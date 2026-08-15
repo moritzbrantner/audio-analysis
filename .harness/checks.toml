@@ -1,0 +1,37 @@
+[[checks]]
+id = "workspace-metadata"
+command = ["cargo", "metadata", "--format-version", "1", "--no-deps"]
+scope = ["Cargo.toml", "Cargo.lock", "crates/**"]
+tier = "targeted"
+blocking = true
+evidence_classes = ["static", "contract"]
+protected_properties = ["INV-001"]
+source_of_truth = "issue:#115"
+state_class = "deterministic"
+timeout_seconds = 60
+tools = ["cargo"]
+services = []
+generated_outputs = []
+cost_class = "low"
+success_exit_codes = [0]
+failure_semantics = "The workspace or inherited dependency contract cannot be resolved."
+independence_group = "cargo-metadata"
+
+[[checks]]
+id = "workspace-preflight"
+command = ["scripts/check-preflight.sh"]
+scope = ["Cargo.toml", "Cargo.lock", "crates/**", "packages/**", "docs/**", ".github/**"]
+tier = "full"
+blocking = true
+evidence_classes = ["behavioral", "integration"]
+protected_properties = ["INV-001"]
+source_of_truth = "issue:#115"
+state_class = "deterministic"
+timeout_seconds = 3600
+tools = ["cargo", "bun"]
+services = []
+generated_outputs = ["target/**", "packages/*/dist/**", "packages/*/pkg/**"]
+cost_class = "high"
+success_exit_codes = [0]
+failure_semantics = "The repository has not demonstrated its release-oriented contract."
+independence_group = "workspace-preflight"

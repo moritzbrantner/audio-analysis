@@ -1,0 +1,13 @@
+schema_version = 1
+profile_status = "draft"
+project_id = "moritzbrantner/audio-analysis"
+default_base_ref = "origin/main"
+maturity = "maintained"
+project_kinds = ["library", "cli", "native-processing"]
+verification_surface_globs = [".harness/**", ".agent-loop.toml", "scripts/**", ".github/**", "Cargo.toml", "Cargo.lock", "crates/**", "packages/**"]
+generated_path_globs = ["target/**", "node_modules/**", "packages/*/dist/**", "packages/*/pkg/**"]
+selection_fallback_ids = ["workspace-preflight"]
+required_external_sources = [
+  { id = "issue:#115", canonical_url = "https://github.com/moritzbrantner/rust-packages/issues/115", minimum_updated_at = "2026-08-15T00:00:00Z" },
+  { id = "issue:#106", canonical_url = "https://github.com/moritzbrantner/rust-packages/issues/106", minimum_updated_at = "2026-08-15T00:00:00Z" }
+]

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "status": "draft",
+  "repository": "moritzbrantner/audio-analysis",
+  "source_repository": "moritzbrantner/rust-packages",
+  "source_sha": "b8b29cf8db0b86ed1b133a18155adf24992f9483",
+  "default_branch_base_sha": "b5222ab29650ae2995fe6204692503b2efa3264",
+  "destination_registry": "crates.io",
+  "release_issue": null,
+  "packages": [],
+  "dependency_order": [],
+  "required_checks": [
+    "scripts/check-fast.sh",
+    "scripts/check-preflight.sh",
+    "cargo package -p <each-public-package> --locked",
+    "native-whisperx temporary-patch matrix"
+  ],
+  "required_consumer_checks": ["native-whisperx temporary-patch matrix"],
+  "publication_authorized": false
+}

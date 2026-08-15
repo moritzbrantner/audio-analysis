@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "source_commit": "b8b29cf8db0b86ed1b133a18155adf24992f9483",
+  "adapted_package_trees": [
+    "crates/audio/audio-analysis-io",
+    "crates/audio/audio-analysis-processing",
+    "crates/audio/audio-analysis-transcription",
+    "packages/audio-analysis-core-app",
+    "packages/audio-analysis-fourier-app",
+    "packages/audio-analysis-io-app",
+    "packages/audio-analysis-pitch-app",
+    "packages/audio-analysis-processing-app",
+    "packages/audio-analysis-recognition-app",
+    "packages/audio-analysis-rhythm-app",
+    "packages/audio-analysis-separation-app",
+    "packages/audio-analysis-speakers-app",
+    "packages/audio-analysis-synthesis-app",
+    "packages/audio-analysis-transcription-app",
+    "packages/audio-generation-midi-app",
+    "packages/audio-generation-tts-app"
+  ],
+  "reasons": {
+    "crates/audio/audio-analysis-io": "owns the extracted audio-only source contracts and FFmpeg command adapter",
+    "crates/audio/audio-analysis-processing": "consumes destination-owned audio source contracts",
+    "crates/audio/audio-analysis-transcription": "uses destination-owned audio fixture support instead of a visual dev dependency",
+    "packages/*-app": "retargeted to private destination-owned @moritzbrantner/audio-app-ui"
+  }
+}

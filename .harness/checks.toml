@@ -1,0 +1,39 @@
+schema_version = 1
+
+[[checks]]
+id = "extraction-structure"
+command = ["python3", "scripts/check_extraction.py"]
+scope = ["Cargo.toml", "crates/**", "package.json", "packages/**", "docs/repository-split/**"]
+tier = "full"
+blocking = true
+evidence_classes = ["contract", "static"]
+protected_properties = ["INV-001", "INV-002", "INV-003"]
+source_of_truth = ["issue:#2", "repo:docs/repository-split/package-ownership.json"]
+state_class = "deterministic"
+timeout_seconds = 300
+tools = ["python3", "git"]
+services = []
+generated_outputs = []
+cost_class = "low"
+success_exit_codes = [0]
+failure_semantics = "The reviewed inventory, provenance, dependency boundary, or byte-identity contract changed."
+independence_group = "extraction-contract"
+
+[[checks]]
+id = "metadata"
+command = ["cargo", "metadata", "--format-version", "1", "--no-deps"]
+scope = ["Cargo.toml", "Cargo.lock", "crates/**"]
+tier = "full"
+blocking = true
+evidence_classes = ["static"]
+protected_properties = ["INV-002"]
+source_of_truth = ["issue:#2", "repo:CONTEXT.md"]
+state_class = "deterministic"
+timeout_seconds = 300
+tools = ["cargo"]
+services = []
+generated_outputs = ["target/**"]
+cost_class = "low"
+success_exit_codes = [0]
+failure_semantics = "Exact registry coordinates cannot yet resolve; audio-contracts 0.1.0 is the expected external blocker."
+independence_group = "cargo-metadata"

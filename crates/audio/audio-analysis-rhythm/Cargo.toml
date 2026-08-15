@@ -1,0 +1,29 @@
+[package]
+name = "moenarch-audio-analysis-rhythm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Onset and tempo analysis for video-analysis audio pipelines."
+readme = "README.md"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "audio_analysis_rhythm"
+
+[dependencies]
+runtime-core.workspace = true
+serde_json.workspace = true
+audio-analysis-core.workspace = true
+audio-contracts.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "rhythm"
+harness = false

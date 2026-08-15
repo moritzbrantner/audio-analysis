@@ -1,0 +1,37 @@
+schema_version = 1
+profile_status = "draft"
+project_id = "moritzbrantner/audio-analysis"
+default_base_ref = "origin/main"
+maturity = "growing"
+project_kinds = ["library", "cli", "application", "native-processing"]
+verification_surface_globs = [
+  ".harness/**",
+  ".github/workflows/**",
+  ".agent-loop.toml",
+  "AGENTS.md",
+  "Cargo.toml",
+  "Cargo.lock",
+  "package.json",
+  "bun.lock",
+  "crates/**",
+  "packages/**",
+  "scripts/**",
+  "docs/repository-split/**",
+]
+required_external_sources = [
+  { id = "issue:#106", canonical_url = "https://github.com/moritzbrantner/rust-packages/issues/106" },
+  { id = "issue:#115", canonical_url = "https://github.com/moritzbrantner/rust-packages/issues/115" },
+  { id = "issue:#2", canonical_url = "https://github.com/moritzbrantner/audio-analysis/issues/2" },
+]
+generated_path_globs = [
+  "target/**",
+  "node_modules/**",
+  "packages/*/node_modules/**",
+  "packages/*-app/dist/**",
+  "packages/audio-app-ui/dist/**",
+  "packages/*-wasm/pkg/**",
+]
+selection_fallback_ids = []
+
+[required_risk_categories]
+migration = ["INV-002", "INV-003"]

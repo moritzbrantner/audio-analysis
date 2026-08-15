@@ -1,0 +1,31 @@
+{
+  "name": "@moritzbrantner/audio-analysis-core-app",
+  "version": "0.1.0",
+  "description": "React app for audio-analysis-core: Shared audio frame conversion, windowing, and streaming helpers for video-analysis.",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.14",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -p tsconfig.json && vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "format": "bunx oxfmt --write src",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@moritzbrantner/audio-app-ui": "workspace:*",
+    "@moritzbrantner/audio-analysis-core-wasm": "workspace:*",
+    "@vitejs/plugin-react": "^5.1.2",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "vite": "^7.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "autoprefixer": "^10.4.23",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.18",
+    "typescript": "^6.0.2"
+  }
+}

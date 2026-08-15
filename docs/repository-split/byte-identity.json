@@ -1,0 +1,258 @@
+{
+  "schema_version": 1,
+  "source_commit": "b8b29cf8db0b86ed1b133a18155adf24992f9483",
+  "trees": {
+    "crates/audio/audio-analysis-core": {
+      "digest": "f5dbcbd8e1c7cd1d1159f2cf66e5610adaf09b7d4e1e32bb66af7b9dc35ea4be",
+      "file_count": 7
+    },
+    "crates/audio/audio-analysis-core-cli": {
+      "digest": "67a1d99b44cce239243e1535f48cd137fcf03c58d34cba21fb0bb59846a54113",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-core-server": {
+      "digest": "c6ea0ee2e7644441d097fdbd53def1774bd6f61b3040d15df9204551cf715d2b",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-fourier": {
+      "digest": "6d1cb29ec597e28ae9a484fcf6aec2b3f188c369beffded403fce8e5a11b2448",
+      "file_count": 6
+    },
+    "crates/audio/audio-analysis-fourier-cli": {
+      "digest": "7c5f787ce85f69d97c63cc29f713d46903bb5fd0fdaad9c44efc021269983612",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-fourier-server": {
+      "digest": "1728a5abbd6b069a158ad8eaddc329bcb5d5450b5b95e0f40b9137576126ff89",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-io-cli": {
+      "digest": "5a24c1e0e65bf1b09ca439eb2f63b59748e11c698a5c2068c583f05a9222ceaf",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-io-server": {
+      "digest": "4522c95f4a7405b9d62ae708a1519c3b5001a81cb5b8953381b0a809bc9339df",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-pitch": {
+      "digest": "dc144e7c5466bd70ede0f609fa5669cc3fc4785448ea9f0c52a1dee5588832e9",
+      "file_count": 6
+    },
+    "crates/audio/audio-analysis-pitch-cli": {
+      "digest": "996f23e22bc7d7295b8cc5d59f546d583f14195f7082ce12c6a92ec7964b54fe",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-pitch-server": {
+      "digest": "413a6e0fb8833f0a99223649e1712f7780186e9ba6f0410264aefca01679aa6c",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-processing-cli": {
+      "digest": "5b1c3579f5142717a212e14c4fc5821446049f04f945aa9181f802aa207c876b",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-processing-server": {
+      "digest": "8182f3ee920585bd0689f34919a43b8adeb75d125175fbd6eac65b268ab28cde",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-recognition": {
+      "digest": "c265bcc99856765d6ae38b78af657d2466d31a396934adb99bcb06302f0f542c",
+      "file_count": 6
+    },
+    "crates/audio/audio-analysis-recognition-cli": {
+      "digest": "356b254ab1ce11cfd10146dfb026c1a2bcaab257d85adb93cee52464fe3c0701",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-recognition-server": {
+      "digest": "b3b637fdd4a75f59cc2248427016e16bb50c744bcbb0f5728582fefc96d71056",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-rhythm": {
+      "digest": "f7e74b8a7685b268e6438c431c3d8f559dee760ac842013d7ae1c943045b5310",
+      "file_count": 6
+    },
+    "crates/audio/audio-analysis-rhythm-cli": {
+      "digest": "6e972d994dfb6a0444febc8ea7be277db84f74195f6a414b16b0d0810c50066b",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-rhythm-server": {
+      "digest": "18b1a40869aeab63fe60db4b0ee390c8c88016af09a1f2b9894decfc6a8dac8d",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-separation": {
+      "digest": "9fba37986942bb557815a9eebf2621a4dfc1aab5c2abf4d364c97e75c02ef834",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-separation-cli": {
+      "digest": "7445a0d5349231f762fd05723f8936600aaf7d810ccb58b761acd1d6a7798ed1",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-separation-server": {
+      "digest": "0e7ee479fbb2047fc25ab11e45155e5de5c2a34649783568bb9fd678d0a51bd3",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-speakers": {
+      "digest": "ff7910cf0f332c21261b9fbdb6cf1acff392af3651993ddebda25328abd75183",
+      "file_count": 15
+    },
+    "crates/audio/audio-analysis-speakers-cli": {
+      "digest": "37f2bacabc3b7e6af46fbfc1c90c5dbc082f97cd00c549485f362eb021d84870",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-speakers-server": {
+      "digest": "c78d81de4060482fa42b12b2c67fa0d62503c60a9450c82f19b351d52126b484",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-synthesis": {
+      "digest": "51e1399ecf5796832cc18f575cb31b2b5845b4db855b9187dacffc1c3b5595bc",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-synthesis-cli": {
+      "digest": "35d3e8d8b05b7e8addf1e4f6c3c9f9bfdc7fd7ae4e9875a2f2d4ff979ba1012a",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-synthesis-server": {
+      "digest": "c98c0219374af723440877dc6726201ff690dc926a6edb1070848675d9530d39",
+      "file_count": 5
+    },
+    "crates/audio/audio-analysis-test-support": {
+      "digest": "5e6f417fbe793cadbb781f9606ad73311b2c5e8ac17193277178ef5eb4e75902",
+      "file_count": 4
+    },
+    "crates/audio/audio-analysis-transcription-cli": {
+      "digest": "279a79d7ff2cf7f6b88e0e773d53d5b8ad7ebe7cd49516a65931728aba61423d",
+      "file_count": 4
+    },
+    "crates/audio/audio-analysis-transcription-server": {
+      "digest": "10e5e0e9bb22aa52c46f5043a05318035f37980adc9bde038bd60ae130a637c1",
+      "file_count": 4
+    },
+    "crates/audio/audio-generation-midi": {
+      "digest": "1dacbc7fd897755c46860f6a934fcca43f8a5c0fabee665423e224acdbff0e41",
+      "file_count": 5
+    },
+    "crates/audio/audio-generation-midi-cli": {
+      "digest": "b865162b3133fe7e325fd8d9c67ecf5a20b7a47bd3dfb07fbfdb5746c5e3d00e",
+      "file_count": 5
+    },
+    "crates/audio/audio-generation-midi-server": {
+      "digest": "f7c83c3332f215eba08a369e083f53f87d29a43e6146cbdc2df830f71d225829",
+      "file_count": 5
+    },
+    "crates/audio/audio-generation-tts": {
+      "digest": "fa246ea51a9a3811a5ae65f4e6a7b2ad2eac41749fc12ace25f3e9ef13a2cc15",
+      "file_count": 6
+    },
+    "crates/audio/audio-generation-tts-cli": {
+      "digest": "140af7d49210e915d28a3572779f1e77f34a8ee417c5d4bd9de60f7201c6c884",
+      "file_count": 5
+    },
+    "crates/audio/audio-generation-tts-server": {
+      "digest": "756a0286796cd545df61ae9a8e9b550ca30be83191a9ad7c41b710294fc66d62",
+      "file_count": 5
+    },
+    "crates/bindings/audio-analysis-core-wasm": {
+      "digest": "46d6d0b774f03a58c893ea3a845b2548edbd1d9321a92b9ddfcd3e67f632b289",
+      "file_count": 2
+    },
+    "crates/bindings/audio-analysis-fourier-wasm": {
+      "digest": "33e101869369c14b452dbfa2722d6cc076a9f4e70de44b9e60179ea65815dafb",
+      "file_count": 2
+    },
+    "crates/bindings/audio-analysis-io-wasm": {
+      "digest": "c42c25c13ef98283bd67ad30eca37d040fd5fae7764530d88bc09ec3080a881b",
+      "file_count": 2
+    },
+    "crates/bindings/audio-analysis-pitch-wasm": {
+      "digest": "b4d107d7f24c95e4e6fc62f2dfbc51f3bd371d9c9b750a4241e578f35d57db0e",
+      "file_count": 2
+    },
+    "crates/bindings/audio-analysis-processing-wasm": {
+      "digest": "6dd495a752fa0ce3037785832ed9afc85ad05f19b9dde31a2e9b947893c624b6",
+      "file_count": 2
+    },
+    "crates/bindings/audio-analysis-recognition-wasm": {
+      "digest": "8f0874fccbd211219570bd3142c446b2b407a59dc96f2f7f55ad3cf7082f4594",
+      "file_count": 2
+    },
+    "crates/bindings/audio-analysis-rhythm-wasm": {
+      "digest": "b76a01d9b7d6b6c13ee8d30a82b39551a9c49db46a2b27513ac50a3f8850561e",
+      "file_count": 2
+    },
+    "crates/bindings/audio-analysis-separation-wasm": {
+      "digest": "b066930ef0f0a46fc3880935dc228ee395772ec930260d290fd88f5e78c38cd4",
+      "file_count": 2
+    },
+    "crates/bindings/audio-analysis-speakers-wasm": {
+      "digest": "54fa672c02f7a2e36905edc737f3393f4523b49a5921f5593d2635c9287a5c40",
+      "file_count": 2
+    },
+    "crates/bindings/audio-analysis-synthesis-wasm": {
+      "digest": "6c61305ce3d17714df6da5b990acadfce35fa285bbbd8bbc90be850c3ca1c727",
+      "file_count": 2
+    },
+    "crates/bindings/audio-analysis-transcription-wasm": {
+      "digest": "ecf8c569d1e68a58d514218e77f94ac3042123238443a969f42b5b0f939e049d",
+      "file_count": 2
+    },
+    "crates/bindings/audio-generation-midi-wasm": {
+      "digest": "a1be425c405470c6d45f1e7d3325497b49668b36b4af44ac9b21c5a058348329",
+      "file_count": 2
+    },
+    "crates/bindings/audio-generation-tts-wasm": {
+      "digest": "20ec1c3a5d3f8072cd1d6c0f74ba3141fbf0d0a7f7d4e5e9f711f1c5464d0a15",
+      "file_count": 2
+    },
+    "packages/audio-analysis-core-wasm": {
+      "digest": "a140a2757dc16f81069b7794e84fe7cd313a092d050efd82667f1b44a6f64d0a",
+      "file_count": 7
+    },
+    "packages/audio-analysis-fourier-wasm": {
+      "digest": "7664c7fa061a986a1283720c23c2f550ee8c9726d23d46df2a637a761082092a",
+      "file_count": 6
+    },
+    "packages/audio-analysis-io-wasm": {
+      "digest": "e9a52fbae90e2e223dde4c00c9d4cf2b1356dd73c8f711f451d89b120cf8814c",
+      "file_count": 6
+    },
+    "packages/audio-analysis-pitch-wasm": {
+      "digest": "dcfc720d90a34ce4afd7151ab999f6c773ad8b7f3aba2e4186290f06712d8861",
+      "file_count": 6
+    },
+    "packages/audio-analysis-processing-wasm": {
+      "digest": "1324651901fc785dea06dd5164b63e3c9a48cde7228e6dc6706b15dfde6c5306",
+      "file_count": 6
+    },
+    "packages/audio-analysis-recognition-wasm": {
+      "digest": "1664f2797dfa59ca178a7f8bffac5651157da54e943e49ed1e8766dc8e34f69c",
+      "file_count": 6
+    },
+    "packages/audio-analysis-rhythm-wasm": {
+      "digest": "52e873334a622807f7fc7d13dc745370d4ecd1789c9ccc5251ca4bea8a4e56d9",
+      "file_count": 6
+    },
+    "packages/audio-analysis-separation-wasm": {
+      "digest": "486562b741de46291dc1d99116c4e927454a9ecd0ebeb62f7524990b2b91532d",
+      "file_count": 6
+    },
+    "packages/audio-analysis-speakers-wasm": {
+      "digest": "13d6310083074367d8c83a1eaabb743beb6e9de9ec8a93f75ba7b6f857892ec3",
+      "file_count": 6
+    },
+    "packages/audio-analysis-synthesis-wasm": {
+      "digest": "f898a85c3820cb37d7133454e83a030af3f0cc02aed77a487bf753950dd744f7",
+      "file_count": 6
+    },
+    "packages/audio-analysis-transcription-wasm": {
+      "digest": "b80b7aa901c86afc70762fb5cbe9a64bd4be92a34d57fa3fffaa2ad88061c335",
+      "file_count": 6
+    },
+    "packages/audio-generation-midi-wasm": {
+      "digest": "c4e6ea33cfbe49dfee2ca9c5d896bf5dfe119635df0462fe7d77b76bd1273762",
+      "file_count": 6
+    },
+    "packages/audio-generation-tts-wasm": {
+      "digest": "8eae4ceefa7184a2bfa7ffd76a4438eb886ffc241087590a108b1b3149d77fdd",
+      "file_count": 6
+    }
+  }
+}

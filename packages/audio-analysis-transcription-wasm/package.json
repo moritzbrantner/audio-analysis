@@ -1,0 +1,27 @@
+{
+  "name": "@moritzbrantner/audio-analysis-transcription-wasm",
+  "version": "0.1.0",
+  "description": "WASM package for audio-analysis-transcription.",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "private": false,
+  "files": [
+    "index.d.ts",
+    "index.js",
+    "pkg",
+    "README.md"
+  ],
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js",
+      "default": "./index.js"
+    }
+  },
+  "scripts": {
+    "build": "bash scripts/build-wasm.sh",
+    "test": "bash -lc 'bun test --parallel=\"${BUN_TEST_WORKERS:-${TEST_MAX_WORKERS:-2}}\" --max-concurrency=\"${BUN_TEST_MAX_CONCURRENCY:-${TEST_MAX_CONCURRENCY:-2}}\" tests'"
+  }
+}

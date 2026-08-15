@@ -1,0 +1,37 @@
+[package]
+name = "moenarch-audio-generation-tts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Generic and speaker-conditioned text-to-speech contracts and package surfaces for video-analysis."
+readme = "README.md"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "audio_generation_tts"
+
+[dependencies]
+audio-analysis-transcription = { workspace = true, optional = true }
+candle-core = { workspace = true, optional = true }
+model-runtime.workspace = true
+runtime-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+audio-contracts.workspace = true
+
+[features]
+default = []
+candle = ["dep:candle-core"]
+cuda = ["candle", "candle-core/cuda"]
+model-bundles = []
+audio-io = []
+asr = ["dep:audio-analysis-transcription"]
+external-tests = []
+
+[dev-dependencies]
+tempfile.workspace = true

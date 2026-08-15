@@ -1,0 +1,27 @@
+[package]
+name = "moenarch-audio-analysis-io"
+version = "0.1.1"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Audio input helpers and FFmpeg-backed source conveniences for video-analysis."
+readme = "README.md"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "audio_analysis_io"
+
+[dependencies]
+runtime-core.workspace = true
+serde_json.workspace = true
+audio-analysis-core.workspace = true
+hound.workspace = true
+audio-contracts.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

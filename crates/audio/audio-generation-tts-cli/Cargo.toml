@@ -1,0 +1,35 @@
+[package]
+name = "moenarch-audio-generation-tts-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Command-line adapter for the audio-generation-tts library crate."
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+default-run = "audio-generation-tts-cli"
+
+[lib]
+name = "audio_generation_tts_cli"
+
+[[bin]]
+name = "audio-generation-tts-cli"
+path = "src/main.rs"
+
+[dependencies]
+audio-generation-tts = { package = "moenarch-audio-generation-tts", version = "0.1.0", path = "../audio-generation-tts" }
+clap.workspace = true
+runtime-core.workspace = true
+serde_json.workspace = true
+
+[features]
+default = []
+candle = ["audio-generation-tts/candle"]
+cuda = ["audio-generation-tts/cuda"]
+model-bundles = ["audio-generation-tts/model-bundles"]
+audio-io = ["audio-generation-tts/audio-io"]
+asr = ["audio-generation-tts/asr"]
+external-tests = ["audio-generation-tts/external-tests"]

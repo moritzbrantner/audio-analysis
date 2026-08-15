@@ -38,8 +38,8 @@ candle-nn = "0.10.2"
 candle-transformers = "0.10.2"
 
 # Released foundation and narrow NLP contracts. These deliberately have no path
-# overrides: the bootstrap stays registry-shaped while issues #111, #112, and
-# #114 complete the required release closure.
+# overrides. Frontend adapters have a separate registry-only UI prerequisite
+# recorded in docs/provenance.md and the draft release plan.
 audio-contracts = { package = "moenarch-audio-contracts", version = "0.1.0" }
 data-inversion-core = { package = "moenarch-data-inversion-core", version = "0.1.0" }
 jobs-core = { package = "moenarch-jobs-core", version = "0.1.1" }

@@ -15,6 +15,25 @@
     "cargo package -p <each-public-package> --locked",
     "native-whisperx temporary-patch matrix"
   ],
-  "required_consumer_checks": ["native-whisperx temporary-patch matrix"],
+  "required_consumer_checks": [
+    "native-whisperx temporary-patch matrix",
+    "isolated registry-only app-adapter consumer gate with @moritzbrantner/video-analysis-ui"
+  ],
+  "external_prerequisites": [
+    {
+      "package": "@moritzbrantner/video-analysis-ui",
+      "required_range": "^0.1.0",
+      "ecosystem": "npm",
+      "semantic_publication_owner": "moritzbrantner/rust-packages",
+      "source_ownership_manifest": "docs/repository-split/package-ownership.json",
+      "source_manifest_path": "packages/video-analysis-ui/package.json",
+      "recorded_current_published_version": null,
+      "required_before_app_adapter_readiness": [
+        "verified registry availability satisfying ^0.1.0",
+        "isolated registry-only consumer installation and adapter exercise"
+      ],
+      "publication_authorized_by_this_plan": false
+    }
+  ],
   "publication_authorized": false
 }

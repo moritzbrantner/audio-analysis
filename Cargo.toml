@@ -1,0 +1,72 @@
+[workspace]
+members = [
+    "crates/audio/*",
+    "crates/bindings/*",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+repository = "https://github.com/moritzbrantner/audio-analysis"
+homepage = "https://github.com/moritzbrantner/audio-analysis"
+documentation = "https://docs.rs/moenarch-audio-analysis-core"
+keywords = ["audio", "analysis", "transcription", "synthesis"]
+categories = ["multimedia", "multimedia::audio", "science"]
+
+[workspace.dependencies]
+base64 = "0.22.1"
+clap = { version = "4.5.51", features = ["derive"] }
+ffmpeg-next = { version = "8.0.0", default-features = false }
+flate2 = "1.1.9"
+hound = "3.5.1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+sha2 = "0.10.9"
+rayon = "1.11.0"
+rustfft = "6.2.0"
+tempfile = "3.23.0"
+thiserror = "2.0.17"
+criterion = "0.5.1"
+proptest = "1.6.0"
+tokenizers = { version = "0.22.2", default-features = false, features = ["unstable_wasm"] }
+ndarray = "0.17.2"
+candle-core = "0.10.2"
+candle-nn = "0.10.2"
+candle-transformers = "0.10.2"
+
+# Released foundation and narrow NLP contracts. These deliberately have no path
+# overrides. Frontend adapters have a separate registry-only UI prerequisite
+# recorded in docs/provenance.md and the draft release plan.
+audio-contracts = { package = "moenarch-audio-contracts", version = "0.1.0" }
+data-inversion-core = { package = "moenarch-data-inversion-core", version = "0.1.0" }
+jobs-core = { package = "moenarch-jobs-core", version = "0.1.1" }
+math-signal-core = { package = "moenarch-math-signal-core", version = "0.1.0" }
+media-core = { package = "moenarch-media-core", version = "0.1.0" }
+model-runtime = { package = "moenarch-model-runtime", version = "0.1.0" }
+runtime-core = { package = "moenarch-runtime-core", version = "0.2.0" }
+runtime-onnx = { package = "moenarch-runtime-onnx", version = "0.1.0" }
+tensor-data = { package = "moenarch-tensor-data", version = "0.1.0" }
+text-model-runtime = { package = "moenarch-text-model-runtime", version = "0.1.0" }
+text-transcripts = { package = "moenarch-text-transcripts", version = "0.1.1" }
+video-analysis-ffmpeg = { package = "moenarch-video-analysis-ffmpeg", version = "0.1.1" }
+video-analysis-ingest = { package = "moenarch-video-analysis-ingest", version = "0.1.0" }
+
+# Audio-owned workspace members retain local composition without crossing a
+# repository boundary.
+audio-analysis-core = { package = "moenarch-audio-analysis-core", version = "0.1.0", path = "crates/audio/audio-analysis-core" }
+audio-generation-midi = { package = "moenarch-audio-generation-midi", version = "0.1.0", path = "crates/audio/audio-generation-midi" }
+audio-generation-tts = { package = "moenarch-audio-generation-tts", version = "0.1.0", path = "crates/audio/audio-generation-tts" }
+audio-analysis-fourier = { package = "moenarch-audio-analysis-fourier", version = "0.1.0", path = "crates/audio/audio-analysis-fourier" }
+audio-analysis-io = { package = "moenarch-audio-analysis-io", version = "0.1.1", path = "crates/audio/audio-analysis-io" }
+audio-analysis-pitch = { package = "moenarch-audio-analysis-pitch", version = "0.1.0", path = "crates/audio/audio-analysis-pitch" }
+audio-analysis-processing = { package = "moenarch-audio-analysis-processing", version = "0.1.0", path = "crates/audio/audio-analysis-processing" }
+audio-analysis-recognition = { package = "moenarch-audio-analysis-recognition", version = "0.1.0", path = "crates/audio/audio-analysis-recognition" }
+audio-analysis-rhythm = { package = "moenarch-audio-analysis-rhythm", version = "0.1.0", path = "crates/audio/audio-analysis-rhythm" }
+audio-analysis-separation = { package = "moenarch-audio-analysis-separation", version = "0.1.0", path = "crates/audio/audio-analysis-separation" }
+audio-analysis-speakers = { package = "moenarch-audio-analysis-speakers", version = "0.1.4", path = "crates/audio/audio-analysis-speakers" }
+audio-analysis-synthesis = { package = "moenarch-audio-analysis-synthesis", version = "0.1.0", path = "crates/audio/audio-analysis-synthesis" }
+audio-analysis-transcription = { package = "moenarch-audio-analysis-transcription", version = "0.1.15", path = "crates/audio/audio-analysis-transcription" }
+audio-analysis-test-support = { package = "moenarch-audio-analysis-test-support", version = "0.1.0", path = "crates/audio/audio-analysis-test-support" }

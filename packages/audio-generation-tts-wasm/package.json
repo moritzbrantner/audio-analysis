@@ -1,0 +1,13 @@
+{
+  "name": "@moritzbrantner/audio-generation-tts-wasm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "WASM package for audio-generation-tts.",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "scripts": {
+    "build": "bash scripts/build-wasm.sh",
+    "test": "bun test tests/package.test.ts"
+  }
+}

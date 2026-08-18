@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@moritzbrantner/video-analysis-ui": [
+        "../video-analysis-ui/src/index.ts"
+      ],
+      "@moritzbrantner/video-analysis-ui/tailwind-content": [
+        "../video-analysis-ui/src/tailwind-content.ts"
+      ],
+      "@moritzbrantner/video-analysis-ui/*": [
+        "../video-analysis-ui/src/*/index.tsx"
+      ]
+    },
+    "ignoreDeprecations": "6.0"
+  },
+  "include": [
+    "src"
+  ],
+  "references": []
+}

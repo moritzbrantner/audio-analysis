@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .panel {
+    @apply rounded-md border border-zinc-200 bg-white p-5 shadow-sm;
+  }
+
+  .button-primary {
+    @apply rounded-md bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-800 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:ring-offset-2;
+  }
+
+  .segmented-control {
+    @apply inline-grid grid-cols-2 overflow-hidden rounded-md border border-zinc-300 bg-white;
+  }
+
+  .mode-button {
+    @apply px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100;
+  }
+
+  .mode-button-active {
+    @apply bg-zinc-950 text-white hover:bg-zinc-900;
+  }
+
+  .section-title {
+    @apply text-base font-semibold text-zinc-950;
+  }
+
+  .section-copy {
+    @apply text-sm text-zinc-600;
+  }
+
+  .code-input {
+    @apply min-h-56 w-full resize-y rounded-md border border-zinc-300 bg-zinc-950 p-4 font-mono text-sm text-zinc-50 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200;
+  }
+
+  .result-block {
+    @apply mt-4 max-h-80 overflow-auto rounded-md border border-zinc-200 bg-zinc-100 p-4 font-mono text-sm text-zinc-900;
+  }
+
+  .error-text {
+    @apply mt-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800;
+  }
+
+  .detail-list {
+    @apply mt-4 space-y-3 text-sm;
+  }
+
+  .detail-list div {
+    @apply grid gap-1;
+  }
+
+  .detail-list dt {
+    @apply text-xs font-semibold uppercase tracking-wide text-zinc-500;
+  }
+
+  .detail-list dd {
+    @apply break-words font-mono text-zinc-900;
+  }
+
+  .endpoint-list {
+    @apply mt-4 space-y-2 font-mono text-sm text-zinc-800;
+  }
+}

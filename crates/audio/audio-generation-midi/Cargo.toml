@@ -1,0 +1,23 @@
+[package]
+name = "moenarch-audio-generation-midi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "MIDI-like note sequencing, Standard MIDI export, and audio rendering helpers for video-analysis."
+readme = "README.md"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "audio_generation_midi"
+
+[dependencies]
+runtime-core.workspace = true
+serde_json.workspace = true
+audio-analysis-synthesis.workspace = true
+data-inversion-core.workspace = true
+audio-contracts.workspace = true

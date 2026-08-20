@@ -32,6 +32,8 @@ FORBIDDEN = (
     "video_analysis_ffmpeg",
     "video-analysis-ingest",
     "video_analysis_ingest",
+    "prototypes/web/video-analysis-web",
+    "setup:colmap-video",
     "@moritzbrantner/video-analysis-ui",
     "../video-analysis-ui",
 )

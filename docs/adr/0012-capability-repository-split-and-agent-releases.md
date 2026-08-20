@@ -1,8 +1,8 @@
 # ADR 0012: Capability Repository Split And Agent-Driven Releases
 
-> Destination adaptation: this copy is authoritative only for the `nlp-stack`
+> Destination adaptation: this copy is authoritative for the `audio-analysis`
 > boundary. It retains the original ecosystem decision as historical rationale.
-> Issue `rust-packages#113` performs clean-copy bootstrap only and authorizes no
+> Issue `rust-packages#115` performs clean-copy bootstrap only and authorizes no
 > publication, source removal, consumer migration, tag, or release.
 
 ## Status

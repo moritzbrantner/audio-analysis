@@ -20,10 +20,9 @@ All other inventory trees must remain byte-identical to the source. Root
 manifests, locks, documentation, CI, Harness metadata, validators, and
 `packages/audio-app-ui` are destination-authored support.
 
-The source `Cargo.lock` was deliberately not retained: lock generation stops at
-the absent exact registry package `moenarch-audio-contracts 0.1.0`, while the
-source lock identifies it as a monolith-local path package. A destination lock
-must be generated after that exact foundation release becomes visible.
+The source `Cargo.lock` was deliberately not retained because it identifies
+`moenarch-audio-contracts` as a monolith-local path package. The destination
+`Cargo.lock` is generated from the now-released exact registry contracts.
 
 `packages/audio-app-ui` derives from the extraction commit's package-surface
 workbench and shared primitive seam. The 13 app packages were retargeted from

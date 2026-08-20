@@ -20,7 +20,10 @@ WhisperX parity and is not part of default tests.
 The compatibility whisper.cpp build, model store, and file adapter live behind
 the `native` feature. That adapter preserves the existing model/download
 behavior while returning the transcript document contract owned by
-`text-transcripts`.
+`text-transcripts`. A clean checkout can enable `native` without bundling
+whisper.cpp; native calls then return an explicit initialization error. To
+enable the adapter, set `WHISPER_CPP_SOURCE_DIR` to a whisper.cpp source
+checkout before building. This never falls back to a different transcriber.
 
 The `candle` feature also exposes `CandleQ8WhisperDecoder`, a low-level CPU Q8_0
 decoder building block for caller-owned GGUF bundles. Its incremental operation

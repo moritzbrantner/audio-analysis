@@ -1,5 +1,8 @@
-# Draft verification harness
+# Draft structural Harness profile
 
-This profile is intentionally `draft`. It records the intended evidence matrix for the extracted audio family but has not been audited or activated. Its commands were not run during the bootstrap because the task explicitly deferred all tests, builds, package commands, and verification.
+This draft profile documents optional independent structural evidence for the
+restructuring-first extraction. It intentionally contains no behavioral,
+workspace-test, consumer, WASM, Clippy, documentation, build, or package gate.
 
-Before activation, a maintainer must review the checked-in command surface, acquire the required external-source bundle, audit the profile, and run the full tier at an exact clean PR head. A draft profile is never passing handoff evidence.
+The authoritative extraction gate remains `.agent-loop.toml`. The profile is
+draft and must not be treated as active without a separate maintainer decision.

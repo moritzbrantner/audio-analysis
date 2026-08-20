@@ -1,1 +1,3 @@
-@import "@moritzbrantner/video-analysis-ui/styles.css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

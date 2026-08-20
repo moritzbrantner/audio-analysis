@@ -1,1 +1,2 @@
-# No flake, skip, or quarantine entries are approved for this draft profile.
+schema_version = 1
+entries = []

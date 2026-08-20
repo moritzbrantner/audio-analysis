@@ -13,18 +13,14 @@ The exact copied Cargo, npm, app, CLI, server, and WASM package selection is fro
 
 Copied code keeps its focused source layout under `crates/audio/`, `crates/bindings/`, and `packages/`. No source history was rewritten and no code was removed from the source repository. Generated `dist/` and WASM `pkg/` artifacts are ignored.
 
-## External UI prerequisite
+## Focused app UI boundary
 
-The 13 focused app adapters retain their dependency on
-`@moritzbrantner/video-analysis-ui` at `^0.1.0`; the UI package is deliberately
-neither copied nor excluded from this extraction. The source ownership manifest
-records it as a `rust-packages`-owned facade, with
-`moritzbrantner/rust-packages` as its intended semantic/publication owner,
-`current_published_version: null`, and a separate npm/WASM release decision.
+The extraction supersedes the bootstrap's external UI prerequisite: the 13
+focused app adapters now depend on the private destination-owned
+`@moritzbrantner/audio-app-ui` package. This removes the visual-analysis UI
+edge while preserving the adapters' package-surface contract.
 
-Consequently, app adapters are not release-ready merely because their package
-manifests name that range. Before any app-adapter release can be ready, the
-release manifest must record a verified registry availability that satisfies the
-range and an isolated registry-only consumer gate must install and exercise the
-adapter with the published UI package. This prerequisite does not authorize UI
-publication from this repository.
+The private adapter is not publishable under this extraction. Any app-adapter
+release requires a separate decision covering whether to publish or bundle it,
+plus an isolated consumer check; this does not authorize UI publication from
+this repository.

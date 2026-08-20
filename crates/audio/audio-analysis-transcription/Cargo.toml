@@ -60,4 +60,4 @@ cmake = "0.1.54"
 [dev-dependencies]
 sha2.workspace = true
 tempfile.workspace = true
-video-analysis-ffmpeg = { workspace = true, features = ["test-utils"] }
+audio-analysis-io.workspace = true

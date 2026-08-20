@@ -1,6 +1,6 @@
 use audio_analysis_processing::{AudioProcessor, ProcessedAudioSource};
 use audio_contracts::{AudioBuffer, OwnedAudioFrame, Timebase, Timestamp};
-use video_analysis_ingest::{AudioFrameSource, AudioStreamInfo, MediaSourceInfo, SourceMode};
+use audio_analysis_io::{AudioFrameSource, AudioStreamInfo, MediaSourceInfo, SourceMode};
 
 #[derive(Clone)]
 struct SingleFrameSource {

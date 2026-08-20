@@ -2,7 +2,7 @@ import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
-const uiSourceRoot = fileURLToPath(new URL("../video-analysis-ui/src", import.meta.url));
+const uiSourceRoot = fileURLToPath(new URL("../audio-app-ui/src", import.meta.url));
 
 export default defineConfig({
   optimizeDeps: {

@@ -101,4 +101,4 @@ external-tool execution.
 
 - `audio-analysis-core`
 - `audio-analysis-io`
-- `video-analysis-ingest`
+- `audio-analysis-io`

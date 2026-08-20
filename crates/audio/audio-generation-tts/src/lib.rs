@@ -1117,7 +1117,7 @@ fn unsupported_provider_diagnostics(
             message: "Reference Voice Prompt ASR fallback is configured but unavailable in this build."
                 .to_string(),
             help: Some(
-                "Build audio-generation-tts with the `asr` feature to plan fallback through audio-analysis-transcription."
+                "Provide a transcript, or run the selected ASR provider separately and resubmit the request; the `asr` feature exposes planning metadata but does not execute fallback transcription."
                     .to_string(),
             ),
         });
@@ -1132,12 +1132,19 @@ fn reference_prompt_asr_unavailable(request: &SpeechSynthesisRequest) -> bool {
         .is_some_and(|prompt| {
             !prompt.has_transcript()
                 && prompt.asr_fallback.is_some()
-                && !reference_prompt_asr_available()
+                && !reference_prompt_asr_execution_available()
         })
 }
 
-fn reference_prompt_asr_available() -> bool {
-    cfg!(feature = "asr")
+/// The `asr` feature gives TTS access to provider planning metadata only.
+///
+/// TTS never constructs or invokes an ASR runtime: callers must provide the
+/// transcript after configuring the selected transcription provider and its
+/// local resources. This keeps a missing native Whisper source or model bundle
+/// an explicit setup requirement instead of treating a compiled feature as an
+/// executable fallback.
+pub(crate) fn reference_prompt_asr_execution_available() -> bool {
+    false
 }
 
 #[cfg(test)]

@@ -21,9 +21,7 @@ serde_json.workspace = true
 audio-analysis-core.workspace = true
 hound.workspace = true
 audio-contracts.workspace = true
-video-analysis-ffmpeg.workspace = true
-video-analysis-ingest.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-video-analysis-ffmpeg = { workspace = true, features = ["test-utils"] }

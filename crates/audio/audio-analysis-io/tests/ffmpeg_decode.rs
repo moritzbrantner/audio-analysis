@@ -4,7 +4,7 @@ use audio_analysis_io::{
     AudioFrameSource, AudioInput, AudioInputOptions, AudioIoError, SelectedMediaSource,
 };
 use audio_contracts::{AudioBuffer, AudioSampleFormat};
-use video_analysis_ffmpeg::{
+use audio_analysis_io::{
     is_ffmpeg_available, is_ffprobe_available, write_two_audio_stream_test_media,
     AudioStreamSelection, AudioStreamSelectionErrorReason, FfmpegError,
 };

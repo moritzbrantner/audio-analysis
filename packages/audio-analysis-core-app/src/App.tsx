@@ -1,4 +1,4 @@
-import { PackageSurfaceWorkbench, type PackageAppConfig } from "@moritzbrantner/video-analysis-ui/package-surface";
+import { PackageSurfaceWorkbench, type PackageAppConfig } from "@moritzbrantner/audio-app-ui/package-surface";
 import * as wasm from "@moritzbrantner/audio-analysis-core-wasm";
 
 const packageAppConfig: PackageAppConfig = {

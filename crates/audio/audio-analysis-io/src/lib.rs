@@ -1,20 +1,18 @@
 #![doc = include_str!("../README.md")]
 
 mod editing;
+mod ffmpeg;
+mod source;
 pub mod surface;
 pub use editing::*;
+pub use ffmpeg::*;
+pub use source::*;
 use std::path::{Path, PathBuf};
 
 pub use audio_analysis_core::ChannelMix;
 use audio_analysis_core::{interleaved_to_mono, AudioClip, OwnedAudioWaveformBatch};
 use audio_contracts::{OwnedAudioFrame, Result, Timebase, Timestamp};
-/// Re-exports the video analysis FFmpeg API.
-pub use video_analysis_ffmpeg::{
-    probe_audio as probe_audio_file, probe_audio_input, AudioMetadata, FfmpegAudioSource,
-    FfmpegAudioSourceOptions, FfmpegError,
-};
-/// Re-exports the video analysis ingest audio frame source API.
-pub use video_analysis_ingest::{AudioFrameSource, AudioStreamInfo, SourceMode};
+pub use ffmpeg::probe_audio as probe_audio_file;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// Variants describing audio input.

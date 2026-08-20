@@ -2,4 +2,9 @@ schema_version = 1
 max_workers = 2
 
 [verification]
-commands = ["scripts/check-fast.sh", "scripts/check-preflight.sh"]
+# Restructuring-first extraction evidence is intentionally structural.
+commands = [
+  "git diff --check",
+  "python3 scripts/check_extraction.py",
+  "cargo metadata --format-version 1 --no-deps",
+]

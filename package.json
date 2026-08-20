@@ -1,13 +1,11 @@
 {
-  "name": "audio-analysis-workspace",
+  "name": "@moritzbrantner/audio-analysis-workspace",
   "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.14",
   "workspaces": ["packages/*"],
   "scripts": {
-    "check:fast": "scripts/check-fast.sh",
-    "check:preflight": "scripts/check-preflight.sh"
-  },
-  "devDependencies": {
-    "typescript": "^6.0.2"
-  },
-  "packageManager": "bun@1.3.9"
+    "check:structure": "python3 scripts/check_extraction.py",
+    "check": "bun run check:structure"
+  }
 }

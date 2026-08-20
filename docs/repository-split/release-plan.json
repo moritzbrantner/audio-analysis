@@ -1,0 +1,664 @@
+{
+  "schema_version": 1,
+  "repository": "moritzbrantner/audio-analysis",
+  "active_release_owner": "moritzbrantner/rust-packages",
+  "source_sha": "b8b29cf8db0b86ed1b133a18155adf24992f9483",
+  "publication_authorized": false,
+  "npm_publication_authorized": false,
+  "release_issue": null,
+  "required_checks": [
+    "git diff --check",
+    "python3 scripts/check_extraction.py",
+    "cargo metadata --format-version 1 --no-deps"
+  ],
+  "explicitly_skipped_checks": [
+    "workspace/unit/integration tests",
+    "consumer tests",
+    "WASM tests/builds",
+    "Clippy",
+    "documentation builds",
+    "package/archive checks",
+    "frontend builds/typechecks"
+  ],
+  "dependency_order": [
+    "moenarch-audio-analysis-core",
+    "moenarch-audio-analysis-test-support",
+    "moenarch-audio-analysis-core-cli",
+    "moenarch-audio-analysis-core-server",
+    "moenarch-audio-analysis-core-wasm",
+    "moenarch-audio-analysis-fourier",
+    "moenarch-audio-analysis-io",
+    "moenarch-audio-analysis-pitch",
+    "moenarch-audio-analysis-rhythm",
+    "moenarch-audio-analysis-fourier-cli",
+    "moenarch-audio-analysis-fourier-server",
+    "moenarch-audio-analysis-fourier-wasm",
+    "moenarch-audio-analysis-io-cli",
+    "moenarch-audio-analysis-io-server",
+    "moenarch-audio-analysis-io-wasm",
+    "moenarch-audio-analysis-pitch-cli",
+    "moenarch-audio-analysis-pitch-server",
+    "moenarch-audio-analysis-pitch-wasm",
+    "moenarch-audio-analysis-processing",
+    "moenarch-audio-analysis-recognition",
+    "moenarch-audio-analysis-rhythm-cli",
+    "moenarch-audio-analysis-rhythm-server",
+    "moenarch-audio-analysis-rhythm-wasm",
+    "moenarch-audio-analysis-processing-cli",
+    "moenarch-audio-analysis-processing-server",
+    "moenarch-audio-analysis-processing-wasm",
+    "moenarch-audio-analysis-recognition-cli",
+    "moenarch-audio-analysis-recognition-server",
+    "moenarch-audio-analysis-recognition-wasm",
+    "moenarch-audio-analysis-separation",
+    "moenarch-audio-analysis-speakers",
+    "moenarch-audio-analysis-synthesis",
+    "moenarch-audio-analysis-separation-cli",
+    "moenarch-audio-analysis-separation-server",
+    "moenarch-audio-analysis-separation-wasm",
+    "moenarch-audio-analysis-speakers-cli",
+    "moenarch-audio-analysis-speakers-server",
+    "moenarch-audio-analysis-speakers-wasm",
+    "moenarch-audio-analysis-synthesis-cli",
+    "moenarch-audio-analysis-synthesis-server",
+    "moenarch-audio-analysis-synthesis-wasm",
+    "moenarch-audio-analysis-transcription",
+    "moenarch-audio-generation-midi",
+    "moenarch-audio-analysis-transcription-cli",
+    "moenarch-audio-analysis-transcription-server",
+    "moenarch-audio-analysis-transcription-wasm",
+    "moenarch-audio-generation-midi-cli",
+    "moenarch-audio-generation-midi-server",
+    "moenarch-audio-generation-midi-wasm",
+    "moenarch-audio-generation-tts",
+    "moenarch-audio-generation-tts-cli",
+    "moenarch-audio-generation-tts-server",
+    "moenarch-audio-generation-tts-wasm"
+  ],
+  "expected_tags": [],
+  "packages": [
+    {
+      "name": "moenarch-audio-analysis-core",
+      "manifest_path": "crates/audio/audio-analysis-core/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": []
+    },
+    {
+      "name": "moenarch-audio-analysis-test-support",
+      "manifest_path": "crates/audio/audio-analysis-test-support/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": []
+    },
+    {
+      "name": "moenarch-audio-analysis-core-cli",
+      "manifest_path": "crates/audio/audio-analysis-core-cli/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-core"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-core-server",
+      "manifest_path": "crates/audio/audio-analysis-core-server/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-core"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-core-wasm",
+      "manifest_path": "crates/bindings/audio-analysis-core-wasm/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-core"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-fourier",
+      "manifest_path": "crates/audio/audio-analysis-fourier/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-core"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-io",
+      "manifest_path": "crates/audio/audio-analysis-io/Cargo.toml",
+      "copied_version": "0.1.1",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-core"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-pitch",
+      "manifest_path": "crates/audio/audio-analysis-pitch/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-core"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-rhythm",
+      "manifest_path": "crates/audio/audio-analysis-rhythm/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-core"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-fourier-cli",
+      "manifest_path": "crates/audio/audio-analysis-fourier-cli/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-fourier"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-fourier-server",
+      "manifest_path": "crates/audio/audio-analysis-fourier-server/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-fourier"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-fourier-wasm",
+      "manifest_path": "crates/bindings/audio-analysis-fourier-wasm/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-fourier"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-io-cli",
+      "manifest_path": "crates/audio/audio-analysis-io-cli/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-io"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-io-server",
+      "manifest_path": "crates/audio/audio-analysis-io-server/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-io"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-io-wasm",
+      "manifest_path": "crates/bindings/audio-analysis-io-wasm/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-io"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-pitch-cli",
+      "manifest_path": "crates/audio/audio-analysis-pitch-cli/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-pitch"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-pitch-server",
+      "manifest_path": "crates/audio/audio-analysis-pitch-server/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-pitch"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-pitch-wasm",
+      "manifest_path": "crates/bindings/audio-analysis-pitch-wasm/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-pitch"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-processing",
+      "manifest_path": "crates/audio/audio-analysis-processing/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-core",
+        "moenarch-audio-analysis-io"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-recognition",
+      "manifest_path": "crates/audio/audio-analysis-recognition/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-core",
+        "moenarch-audio-analysis-fourier"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-rhythm-cli",
+      "manifest_path": "crates/audio/audio-analysis-rhythm-cli/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-rhythm"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-rhythm-server",
+      "manifest_path": "crates/audio/audio-analysis-rhythm-server/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-rhythm"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-rhythm-wasm",
+      "manifest_path": "crates/bindings/audio-analysis-rhythm-wasm/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-rhythm"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-processing-cli",
+      "manifest_path": "crates/audio/audio-analysis-processing-cli/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-processing"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-processing-server",
+      "manifest_path": "crates/audio/audio-analysis-processing-server/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-processing"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-processing-wasm",
+      "manifest_path": "crates/bindings/audio-analysis-processing-wasm/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-processing"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-recognition-cli",
+      "manifest_path": "crates/audio/audio-analysis-recognition-cli/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-recognition"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-recognition-server",
+      "manifest_path": "crates/audio/audio-analysis-recognition-server/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-recognition"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-recognition-wasm",
+      "manifest_path": "crates/bindings/audio-analysis-recognition-wasm/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-recognition"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-separation",
+      "manifest_path": "crates/audio/audio-analysis-separation/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-recognition"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-speakers",
+      "manifest_path": "crates/audio/audio-analysis-speakers/Cargo.toml",
+      "copied_version": "0.1.4",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-core",
+        "moenarch-audio-analysis-recognition"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-synthesis",
+      "manifest_path": "crates/audio/audio-analysis-synthesis/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-recognition"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-separation-cli",
+      "manifest_path": "crates/audio/audio-analysis-separation-cli/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-separation"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-separation-server",
+      "manifest_path": "crates/audio/audio-analysis-separation-server/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-separation"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-separation-wasm",
+      "manifest_path": "crates/bindings/audio-analysis-separation-wasm/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-separation"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-speakers-cli",
+      "manifest_path": "crates/audio/audio-analysis-speakers-cli/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-speakers"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-speakers-server",
+      "manifest_path": "crates/audio/audio-analysis-speakers-server/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-speakers"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-speakers-wasm",
+      "manifest_path": "crates/bindings/audio-analysis-speakers-wasm/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-speakers"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-synthesis-cli",
+      "manifest_path": "crates/audio/audio-analysis-synthesis-cli/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-synthesis"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-synthesis-server",
+      "manifest_path": "crates/audio/audio-analysis-synthesis-server/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-synthesis"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-synthesis-wasm",
+      "manifest_path": "crates/bindings/audio-analysis-synthesis-wasm/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-synthesis"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-transcription",
+      "manifest_path": "crates/audio/audio-analysis-transcription/Cargo.toml",
+      "copied_version": "0.1.15",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-io",
+        "moenarch-audio-analysis-speakers"
+      ]
+    },
+    {
+      "name": "moenarch-audio-generation-midi",
+      "manifest_path": "crates/audio/audio-generation-midi/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-synthesis"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-transcription-cli",
+      "manifest_path": "crates/audio/audio-analysis-transcription-cli/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-transcription"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-transcription-server",
+      "manifest_path": "crates/audio/audio-analysis-transcription-server/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-transcription"
+      ]
+    },
+    {
+      "name": "moenarch-audio-analysis-transcription-wasm",
+      "manifest_path": "crates/bindings/audio-analysis-transcription-wasm/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-transcription"
+      ]
+    },
+    {
+      "name": "moenarch-audio-generation-midi-cli",
+      "manifest_path": "crates/audio/audio-generation-midi-cli/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-generation-midi"
+      ]
+    },
+    {
+      "name": "moenarch-audio-generation-midi-server",
+      "manifest_path": "crates/audio/audio-generation-midi-server/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-generation-midi"
+      ]
+    },
+    {
+      "name": "moenarch-audio-generation-midi-wasm",
+      "manifest_path": "crates/bindings/audio-generation-midi-wasm/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-generation-midi"
+      ]
+    },
+    {
+      "name": "moenarch-audio-generation-tts",
+      "manifest_path": "crates/audio/audio-generation-tts/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-analysis-transcription"
+      ]
+    },
+    {
+      "name": "moenarch-audio-generation-tts-cli",
+      "manifest_path": "crates/audio/audio-generation-tts-cli/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-generation-tts"
+      ]
+    },
+    {
+      "name": "moenarch-audio-generation-tts-server",
+      "manifest_path": "crates/audio/audio-generation-tts-server/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-generation-tts"
+      ]
+    },
+    {
+      "name": "moenarch-audio-generation-tts-wasm",
+      "manifest_path": "crates/bindings/audio-generation-tts-wasm/Cargo.toml",
+      "copied_version": "0.1.0",
+      "publish": false,
+      "expected_tag": null,
+      "intended_next_release_owner": "moritzbrantner/audio-analysis",
+      "release_dependencies": [
+        "moenarch-audio-generation-tts"
+      ]
+    }
+  ]
+}

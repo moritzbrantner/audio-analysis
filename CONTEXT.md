@@ -1,11 +1,14 @@
-# Audio Analysis Context
+# Domain context
 
-**Capability Repository**: this repository is the release-owning home for a coherent audio boundary, independently buildable only against released foundation and narrow NLP contracts.
+`audio-analysis` owns reusable audio decoding, signal analysis, recognition,
+speaker, transcription, synthesis, MIDI, TTS, and focused adapter surfaces.
 
-**Adapter Parity**: library, CLI, REST/server, WASM, npm, and focused app surfaces delegate to the same library-owned operations and preserve their request/response contracts.
+Generic audio stream metadata and finite audio decoding are owned here. Visual
+analysis, video frame decoding, application composition, and broad multimodal
+UI remain outside this repository. Shared media/runtime/data contracts are
+consumed only through exact published foundation crates; transcript/model
+contracts are consumed through exact published NLP crates.
 
-**Speaker Diarization**: `moenarch-audio-analysis-speakers` owns diarization and transcript speaker assignment contracts. Transcription may orchestrate those contracts but does not own their schema.
-
-**Speaker-conditioned TTS**: `moenarch-audio-generation-tts` owns Reference Voice Prompt planning and provider diagnostics. Consent and identity policy stay with downstream products; default builds remain model-free and network-free.
-
-**Native Workflow**: a workflow requiring local tools, models, native runtimes, or materialization. It is opt-in and must not be selected silently by default.
+The extraction source remains authoritative until a separately authorized
+release and migration complete. This repository does not remove source code or
+publish packages as part of issue #2.

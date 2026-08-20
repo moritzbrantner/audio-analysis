@@ -17,7 +17,7 @@ use audio_contracts::{
     AnalysisEvent, AudioAnalyzer, AudioBuffer, AudioFrame, DetectError, OwnedAudioFrame, Result,
 };
 use math_signal_core::{BiquadCoefficients as DesignedBiquadCoefficients, SampleRate};
-use video_analysis_ingest::{AudioFrameSource, MediaSourceInfo};
+use audio_analysis_io::{AudioFrameSource, MediaSourceInfo};
 
 /// Trait for audio transform implementations.
 pub trait AudioTransform {
@@ -757,7 +757,7 @@ mod tests {
     use super::*;
     use audio_contracts::{AudioPipeline, Timebase, Timestamp};
     use proptest::prelude::*;
-    use video_analysis_ingest::{analyze_audio_source, AudioStreamInfo, SourceMode};
+    use audio_analysis_io::{analyze_audio_source, AudioStreamInfo, SourceMode};
 
     fn assert_approx_eq(actual: f32, expected: f32, tolerance: f32) {
         assert!(

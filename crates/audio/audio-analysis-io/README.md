@@ -65,6 +65,6 @@ deterministic plans and do not execute commands.
 
 ## Related crates
 
-- `video-analysis-ffmpeg`
-- `video-analysis-ingest`
+- destination-owned FFmpeg command adapter
+- destination-owned audio source contracts
 - `audio-analysis-core`

@@ -13,7 +13,7 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
-    "@moritzbrantner/video-analysis-ui": "^0.1.0",
+    "@moritzbrantner/audio-app-ui": "workspace:*",
     "@moritzbrantner/audio-analysis-io-wasm": "workspace:*",
     "@vitejs/plugin-react": "^5.1.2",
     "react": "^19.2.5",

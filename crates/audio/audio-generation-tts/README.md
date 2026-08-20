@@ -36,10 +36,13 @@ of materializing files.
 Reference Voice Prompts accept either inline PCM samples or a caller-managed
 path source. A prompt transcript must be non-empty when provided.
 Speaker-conditioned synthesis requires either a transcript or an explicit
-`referenceVoicePrompt.asrFallback` setup; default builds report missing ASR
-fallback support as setup-required diagnostics. Building with `asr` enables
-fallback planning through `audio-analysis-transcription` provider metadata, but
-planning remains side-effect free and does not run ASR.
+`referenceVoicePrompt.asrFallback` setup. An ASR fallback remains
+setup-required until a caller runs the selected transcription provider and
+supplies the resulting transcript; this includes supplying local native
+resources such as a Whisper source checkout or model bundle when that provider
+requires them. Building with `asr` exposes fallback planning through
+`audio-analysis-transcription` provider metadata, but planning remains
+side-effect free and does not run ASR.
 
 Device planning uses `provider.device`:
 

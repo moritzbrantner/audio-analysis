@@ -1,10 +1,22 @@
-# Audio-analysis invariants
+# Project invariants
 
-## INV-001 — Focused audio adapters preserve their library contract
+## INV-001 — Reviewed ownership is exact
 
-- Authority/source: issue:#115
-- Affected surfaces: crates/audio/**, crates/bindings/**, packages/**
-- Compatibility promise: Existing crate names, serialized shapes, and focused CLI/server/WASM/app adapters remain until a separately authorized semver decision.
-- Required evidence: contract, behavioral, integration
-- Sensitivity: required
-- Risk dimensions: security=not-applicable:bootstrap-has-no-auth-surface; recovery=covered:INV-001; persistence=not-applicable:no-persistent-store; concurrency=covered:INV-001; migration=covered:INV-001; partial-failure=covered:INV-001; operational=covered:INV-001
+- Requirement: Exactly 53 Cargo and 26 Bun source records match the canonical reviewed digest.
+- Forbidden behavior: extra, omitted, renamed, or source-relocated package records.
+- Authority/source: repo:docs/repository-split/package-ownership.json
+- Required evidence: contract, static
+
+## INV-002 — External capability seams are registry-only
+
+- Requirement: Destination-owned dependencies remain local; foundation and NLP dependencies use exact registry coordinates.
+- Forbidden behavior: sibling paths, Git dependencies, visual ingest/FFmpeg edges, or the broad UI workspace dependency.
+- Authority/source: repo:CONTEXT.md
+- Required evidence: contract, static
+
+## INV-003 — Extraction remains reversible
+
+- Requirement: Unadapted package trees remain byte-identical to the exact source and adapted trees are enumerated.
+- Forbidden behavior: source removal, publication, undocumented copied-tree mutation, or generated output committed as source.
+- Authority/source: repo:docs/PROVENANCE.md
+- Required evidence: contract, static

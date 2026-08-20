@@ -6196,7 +6196,7 @@ mod tests {
     #[cfg(feature = "audio-io")]
     #[test]
     fn selected_media_pipeline_transcribes_distinguishable_tracks_and_preserves_default() {
-        use video_analysis_ffmpeg::{
+        use audio_analysis_io::{
             is_ffmpeg_available, is_ffprobe_available, write_two_audio_stream_test_media,
         };
 
@@ -6272,7 +6272,7 @@ mod tests {
     #[cfg(feature = "audio-io")]
     #[test]
     fn invalid_selected_media_is_typed_before_progress_or_provider_work() {
-        use video_analysis_ffmpeg::{
+        use audio_analysis_io::{
             is_ffmpeg_available, is_ffprobe_available, write_two_audio_stream_test_media,
             AudioStreamSelection, AudioStreamSelectionErrorReason, FfmpegError,
         };

@@ -16,10 +16,5 @@ dependency boundaries, byte identity for unadapted copies, and Cargo metadata
 when all exact registry dependencies are available.
 
 `moenarch-audio-contracts = 0.1.0` remains an external foundation dependency.
-Until that exact release is visible on crates.io, metadata resolution is an
-expected merge blocker rather than permission to add a sibling path or Git
-dependency.
-
-`Cargo.lock` cannot be generated truthfully until that version exists. The
-monolith lockfile was not retained because it would falsely encode a local path
-source for a foundation-owned dependency.
+The checked-in lockfile resolves it and the other required foundation/NLP
+contracts from crates.io; it does not encode sibling-path or Git dependencies.

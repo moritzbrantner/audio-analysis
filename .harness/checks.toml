@@ -35,5 +35,5 @@ services = []
 generated_outputs = ["target/**"]
 cost_class = "low"
 success_exit_codes = [0]
-failure_semantics = "Exact registry coordinates cannot yet resolve; audio-contracts 0.1.0 is the expected external blocker."
+failure_semantics = "The exact registry dependency contract cannot resolve."
 independence_group = "cargo-metadata"

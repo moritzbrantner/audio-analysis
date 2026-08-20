@@ -5,6 +5,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn main() {
+    println!("cargo:rustc-check-cfg=cfg(whisper_cpp_available)");
+    println!("cargo:rerun-if-env-changed=WHISPER_CPP_SOURCE_DIR");
+
     if env::var_os("CARGO_FEATURE_NATIVE").is_none() {
         return;
     }
@@ -20,10 +23,10 @@ fn main() {
                 .join("vendor/whisper.cpp")
         });
     if !vendor_dir.join("CMakeLists.txt").is_file() {
-        panic!(
-            "audio-analysis-transcription native builds require a whisper.cpp source checkout; \
-             set WHISPER_CPP_SOURCE_DIR or build from this repository with vendor/whisper.cpp present"
+        println!(
+            "cargo:warning=whisper.cpp is unavailable; native transcription calls will return an explicit initialization error. Set WHISPER_CPP_SOURCE_DIR to a whisper.cpp source checkout to enable them."
         );
+        return;
     }
 
     println!("cargo:rerun-if-changed={}", vendor_dir.display());
@@ -73,6 +76,8 @@ fn main() {
     } else if cfg!(target_os = "linux") {
         println!("cargo:rustc-link-lib=dylib=stdc++");
     }
+
+    println!("cargo:rustc-cfg=whisper_cpp_available");
 }
 
 fn static_library_names(lib_dir: &Path) -> Vec<String> {

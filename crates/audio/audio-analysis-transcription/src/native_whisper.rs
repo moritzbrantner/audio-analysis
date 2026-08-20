@@ -5142,6 +5142,7 @@ mod tests {
         create_fake_whisper_bundle(explicit.path());
         let options = CandleWhisperOptions {
             model_bundle: Some(explicit.path().to_path_buf()),
+            device: crate::NativeDevicePreference::Cpu,
             ..CandleWhisperOptions::default()
         };
         let setup =

@@ -8,10 +8,11 @@ use runtime_core::{
 };
 
 use crate::{
-    run_f5_mel_diagnostic, run_vocos_vocoder_diagnostic, speech_synthesis_text_chunking_report,
-    synthesize, NativeF5MelDiagnosticRequest, NativeTtsDevicePreference,
-    NativeVocosVocoderDiagnosticRequest, PcmAudio, ReferenceVoicePrompt, ReferenceVoicePromptAudio,
-    SpeechSynthesisRequest, SpeechSynthesisStatus, TtsModelBundleSelection,
+    reference_prompt_asr_execution_available, run_f5_mel_diagnostic, run_vocos_vocoder_diagnostic,
+    speech_synthesis_text_chunking_report, synthesize, NativeF5MelDiagnosticRequest,
+    NativeTtsDevicePreference, NativeVocosVocoderDiagnosticRequest, PcmAudio, ReferenceVoicePrompt,
+    ReferenceVoicePromptAudio, SpeechSynthesisRequest, SpeechSynthesisStatus,
+    TtsModelBundleSelection,
 };
 
 /// Returns the package surface exposed by every transport wrapper.
@@ -415,7 +416,9 @@ fn request_reference_prompt_asr_unavailable(request: &SpeechSynthesisRequest) ->
         .reference_voice_prompt
         .as_ref()
         .is_some_and(|prompt| {
-            !prompt.has_transcript() && prompt.asr_fallback.is_some() && !cfg!(feature = "asr")
+            !prompt.has_transcript()
+                && prompt.asr_fallback.is_some()
+                && !reference_prompt_asr_execution_available()
         })
 }
 
@@ -662,10 +665,14 @@ fn asr_fallback_plan(prompt: &ReferenceVoicePrompt) -> serde_json::Value {
             .into_iter()
             .find(|plan| plan.provider_id == fallback.provider_id);
         let provider_known = provider_plan.is_some();
+        let setup = provider_plan
+            .as_ref()
+            .map(|plan| plan.setup.clone())
+            .unwrap_or_default();
 
         serde_json::json!({
             "configured": true,
-            "available": provider_known,
+            "available": reference_prompt_asr_execution_available(),
             "asrFeatureEnabled": true,
             "providerKnown": provider_known,
             "providerId": fallback.provider_id,
@@ -674,8 +681,9 @@ fn asr_fallback_plan(prompt: &ReferenceVoicePrompt) -> serde_json::Value {
             "sourceKind": transcription_source_kind(&source),
             "willRunAsr": false,
             "transcriptionProviderPlan": provider_plan,
+            "setup": setup,
             "message": if provider_known {
-                "ASR fallback is planned through audio-analysis-transcription; this operation does not run transcription."
+                "ASR fallback metadata is available, but this TTS operation does not execute transcription."
             } else {
                 "ASR fallback provider is not known to audio-analysis-transcription."
             }
@@ -957,7 +965,7 @@ mod tests {
 
     #[cfg(feature = "asr")]
     #[test]
-    fn reference_prompt_plan_uses_transcription_provider_plan_when_asr_feature_enabled() {
+    fn reference_prompt_plan_reports_setup_when_asr_feature_only_enables_planning() {
         let response = run_surface_operation(SurfaceRequest {
             operation: "audio.tts.referencePromptPlan".into(),
             input: serde_json::json!({
@@ -975,12 +983,22 @@ mod tests {
 
         let fallback = &response.value["result"]["asrFallback"];
         assert_eq!(fallback["configured"], true);
-        assert_eq!(fallback["available"], true);
+        assert_eq!(fallback["available"], false);
         assert_eq!(fallback["asrFeatureEnabled"], true);
+        assert_eq!(fallback["providerKnown"], true);
         assert_eq!(fallback["sourceKind"], "path");
         assert_eq!(
             fallback["transcriptionProviderPlan"]["providerId"],
             "candle-whisper"
+        );
+        assert_eq!(fallback["willRunAsr"], false);
+        assert_eq!(
+            fallback["setup"][0],
+            "Provide an offline model bundle with config.json, generation_config.json, tokenizer.json, preprocessor_config.json, and model.safetensors."
+        );
+        assert_eq!(
+            fallback["message"],
+            "ASR fallback metadata is available, but this TTS operation does not execute transcription."
         );
     }
 

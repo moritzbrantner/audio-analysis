@@ -176,7 +176,11 @@ def main() -> int:
         for error in errors:
             print(f"error: {error}", file=sys.stderr)
         return 1
-    print("audio extraction structure valid: 53 Cargo, 26 Bun, 63 byte-identical trees")
+    print(
+        "audio extraction structure valid: "
+        f"{len(cargo_records)} Cargo, {len(bun_records)} Bun, "
+        f"{len(identity.get('trees', {}))} byte-identical trees"
+    )
     return 0
 
 

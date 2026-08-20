@@ -5,6 +5,7 @@
     "crates/audio/audio-analysis-io",
     "crates/audio/audio-analysis-processing",
     "crates/audio/audio-analysis-transcription",
+    "crates/audio/audio-generation-tts",
     "packages/audio-analysis-core-app",
     "packages/audio-analysis-fourier-app",
     "packages/audio-analysis-io-app",
@@ -23,6 +24,7 @@
     "crates/audio/audio-analysis-io": "owns the extracted audio-only source contracts and FFmpeg command adapter",
     "crates/audio/audio-analysis-processing": "consumes destination-owned audio source contracts",
     "crates/audio/audio-analysis-transcription": "uses destination-owned audio fixture support instead of a visual dev dependency",
+    "crates/audio/audio-generation-tts": "keeps unavailable Reference Voice Prompt ASR fallback as an explicit destination setup requirement",
     "packages/*-app": "retargeted to private destination-owned @moritzbrantner/audio-app-ui"
   }
 }

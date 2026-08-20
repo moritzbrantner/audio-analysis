@@ -138,10 +138,6 @@
       "digest": "f7c83c3332f215eba08a369e083f53f87d29a43e6146cbdc2df830f71d225829",
       "file_count": 5
     },
-    "crates/audio/audio-generation-tts": {
-      "digest": "fa246ea51a9a3811a5ae65f4e6a7b2ad2eac41749fc12ace25f3e9ef13a2cc15",
-      "file_count": 6
-    },
     "crates/audio/audio-generation-tts-cli": {
       "digest": "140af7d49210e915d28a3572779f1e77f34a8ee417c5d4bd9de60f7201c6c884",
       "file_count": 5

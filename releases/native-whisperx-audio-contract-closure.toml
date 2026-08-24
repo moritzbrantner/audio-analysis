@@ -1,0 +1,59 @@
+schema_version = 1
+repository = "moritzbrantner/audio-analysis"
+issue = 6
+source_sha = "48fafa4ed361dc28460ae112e20dd70b17e0699a"
+registry = "crates.io"
+fast_continuation = false
+dependency_order = ["moenarch-audio-analysis-core","moenarch-audio-analysis-fourier","moenarch-audio-analysis-recognition","moenarch-audio-analysis-io","moenarch-audio-analysis-speakers","moenarch-audio-analysis-transcription"]
+expected_tags = ["moenarch-audio-analysis-core-v0.1.1","moenarch-audio-analysis-fourier-v0.1.1","moenarch-audio-analysis-recognition-v0.1.1","moenarch-audio-analysis-io-v0.1.2","moenarch-audio-analysis-speakers-v0.1.5","moenarch-audio-analysis-transcription-v0.1.16"]
+required_checks = ["git diff --check","python3 scripts/check_extraction.py","cargo metadata --format-version 1 --no-deps","python3 -m unittest discover -s scripts -p 'test_*.py'","cargo fmt --all -- --check","cargo clippy --workspace --all-targets --all-features -- -D warnings","cargo test --workspace --all-features","cargo test --workspace --no-default-features","cargo doc --workspace --no-deps","python3 scripts/check_release_plan.py --check releases/native-whisperx-audio-contract-closure.toml","python3 scripts/check_release_plan.py --package-release releases/native-whisperx-audio-contract-closure.toml"]
+required_consumer_checks = ["bash scripts/check_native_whisperx_contract_candidate.sh"]
+github_releases = []
+
+[[packages]]
+name = "moenarch-audio-analysis-core"
+version = "0.1.1"
+owner = "moritzbrantner/audio-analysis"
+manifest_path = "crates/audio/audio-analysis-core/Cargo.toml"
+dependencies = []
+tag = "moenarch-audio-analysis-core-v0.1.1"
+
+[[packages]]
+name = "moenarch-audio-analysis-fourier"
+version = "0.1.1"
+owner = "moritzbrantner/audio-analysis"
+manifest_path = "crates/audio/audio-analysis-fourier/Cargo.toml"
+dependencies = ["moenarch-audio-analysis-core"]
+tag = "moenarch-audio-analysis-fourier-v0.1.1"
+
+[[packages]]
+name = "moenarch-audio-analysis-recognition"
+version = "0.1.1"
+owner = "moritzbrantner/audio-analysis"
+manifest_path = "crates/audio/audio-analysis-recognition/Cargo.toml"
+dependencies = ["moenarch-audio-analysis-core","moenarch-audio-analysis-fourier"]
+tag = "moenarch-audio-analysis-recognition-v0.1.1"
+
+[[packages]]
+name = "moenarch-audio-analysis-io"
+version = "0.1.2"
+owner = "moritzbrantner/audio-analysis"
+manifest_path = "crates/audio/audio-analysis-io/Cargo.toml"
+dependencies = ["moenarch-audio-analysis-core"]
+tag = "moenarch-audio-analysis-io-v0.1.2"
+
+[[packages]]
+name = "moenarch-audio-analysis-speakers"
+version = "0.1.5"
+owner = "moritzbrantner/audio-analysis"
+manifest_path = "crates/audio/audio-analysis-speakers/Cargo.toml"
+dependencies = ["moenarch-audio-analysis-core","moenarch-audio-analysis-recognition"]
+tag = "moenarch-audio-analysis-speakers-v0.1.5"
+
+[[packages]]
+name = "moenarch-audio-analysis-transcription"
+version = "0.1.16"
+owner = "moritzbrantner/audio-analysis"
+manifest_path = "crates/audio/audio-analysis-transcription/Cargo.toml"
+dependencies = ["moenarch-audio-analysis-io","moenarch-audio-analysis-speakers"]
+tag = "moenarch-audio-analysis-transcription-v0.1.16"

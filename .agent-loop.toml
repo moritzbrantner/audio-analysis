@@ -2,9 +2,20 @@ schema_version = 1
 max_workers = 2
 
 [verification]
-# Restructuring-first extraction evidence is intentionally structural.
 commands = [
   "git diff --check",
   "python3 scripts/check_extraction.py",
   "cargo metadata --format-version 1 --no-deps",
+  "python3 -m unittest discover -s scripts -p 'test_*.py'",
+  "cargo fmt --all -- --check",
+  "cargo clippy --workspace --all-targets --all-features -- -D warnings",
+  "cargo test --workspace --all-features",
+  "cargo test --workspace --no-default-features",
+  "cargo doc --workspace --no-deps",
+  "python3 scripts/check_release_plan.py --check releases/native-whisperx-audio-contract-closure.toml",
+  "python3 scripts/check_release_plan.py --package-release releases/native-whisperx-audio-contract-closure.toml",
 ]
+
+[publication]
+command = "python3 scripts/publish_release.py"
+authorization_label = "release:approved"

@@ -18,17 +18,17 @@ categories = ["multimedia", "science", "algorithms"]
 
 [workspace.dependencies]
 # Destination-owned crates retain path-plus-version coordinates for packaging.
-audio-analysis-core = { package = "moenarch-audio-analysis-core", version = "0.1.0", path = "crates/audio/audio-analysis-core" }
-audio-analysis-fourier = { package = "moenarch-audio-analysis-fourier", version = "0.1.0", path = "crates/audio/audio-analysis-fourier" }
-audio-analysis-io = { package = "moenarch-audio-analysis-io", version = "0.1.1", path = "crates/audio/audio-analysis-io" }
+audio-analysis-core = { package = "moenarch-audio-analysis-core", version = "=0.1.1", path = "crates/audio/audio-analysis-core" }
+audio-analysis-fourier = { package = "moenarch-audio-analysis-fourier", version = "=0.1.1", path = "crates/audio/audio-analysis-fourier" }
+audio-analysis-io = { package = "moenarch-audio-analysis-io", version = "=0.1.2", path = "crates/audio/audio-analysis-io" }
 audio-analysis-pitch = { package = "moenarch-audio-analysis-pitch", version = "0.1.0", path = "crates/audio/audio-analysis-pitch" }
 audio-analysis-processing = { package = "moenarch-audio-analysis-processing", version = "0.1.0", path = "crates/audio/audio-analysis-processing" }
-audio-analysis-recognition = { package = "moenarch-audio-analysis-recognition", version = "0.1.0", path = "crates/audio/audio-analysis-recognition" }
+audio-analysis-recognition = { package = "moenarch-audio-analysis-recognition", version = "=0.1.1", path = "crates/audio/audio-analysis-recognition" }
 audio-analysis-rhythm = { package = "moenarch-audio-analysis-rhythm", version = "0.1.0", path = "crates/audio/audio-analysis-rhythm" }
 audio-analysis-separation = { package = "moenarch-audio-analysis-separation", version = "0.1.0", path = "crates/audio/audio-analysis-separation" }
-audio-analysis-speakers = { package = "moenarch-audio-analysis-speakers", version = "0.1.4", path = "crates/audio/audio-analysis-speakers" }
+audio-analysis-speakers = { package = "moenarch-audio-analysis-speakers", version = "=0.1.5", path = "crates/audio/audio-analysis-speakers" }
 audio-analysis-synthesis = { package = "moenarch-audio-analysis-synthesis", version = "0.1.0", path = "crates/audio/audio-analysis-synthesis" }
-audio-analysis-transcription = { package = "moenarch-audio-analysis-transcription", version = "0.1.15", path = "crates/audio/audio-analysis-transcription" }
+audio-analysis-transcription = { package = "moenarch-audio-analysis-transcription", version = "=0.1.16", path = "crates/audio/audio-analysis-transcription" }
 audio-generation-midi = { package = "moenarch-audio-generation-midi", version = "0.1.0", path = "crates/audio/audio-generation-midi" }
 audio-generation-tts = { package = "moenarch-audio-generation-tts", version = "0.1.0", path = "crates/audio/audio-generation-tts" }
 

@@ -1625,7 +1625,7 @@ dependencies = [
 
 [[package]]
 name = "moenarch-audio-analysis-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "criterion",
  "moenarch-audio-contracts",
@@ -1672,7 +1672,7 @@ dependencies = [
 
 [[package]]
 name = "moenarch-audio-analysis-fourier"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "criterion",
  "moenarch-audio-analysis-core",
@@ -1718,7 +1718,7 @@ dependencies = [
 
 [[package]]
 name = "moenarch-audio-analysis-io"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "hound",
  "moenarch-audio-analysis-core",
@@ -1857,7 +1857,7 @@ dependencies = [
 
 [[package]]
 name = "moenarch-audio-analysis-recognition"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "criterion",
  "moenarch-audio-analysis-core",
@@ -1995,7 +1995,7 @@ dependencies = [
 
 [[package]]
 name = "moenarch-audio-analysis-speakers"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "hound",
  "moenarch-audio-analysis-core",
@@ -2100,7 +2100,7 @@ dependencies = [
 
 [[package]]
 name = "moenarch-audio-analysis-transcription"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "candle-core",
  "candle-nn",

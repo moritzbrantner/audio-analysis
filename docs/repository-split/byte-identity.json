@@ -2,10 +2,6 @@
   "schema_version": 1,
   "source_commit": "b8b29cf8db0b86ed1b133a18155adf24992f9483",
   "trees": {
-    "crates/audio/audio-analysis-core": {
-      "digest": "f5dbcbd8e1c7cd1d1159f2cf66e5610adaf09b7d4e1e32bb66af7b9dc35ea4be",
-      "file_count": 7
-    },
     "crates/audio/audio-analysis-core-cli": {
       "digest": "67a1d99b44cce239243e1535f48cd137fcf03c58d34cba21fb0bb59846a54113",
       "file_count": 5
@@ -13,10 +9,6 @@
     "crates/audio/audio-analysis-core-server": {
       "digest": "c6ea0ee2e7644441d097fdbd53def1774bd6f61b3040d15df9204551cf715d2b",
       "file_count": 5
-    },
-    "crates/audio/audio-analysis-fourier": {
-      "digest": "6d1cb29ec597e28ae9a484fcf6aec2b3f188c369beffded403fce8e5a11b2448",
-      "file_count": 6
     },
     "crates/audio/audio-analysis-fourier-cli": {
       "digest": "7c5f787ce85f69d97c63cc29f713d46903bb5fd0fdaad9c44efc021269983612",
@@ -54,10 +46,6 @@
       "digest": "8182f3ee920585bd0689f34919a43b8adeb75d125175fbd6eac65b268ab28cde",
       "file_count": 5
     },
-    "crates/audio/audio-analysis-recognition": {
-      "digest": "c265bcc99856765d6ae38b78af657d2466d31a396934adb99bcb06302f0f542c",
-      "file_count": 6
-    },
     "crates/audio/audio-analysis-recognition-cli": {
       "digest": "356b254ab1ce11cfd10146dfb026c1a2bcaab257d85adb93cee52464fe3c0701",
       "file_count": 5
@@ -89,10 +77,6 @@
     "crates/audio/audio-analysis-separation-server": {
       "digest": "0e7ee479fbb2047fc25ab11e45155e5de5c2a34649783568bb9fd678d0a51bd3",
       "file_count": 5
-    },
-    "crates/audio/audio-analysis-speakers": {
-      "digest": "ff7910cf0f332c21261b9fbdb6cf1acff392af3651993ddebda25328abd75183",
-      "file_count": 15
     },
     "crates/audio/audio-analysis-speakers-cli": {
       "digest": "37f2bacabc3b7e6af46fbfc1c90c5dbc082f97cd00c549485f362eb021d84870",

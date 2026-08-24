@@ -2,8 +2,12 @@
   "schema_version": 1,
   "source_commit": "b8b29cf8db0b86ed1b133a18155adf24992f9483",
   "adapted_package_trees": [
+    "crates/audio/audio-analysis-core",
+    "crates/audio/audio-analysis-fourier",
     "crates/audio/audio-analysis-io",
     "crates/audio/audio-analysis-processing",
+    "crates/audio/audio-analysis-recognition",
+    "crates/audio/audio-analysis-speakers",
     "crates/audio/audio-analysis-transcription",
     "crates/audio/audio-generation-tts",
     "packages/audio-analysis-core-app",
@@ -25,6 +29,10 @@
     "crates/audio/audio-analysis-processing": "consumes destination-owned audio source contracts",
     "crates/audio/audio-analysis-transcription": "uses destination-owned audio fixture support instead of a visual dev dependency",
     "crates/audio/audio-generation-tts": "keeps unavailable Reference Voice Prompt ASR fallback as an explicit destination setup requirement",
-    "packages/*-app": "retargeted to private destination-owned @moritzbrantner/audio-app-ui"
+    "packages/*-app": "retargeted to private destination-owned @moritzbrantner/audio-app-ui",
+    "crates/audio/audio-analysis-core": "pins the minimal registry-only native-whisperx audio contract release closure",
+    "crates/audio/audio-analysis-fourier": "pins the minimal registry-only native-whisperx audio contract release closure",
+    "crates/audio/audio-analysis-recognition": "pins the minimal registry-only native-whisperx audio contract release closure",
+    "crates/audio/audio-analysis-speakers": "pins the minimal registry-only native-whisperx audio contract release closure"
   }
 }

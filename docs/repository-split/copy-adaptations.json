@@ -7,16 +7,22 @@
     "crates/audio/audio-analysis-transcription",
     "crates/audio/audio-generation-tts",
     "packages/audio-analysis-core-app",
+    "packages/audio-analysis-core-wasm",
     "packages/audio-analysis-fourier-app",
+    "packages/audio-analysis-fourier-wasm",
     "packages/audio-analysis-io-app",
+    "packages/audio-analysis-io-wasm",
     "packages/audio-analysis-pitch-app",
     "packages/audio-analysis-processing-app",
     "packages/audio-analysis-recognition-app",
+    "packages/audio-analysis-recognition-wasm",
     "packages/audio-analysis-rhythm-app",
     "packages/audio-analysis-separation-app",
     "packages/audio-analysis-speakers-app",
+    "packages/audio-analysis-speakers-wasm",
     "packages/audio-analysis-synthesis-app",
     "packages/audio-analysis-transcription-app",
+    "packages/audio-analysis-transcription-wasm",
     "packages/audio-generation-midi-app",
     "packages/audio-generation-tts-app"
   ],
@@ -25,6 +31,12 @@
     "crates/audio/audio-analysis-processing": "consumes destination-owned audio source contracts",
     "crates/audio/audio-analysis-transcription": "uses destination-owned audio fixture support instead of a visual dev dependency",
     "crates/audio/audio-generation-tts": "keeps unavailable Reference Voice Prompt ASR fallback as an explicit destination setup requirement",
-    "packages/*-app": "retargeted to private destination-owned @moritzbrantner/audio-app-ui"
+    "packages/*-app": "retargeted to private destination-owned @moritzbrantner/audio-app-ui",
+    "packages/audio-analysis-core-wasm": "destination policy makes the active Native WhisperX source-closure WASM package private until an independent npm consumer justifies publication",
+    "packages/audio-analysis-fourier-wasm": "destination policy makes the active Native WhisperX source-closure WASM package private until an independent npm consumer justifies publication",
+    "packages/audio-analysis-io-wasm": "destination policy makes the active Native WhisperX source-closure WASM package private until an independent npm consumer justifies publication",
+    "packages/audio-analysis-recognition-wasm": "destination policy makes the active Native WhisperX source-closure WASM package private until an independent npm consumer justifies publication",
+    "packages/audio-analysis-speakers-wasm": "destination policy makes the active Native WhisperX source-closure WASM package private until an independent npm consumer justifies publication",
+    "packages/audio-analysis-transcription-wasm": "destination policy makes the active Native WhisperX source-closure WASM package private until an independent npm consumer justifies publication"
   }
 }

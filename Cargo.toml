@@ -4,6 +4,21 @@ members = [
   "crates/audio/*",
   "crates/bindings/*",
 ]
+default-members = [
+  "crates/audio/audio-analysis-core",
+  "crates/audio/audio-analysis-fourier",
+  "crates/audio/audio-analysis-io",
+  "crates/audio/audio-analysis-pitch",
+  "crates/audio/audio-analysis-processing",
+  "crates/audio/audio-analysis-recognition",
+  "crates/audio/audio-analysis-rhythm",
+  "crates/audio/audio-analysis-separation",
+  "crates/audio/audio-analysis-speakers",
+  "crates/audio/audio-analysis-synthesis",
+  "crates/audio/audio-analysis-transcription",
+  "crates/audio/audio-generation-midi",
+  "crates/audio/audio-generation-tts",
+]
 
 [workspace.package]
 version = "0.1.0"

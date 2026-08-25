@@ -15,10 +15,10 @@ scripts/check-fast.sh
 That validates Cargo metadata and the capability libraries. When an adapter shell changes, or before checking distribution compatibility, run:
 
 ```text
-scripts/check-adapters.sh
+bash scripts/check-adapters.sh
 ```
 
-The broader CI feature matrix remains responsible for optional runtime/features that are not appropriate for every local edit.
+Repository CI deliberately remains broader than the local fast loop: preflight runs the default library checks and then the complete workspace with all features, followed by documentation and package checks. Reducing local iteration cost must not reduce compatibility or feature-gated CI coverage.
 
 ## Package-shape direction
 

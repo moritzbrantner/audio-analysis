@@ -18,7 +18,15 @@ That validates Cargo metadata and the capability libraries. When an adapter shel
 bash scripts/check-adapters.sh
 ```
 
-Repository CI deliberately remains broader than the local fast loop: preflight runs the default library checks and then the complete workspace with all features, followed by documentation and package checks. Reducing local iteration cost must not reduce compatibility or feature-gated CI coverage.
+Repository CPU CI deliberately remains broader than the local fast loop: preflight runs the default library checks, the complete workspace with default features, and the important non-CUDA optional feature combinations, followed by documentation and package checks. Reducing local iteration cost must not reduce compatibility coverage.
+
+CUDA is a resource-backed surface rather than a requirement of the ordinary hosted CPU runner. On a CUDA-equipped machine with `nvcc` available, run:
+
+```text
+bash scripts/check-cuda.sh
+```
+
+That check covers the transcription and TTS CUDA paths plus their transport adapters. CPU CI does not claim CUDA evidence.
 
 ## Package-shape direction
 

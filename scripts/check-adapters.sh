@@ -2,6 +2,6 @@
 set -euo pipefail
 
 # Adapter shells remain compatibility surfaces, but they are not part of the
-# ordinary capability-development loop. Run this when changing CLI/server/WASM
-# adapters or before a distribution cutover.
-cargo test --workspace
+# ordinary capability-development loop. CI and distribution checks still
+# exercise the complete workspace and feature surface.
+cargo test --workspace --all-features

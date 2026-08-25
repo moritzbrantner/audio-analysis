@@ -164,10 +164,24 @@ def main() -> int:
     expected_trees = {package_tree(record) for record in packages}
     if not adaptations <= expected_trees:
         errors.append("adaptation inventory contains a non-source package tree")
+
+    # byte-identity.json is extraction provenance: once a copied tree is
+    # intentionally adapted in the destination, its original identity record
+    # may remain as historical evidence. Every still-unadapted tree must keep
+    # an identity record and must continue to match it byte-for-byte.
     identity = load_json(IDENTITY)
-    if set(identity.get("trees", {})) != expected_trees - adaptations:
-        errors.append("byte-identity inventory does not exactly cover unadapted trees")
-    for tree, expected in identity.get("trees", {}).items():
+    identity_trees = set(identity.get("trees", {}))
+    unadapted_trees = expected_trees - adaptations
+    if identity_trees - expected_trees:
+        errors.append("byte-identity inventory contains a non-source package tree")
+    missing_identity = unadapted_trees - identity_trees
+    if missing_identity:
+        errors.append(
+            "byte-identity inventory is missing unadapted trees: "
+            + ", ".join(sorted(missing_identity))
+        )
+    for tree in sorted(unadapted_trees):
+        expected = identity["trees"][tree]
         count, current = tree_digest(ROOT / tree)
         if count != expected["file_count"] or current != expected["digest"]:
             errors.append(f"unadapted tree differs from source: {tree}")
@@ -179,7 +193,7 @@ def main() -> int:
     print(
         "audio extraction structure valid: "
         f"{len(cargo_records)} Cargo, {len(bun_records)} Bun, "
-        f"{len(identity.get('trees', {}))} byte-identical trees"
+        f"{len(unadapted_trees)} byte-identical trees"
     )
     return 0
 

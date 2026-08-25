@@ -4,7 +4,7 @@
   "description": "WASM package for audio-analysis-speakers.",
   "license": "MIT OR Apache-2.0",
   "type": "module",
-  "private": false,
+  "private": true,
   "files": [
     "index.d.ts",
     "index.js",

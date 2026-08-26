@@ -5,9 +5,11 @@ This is the capability repository for audio analysis and generation packages.
 - Keep reusable Rust code under `crates/` and focused package surfaces under `packages/`.
 - Do not reintroduce sibling paths, moving Git dependencies, or visual-analysis dependencies into committed package manifests.
 - `packages/audio-app-ui` is private destination support, not an automatically publishable package.
-- Ordinary feature work is source-first. Do not publish crates, bump package versions, create tags, or start a release train merely to unblock a consumer.
+- Ordinary feature work is source-first. Use `bash scripts/source-deps activate` when it needs unreleased `moenarch-foundation` or `nlp-stack` changes; the committed declaration pins exact reviewed revisions.
+- Do not publish crates, bump package versions, create tags, or start a release train merely to unblock a consumer or an upstream dependency.
 - Keep package versions stable during source-development work when possible; a dedicated release change owns version bumps and registry publication.
 - Native WhisperX and other consumers may validate exact audio source revisions through their source-development configuration before registry releases exist.
+- Generated `.cargo/config.toml` is development state and must not be committed. Deactivate source mode before registry-only release verification.
 - Do not create a new independently versioned crate unless there is a second independent consumer, a hard dependency/isolation boundary, or another concrete independent-versioning reason.
 - The capability library crates are the default Cargo workspace members. Existing per-capability CLI, server, WASM, and app packages are compatibility shells, not the default development surface.
 - Do not create another per-capability CLI/server/WASM/app shell. If a genuinely new transport surface is required, prefer one repository-level adapter and reuse the library-owned operation contracts.

@@ -6,6 +6,7 @@ This is the capability repository for audio analysis and generation packages.
 - Do not reintroduce sibling paths, moving Git dependencies, or visual-analysis dependencies into committed package manifests.
 - `packages/audio-app-ui` is private destination support, not an automatically publishable package.
 - Ordinary feature work is source-first. Use `bash scripts/source-deps activate` when it needs unreleased `moenarch-foundation` or `nlp-stack` changes; the committed declaration pins exact reviewed revisions.
+- Source mode is local-workspace owned: every declared sibling checkout must exist at the exact pinned revision. Do not add private-repository tokens or authenticated Git fallback so hosted CI can reproduce the multi-repository workspace.
 - Do not publish crates, bump package versions, create tags, or start a release train merely to unblock a consumer or an upstream dependency.
 - Keep package versions stable during source-development work when possible; a dedicated release change owns version bumps and registry publication.
 - Native WhisperX and other consumers may validate exact audio source revisions through their source-development configuration before registry releases exist.

@@ -6,7 +6,7 @@ use audio_analysis_io::{
 use audio_contracts::{AudioBuffer, AudioSampleFormat};
 use audio_analysis_io::{
     is_ffmpeg_available, is_ffprobe_available, write_two_audio_stream_test_media,
-    AudioStreamSelection, AudioStreamSelectionErrorReason, FfmpegError,
+    AudioStreamSelection, AudioStreamSelectionErrorReason, FfmpegError, MediaType,
 };
 
 fn sine(freq_hz: f32, sample_rate: u32, seconds: f32) -> Vec<f32> {
@@ -213,4 +213,61 @@ fn invalid_selected_media_retains_typed_available_streams() {
     assert_eq!(selection, AudioStreamSelection::AudioOrdinal(2));
     assert_eq!(reason, AudioStreamSelectionErrorReason::OutOfRange);
     assert_eq!(available_streams.streams.len(), 3);
+}
+
+#[test]
+fn explicit_zero_audio_ordinal_rejects_video_only_input_with_typed_inventory() {
+    let required = std::env::var("FFMPEG_EXTERNAL_TESTS").ok().as_deref() == Some("1");
+    if !required {
+        eprintln!("skipping selected-media test; set FFMPEG_EXTERNAL_TESTS=1");
+        return;
+    }
+    if !(is_ffmpeg_available() && is_ffprobe_available()) {
+        panic!("FFMPEG_EXTERNAL_TESTS=1 but ffmpeg/ffprobe is unavailable");
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("video-only.mkv");
+    let output = std::process::Command::new("ffmpeg")
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=16x16:d=0.2",
+            "-an",
+            "-c:v",
+            "ffv1",
+        ])
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "ffmpeg failed to create video-only fixture: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let error = decode_selected_media_to_mono_f32(
+        SelectedMediaSource::new(path).audio_stream_index(0),
+        AudioInputOptions::recorded(),
+        ChannelMix::Average,
+    )
+    .unwrap_err();
+
+    let AudioIoError::Ffmpeg(FfmpegError::InvalidAudioStreamSelection {
+        selection,
+        reason,
+        available_streams,
+    }) = error
+    else {
+        panic!("expected typed selected-stream error, got {error:?}");
+    };
+    assert_eq!(selection, AudioStreamSelection::AudioOrdinal(0));
+    assert_eq!(reason, AudioStreamSelectionErrorReason::NoAudioStreams);
+    assert_eq!(available_streams.streams.len(), 1);
+    assert_eq!(available_streams.streams[0].media_type, MediaType::Video);
 }

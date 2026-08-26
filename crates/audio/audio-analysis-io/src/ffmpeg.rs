@@ -256,8 +256,10 @@ pub fn probe_streams_input(input: impl AsRef<str>) -> std::result::Result<MediaS
 
 fn probe_selected_audio_input(input: &str, path: Option<PathBuf>, mode: SourceMode, runtime: &FfmpegRuntimeOptions, ordinal: Option<usize>) -> std::result::Result<AudioMetadata, FfmpegError> {
     if matches!(runtime.backend, FfmpegRuntimeBackend::Native) { return Err(FfmpegError::UnsupportedRuntime { message: "native probing is not enabled".into() }); }
+    if let Some(ordinal) = ordinal {
+        validate_audio_stream_selection(&probe_streams_input(input)?, AudioStreamSelection::AudioOrdinal(ordinal))?;
+    }
     let ordinal = ordinal.unwrap_or(0);
-    if ordinal != 0 { validate_audio_stream_selection(&probe_streams_input(input)?, AudioStreamSelection::AudioOrdinal(ordinal))?; }
     probe_audio_input_with_ordinal(input, path, mode, ordinal)
 }
 

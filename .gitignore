@@ -1,4 +1,5 @@
 .cargo-target/
+/.cargo/config.toml
 target/
 .external-test-tools/
 .audio-tools/

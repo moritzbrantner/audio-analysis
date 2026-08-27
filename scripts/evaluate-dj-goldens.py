@@ -11,6 +11,9 @@ Optional stronger cross-check:
     python -m pip install essentia
 
 The downloaded audio is stored under target/dj-goldens and never committed.
+Key references below were captured from Essentia 2.1b6.dev1389 against the
+exact checksum-pinned fixture bytes. They deliberately describe the analyzed
+recording rather than trusting title/filename metadata.
 """
 
 from __future__ import annotations
@@ -35,7 +38,7 @@ class Fixture:
     url: str
     sha256: str
     license: str
-    known_key: str | None = None
+    reference_key: str | None = None
     assert_tempo: bool = False
 
 
@@ -49,6 +52,7 @@ FIXTURES = (
         ),
         sha256="ac644f9645e7c15174e4a4f8561e4d1448d7f6e59ff6b0556b310ebbced879bc",
         license="CC-BY-NC-4.0",
+        reference_key="G major",
         assert_tempo=True,
     ),
     Fixture(
@@ -60,7 +64,8 @@ FIXTURES = (
         ),
         sha256="919b48aa4cc66a0357d2cd5728664c5ab8f15c4b3469460df4b59470d35d3e49",
         license="CC-PDM-1.0",
-        known_key="F# minor",
+        reference_key="G minor",
+        assert_tempo=True,
     ),
 )
 
@@ -176,6 +181,7 @@ def main() -> int:
             "fixture": fixture.name,
             "license": fixture.license,
             "sha256": fixture.sha256,
+            "referenceKey": fixture.reference_key,
             "rust": rust,
             "librosa": librosa,
             "essentia": essentia,
@@ -198,16 +204,17 @@ def main() -> int:
                     f"Essentia BPM {essentia['tempo']:.3f}"
                 )
 
-        if fixture.known_key is not None:
+        if fixture.reference_key is not None:
             rust_key = (rust.get("key") or {}).get("label")
-            if rust_key != fixture.known_key:
+            if rust_key != fixture.reference_key:
                 failures.append(
-                    f"{fixture.name}: Rust key {rust_key!r} != known key {fixture.known_key!r}"
+                    f"{fixture.name}: Rust key {rust_key!r} != pinned Essentia reference "
+                    f"{fixture.reference_key!r}"
                 )
-            if essentia is not None and essentia["key"] != fixture.known_key:
+            if essentia is not None and essentia["key"] != fixture.reference_key:
                 failures.append(
-                    f"{fixture.name}: Essentia key {essentia['key']!r} differs from "
-                    f"known key {fixture.known_key!r}"
+                    f"{fixture.name}: Essentia key {essentia['key']!r} differs from pinned "
+                    f"reference {fixture.reference_key!r}"
                 )
 
     print(json.dumps({"fixtures": reports, "failures": failures}, indent=2))
@@ -217,8 +224,8 @@ def main() -> int:
         return 1
     if all(report["essentia"] is None for report in reports):
         print(
-            "note: Essentia is not installed; librosa and known-key checks ran, "
-            "but the second independent golden was skipped",
+            "note: Essentia is not installed; librosa tempo and pinned Essentia key "
+            "references ran, but the live second implementation cross-check was skipped",
             file=sys.stderr,
         )
     return 0

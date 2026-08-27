@@ -1,0 +1,28 @@
+name: DJ golden helper
+
+on:
+  push:
+    branches:
+      - feature/dj-rhythm-key-analysis
+
+permissions:
+  contents: read
+
+jobs:
+  golden:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install audio golden dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libsndfile1
+          python -m pip install --upgrade pip
+          python -m pip install numpy librosa
+          python -m pip install essentia || echo 'Essentia wheel unavailable; continuing with librosa + known-key golden'
+      - name: Run real-music golden evaluation
+        run: python scripts/evaluate-dj-goldens.py

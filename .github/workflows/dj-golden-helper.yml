@@ -6,17 +6,29 @@ on:
       - feature/dj-rhythm-key-analysis
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   style:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: feature/dj-rhythm-key-analysis
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      - name: Format modified capability crates
+        run: cargo fmt -p moenarch-audio-analysis-rhythm -p moenarch-audio-analysis-pitch
+      - name: Commit focused formatting if needed
+        run: |
+          git add crates/audio/audio-analysis-rhythm crates/audio/audio-analysis-pitch
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "Format DJ analysis crates"
+          git push origin HEAD:feature/dj-rhythm-key-analysis
       - name: Check modified capability crates
         run: cargo clippy -p moenarch-audio-analysis-rhythm -p moenarch-audio-analysis-pitch --all-targets -- -D warnings

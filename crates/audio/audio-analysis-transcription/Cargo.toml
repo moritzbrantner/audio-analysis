@@ -33,15 +33,14 @@ serde.workspace = true
 serde_json.workspace = true
 text-transcripts.workspace = true
 thiserror.workspace = true
-text-model-runtime = { workspace = true, optional = true }
 tokenizers = { workspace = true, optional = true }
 audio-analysis-io = { workspace = true, optional = true }
 audio-analysis-speakers = { package = "moenarch-audio-analysis-speakers", version = "0.1.4", path = "../audio-analysis-speakers" }
 
 [features]
 default = []
-candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:flate2", "dep:rayon", "dep:rustfft", "dep:text-model-runtime", "dep:tokenizers"]
-cuda = ["candle", "candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda", "text-model-runtime/cuda"]
+candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:flate2", "dep:rayon", "dep:rustfft", "dep:tokenizers"]
+cuda = ["candle", "candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
 alignment = ["candle", "dep:tokenizers"]
 diarization = []
 onnx = ["diarization", "audio-analysis-speakers/onnx", "dep:runtime-onnx"]

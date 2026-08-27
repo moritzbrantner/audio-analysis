@@ -1,0 +1,31 @@
+name: DJ lock helper
+
+on:
+  push:
+    branches:
+      - feature/dj-rhythm-key-analysis
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-lock:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/dj-rhythm-key-analysis
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Reconcile workspace lock graph
+        run: cargo check -p moenarch-audio-analysis-pitch -p moenarch-audio-analysis-rhythm
+      - name: Commit lockfile if needed
+        run: |
+          if git diff --quiet -- Cargo.lock; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add Cargo.lock
+          git commit -m "Refresh lockfile for DJ analysis"
+          git push origin HEAD:feature/dj-rhythm-key-analysis

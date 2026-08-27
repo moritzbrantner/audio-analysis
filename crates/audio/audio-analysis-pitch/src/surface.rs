@@ -309,8 +309,8 @@ fn key_value(input: serde_json::Value) -> Result<serde_json::Value, String> {
             ));
         }
     };
-    let estimate = estimate_musical_key(&samples, sample_rate, config)
-        .map_err(|error| error.to_string())?;
+    let estimate =
+        estimate_musical_key(&samples, sample_rate, config).map_err(|error| error.to_string())?;
     let Some(estimate) = estimate else {
         return Ok(serde_json::json!({
             "sampleRate": sample_rate,

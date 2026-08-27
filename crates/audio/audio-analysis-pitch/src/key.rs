@@ -16,12 +16,8 @@ const KRUMHANSL_MAJOR: [f32; 12] = [
 const KRUMHANSL_MINOR: [f32; 12] = [
     6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17,
 ];
-const TEMPERLEY_MAJOR: [f32; 12] = [
-    5.0, 2.0, 3.5, 2.0, 4.5, 4.0, 2.0, 4.5, 2.0, 3.5, 1.5, 4.0,
-];
-const TEMPERLEY_MINOR: [f32; 12] = [
-    5.0, 2.0, 3.5, 4.5, 2.0, 4.0, 2.0, 4.5, 3.5, 2.0, 1.5, 4.0,
-];
+const TEMPERLEY_MAJOR: [f32; 12] = [5.0, 2.0, 3.5, 2.0, 4.5, 4.0, 2.0, 4.5, 2.0, 3.5, 1.5, 4.0];
+const TEMPERLEY_MINOR: [f32; 12] = [5.0, 2.0, 3.5, 4.5, 2.0, 4.0, 2.0, 4.5, 3.5, 2.0, 1.5, 4.0];
 
 /// Key profile family used to score the chroma vector.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -86,8 +82,7 @@ impl HarmonicKeyConfig {
             || self.max_frequency_hz <= self.min_frequency_hz
         {
             return Err(DetectError::InvalidArgument(
-                "harmonic key frequency range must be finite, positive, and increasing"
-                    .to_string(),
+                "harmonic key frequency range must be finite, positive, and increasing".to_string(),
             ));
         }
         if !self.peak_threshold.is_finite() || !(0.0..=1.0).contains(&self.peak_threshold) {
@@ -242,9 +237,7 @@ pub fn estimate_musical_key(
     config: HarmonicKeyConfig,
 ) -> Result<Option<MusicalKeyEstimate>> {
     let analysis = harmonic_chroma(samples, sample_rate, config)?;
-    if analysis.peak_count == 0
-        || analysis.chroma.bins.iter().sum::<f32>() <= f32::EPSILON
-    {
+    if analysis.peak_count == 0 || analysis.chroma.bins.iter().sum::<f32>() <= f32::EPSILON {
         return Ok(None);
     }
 
@@ -255,7 +248,12 @@ pub fn estimate_musical_key(
             candidates.push(KeyCandidate {
                 tonic: tonic_name,
                 scale,
-                correlation: profile_correlation(&analysis.chroma.bins, tonic, scale, config.profile),
+                correlation: profile_correlation(
+                    &analysis.chroma.bins,
+                    tonic,
+                    scale,
+                    config.profile,
+                ),
             });
         }
     }
@@ -263,8 +261,7 @@ pub fn estimate_musical_key(
     let best = candidates[0];
     let runner_up = candidates[1];
     let strength = ((best.correlation + 1.0) * 0.5).clamp(0.0, 1.0);
-    let confidence = ((best.correlation - runner_up.correlation).max(0.0) / 0.35)
-        .clamp(0.0, 1.0);
+    let confidence = ((best.correlation - runner_up.correlation).max(0.0) / 0.35).clamp(0.0, 1.0);
 
     Ok(Some(MusicalKeyEstimate {
         tonic: best.tonic,
@@ -301,8 +298,8 @@ fn frame_peaks(
             let left = &window[0];
             let center = &window[1];
             let right = &window[2];
-            let in_range = (config.min_frequency_hz..=config.max_frequency_hz)
-                .contains(&center.frequency_hz);
+            let in_range =
+                (config.min_frequency_hz..=config.max_frequency_hz).contains(&center.frequency_hz);
             (in_range
                 && center.magnitude >= floor
                 && center.magnitude >= left.magnitude

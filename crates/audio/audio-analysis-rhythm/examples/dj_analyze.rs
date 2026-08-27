@@ -16,16 +16,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?;
     let samples = downmix_to_mono(&clip.samples, clip.channels);
 
-    let rhythm = analyze_rhythm_track(
-        &samples,
-        clip.sample_rate,
-        TrackRhythmConfig::default(),
-    )?;
-    let key = estimate_musical_key(
-        &samples,
-        clip.sample_rate,
-        HarmonicKeyConfig::default(),
-    )?;
+    let rhythm = analyze_rhythm_track(&samples, clip.sample_rate, TrackRhythmConfig::default())?;
+    let key = estimate_musical_key(&samples, clip.sample_rate, HarmonicKeyConfig::default())?;
 
     let key_value = key.map(|estimate| {
         let scale = match estimate.scale {

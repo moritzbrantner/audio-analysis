@@ -208,14 +208,10 @@ fn track_analysis_value(input: serde_json::Value) -> Result<serde_json::Value, S
     config.fft_size = positive_usize(&input, "fftSize", config.fft_size)?;
     config.hop_size = positive_usize(&input, "hopSize", config.hop_size)?;
     config.beats_per_bar = positive_usize(&input, "beatsPerBar", config.beats_per_bar)?;
-    config.tempo_candidate_count = positive_usize(
-        &input,
-        "tempoCandidateCount",
-        config.tempo_candidate_count,
-    )?
-    .min(16);
-    let analysis = analyze_rhythm_track(&samples, sample_rate, config)
-        .map_err(|error| error.to_string())?;
+    config.tempo_candidate_count =
+        positive_usize(&input, "tempoCandidateCount", config.tempo_candidate_count)?.min(16);
+    let analysis =
+        analyze_rhythm_track(&samples, sample_rate, config).map_err(|error| error.to_string())?;
     Ok(serde_json::json!({
         "sampleRate": sample_rate,
         "sampleCount": samples.len(),

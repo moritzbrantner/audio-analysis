@@ -153,12 +153,7 @@ pub fn analyze_rhythm_track(
     let features = spectral_onset_features(samples, sample_rate, config)?;
     let hop_seconds = config.hop_size as f64 / sample_rate as f64;
     if features.novelty.is_empty()
-        || features
-            .novelty
-            .iter()
-            .copied()
-            .fold(0.0_f32, f32::max)
-            <= f32::EPSILON
+        || features.novelty.iter().copied().fold(0.0_f32, f32::max) <= f32::EPSILON
     {
         return Ok(TrackRhythmAnalysis {
             bpm: None,
@@ -238,8 +233,8 @@ pub fn analyze_rhythm_track(
             .sum::<f32>()
             / beat_frames.len() as f32
     };
-    let confidence = (0.55 * selected.score + 0.25 * tempo_margin + 0.20 * beat_support)
-        .clamp(0.0, 1.0);
+    let confidence =
+        (0.55 * selected.score + 0.25 * tempo_margin + 0.20 * beat_support).clamp(0.0, 1.0);
 
     Ok(TrackRhythmAnalysis {
         bpm: Some(selected.bpm),
@@ -281,9 +276,7 @@ fn spectral_onset_features(
             .map(|bin| bin.power)
             .sum::<f32>();
         low_energy.push(low.sqrt());
-        timestamps.push(
-            frame.start_seconds + config.fft_size as f64 / (2.0 * sample_rate as f64),
-        );
+        timestamps.push(frame.start_seconds + config.fft_size as f64 / (2.0 * sample_rate as f64));
     }
 
     for pair in frames.windows(2) {
@@ -354,8 +347,8 @@ fn estimate_tempo_candidates(
         return Vec::new();
     }
     let min_lag = ((60.0 * frame_rate / max_bpm).floor() as usize).max(1);
-    let max_lag = ((60.0 * frame_rate / min_bpm).ceil() as usize)
-        .min(novelty.len().saturating_sub(1));
+    let max_lag =
+        ((60.0 * frame_rate / min_bpm).ceil() as usize).min(novelty.len().saturating_sub(1));
     if min_lag > max_lag {
         return Vec::new();
     }
@@ -398,12 +391,7 @@ fn estimate_tempo_candidates(
     selected
 }
 
-fn track_beat_frames(
-    novelty: &[f32],
-    frame_rate: f32,
-    bpm: f32,
-    tightness: f32,
-) -> Vec<usize> {
+fn track_beat_frames(novelty: &[f32], frame_rate: f32, bpm: f32, tightness: f32) -> Vec<usize> {
     if novelty.is_empty() || frame_rate <= 0.0 || bpm <= 0.0 {
         return Vec::new();
     }
@@ -542,7 +530,9 @@ mod tests {
     fn tempo_candidates_recover_regular_pulse_rate() {
         let novelty = pulse_envelope(50, 20);
         let candidates = estimate_tempo_candidates(&novelty, 100.0, 55.0, 220.0, 5);
-        assert!(candidates.iter().any(|candidate| (candidate.bpm - 120.0).abs() < 1.0));
+        assert!(candidates
+            .iter()
+            .any(|candidate| (candidate.bpm - 120.0).abs() < 1.0));
         assert!((candidates[0].bpm - 120.0).abs() < 1.0);
     }
 

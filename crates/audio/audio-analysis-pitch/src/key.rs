@@ -395,8 +395,8 @@ fn pearson_for_profile(chroma: &[f32; 12], tonic: usize, profile: &[f32; 12]) ->
     let mut numerator = 0.0_f32;
     let mut chroma_energy = 0.0_f32;
     let mut profile_energy = 0.0_f32;
-    for pitch_class in 0..12 {
-        let x = chroma[pitch_class] - chroma_mean;
+    for (pitch_class, chroma_value) in chroma.iter().enumerate() {
+        let x = *chroma_value - chroma_mean;
         let relative = (pitch_class + 12 - tonic) % 12;
         let y = profile[relative] - profile_mean;
         numerator += x * y;

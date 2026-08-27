@@ -2,6 +2,8 @@
 
 Rust-first audio analysis, recognition, transcription, synthesis, and generation packages extracted from `moritzbrantner/rust-packages`.
 
+For the Rust packages assigned to `audio-analysis`, this repository is the canonical source, test, issue, version, and release authority. Historical copies in `rust-packages` are compatibility/provenance material rather than a competing implementation or release source. Ownership does not itself publish, tag, or remove historical source; those remain explicit destination-local release or migration operations.
+
 ## Development surface
 
 The repository still retains the reviewed historical package inventory for compatibility, but ordinary development is intentionally smaller. The capability library crates are the Cargo workspace `default-members`; per-capability CLI, server, WASM, and app packages are compatibility shells and are not the default feature-development surface.

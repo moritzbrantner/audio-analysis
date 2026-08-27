@@ -24,6 +24,8 @@ audio-contracts.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+audio-analysis-io.workspace = true
+audio-analysis-pitch.workspace = true
 
 [[bench]]
 name = "rhythm"

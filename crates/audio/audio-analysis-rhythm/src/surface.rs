@@ -6,6 +6,7 @@ use runtime_core::{
     SurfaceOperation, SurfaceRequest, SurfaceResponse,
 };
 
+use crate::track::{analyze_rhythm_track, TrackRhythmConfig};
 use crate::{
     beat_grid, detect_onsets, estimate_tempo, onset_envelope, OnsetDetectorConfig,
     TempoEstimatorConfig,
@@ -23,7 +24,7 @@ pub fn package_surface() -> PackageSurface {
             operation(
                 "describe",
                 "Describe package",
-                "Onset detection and tempo estimation for video-analysis.",
+                "Onset detection, tempo estimation, and whole-track beat analysis.",
                 serde_json::json!({"includeOperations": true}),
             ),
             operation(
@@ -43,6 +44,12 @@ pub fn package_surface() -> PackageSurface {
                 "Beat grid",
                 "Creates a beat grid from start time, BPM, and beat count.",
                 serde_json::json!({"startSeconds": 0.0, "bpm": 120.0, "beats": 4}),
+            ),
+            operation(
+                "audio.rhythm.analyze",
+                "Analyze track rhythm",
+                "Uses spectral flux, tempo autocorrelation, dynamic-programming beat tracking, and bar-phase accents to estimate BPM, beats, and downbeats.",
+                serde_json::json!({"samples": [1.0, 0.0, 0.0, 1.0], "sampleRate": 48000}),
             ),
         ],
     }
@@ -75,6 +82,7 @@ pub fn run_surface_operation(request: SurfaceRequest) -> Result<SurfaceResponse,
         "audio.rhythm.onsets" => onsets_value(request.input)?,
         "audio.rhythm.tempo" => tempo_value(request.input)?,
         "audio.rhythm.beatGrid" => beat_grid_value(request.input)?,
+        "audio.rhythm.analyze" => track_analysis_value(request.input)?,
         operation => {
             return Err(format!(
                 "unsupported operation `{operation}` for {}",
@@ -89,7 +97,7 @@ fn response(operation: OperationId, value: serde_json::Value) -> SurfaceResponse
     let (title, message, summary) = match operation.as_str() {
         "describe" => (
             "Rhythm package metadata",
-            "Inspected the onset, tempo, and beat-grid operations exposed by this package.",
+            "Inspected the onset, tempo, beat-grid, and whole-track rhythm operations exposed by this package.",
             serde_json::json!({
                 "operationCount": value.get("operationCount").cloned().unwrap_or(serde_json::Value::Null)
             }),
@@ -117,6 +125,16 @@ fn response(operation: OperationId, value: serde_json::Value) -> SurfaceResponse
             serde_json::json!({
                 "bpm": value.get("bpm").cloned().unwrap_or(serde_json::Value::Null),
                 "beatCount": value.get("grid").and_then(serde_json::Value::as_array).map_or(0, Vec::len)
+            }),
+        ),
+        "audio.rhythm.analyze" => (
+            "Track rhythm analysis",
+            "Estimated whole-track tempo candidates, a globally consistent beat path, and 4/4 downbeats.",
+            serde_json::json!({
+                "bpm": value.get("bpm").cloned().unwrap_or(serde_json::Value::Null),
+                "confidence": value.get("confidence").cloned().unwrap_or(serde_json::Value::Null),
+                "beatCount": value.get("beats").and_then(serde_json::Value::as_array).map_or(0, Vec::len),
+                "downbeatCount": value.get("downbeats").and_then(serde_json::Value::as_array).map_or(0, Vec::len)
             }),
         ),
         _ => (
@@ -178,6 +196,44 @@ fn beat_grid_value(input: serde_json::Value) -> Result<serde_json::Value, String
         "bpm": bpm,
         "beats": beats,
         "grid": grid
+    }))
+}
+
+fn track_analysis_value(input: serde_json::Value) -> Result<serde_json::Value, String> {
+    let samples = sample_array(&input, "samples")?;
+    let sample_rate = sample_rate(&input)?;
+    let mut config = TrackRhythmConfig::default();
+    config.min_bpm = finite_f64(&input, "minBpm", config.min_bpm as f64)? as f32;
+    config.max_bpm = finite_f64(&input, "maxBpm", config.max_bpm as f64)? as f32;
+    config.fft_size = positive_usize(&input, "fftSize", config.fft_size)?;
+    config.hop_size = positive_usize(&input, "hopSize", config.hop_size)?;
+    config.beats_per_bar = positive_usize(&input, "beatsPerBar", config.beats_per_bar)?;
+    config.tempo_candidate_count = positive_usize(
+        &input,
+        "tempoCandidateCount",
+        config.tempo_candidate_count,
+    )?
+    .min(16);
+    let analysis = analyze_rhythm_track(&samples, sample_rate, config)
+        .map_err(|error| error.to_string())?;
+    Ok(serde_json::json!({
+        "sampleRate": sample_rate,
+        "sampleCount": samples.len(),
+        "bpm": analysis.bpm,
+        "confidence": analysis.confidence,
+        "hopSeconds": analysis.hop_seconds,
+        "tempoCandidates": analysis.tempo_candidates.iter().map(|candidate| serde_json::json!({
+            "bpm": candidate.bpm,
+            "score": candidate.score
+        })).collect::<Vec<_>>(),
+        "beats": analysis.beats.iter().take(512).map(|beat| serde_json::json!({
+            "timestampSeconds": beat.timestamp_seconds,
+            "strength": beat.strength,
+            "beatInBar": beat.beat_in_bar,
+            "downbeat": beat.downbeat
+        })).collect::<Vec<_>>(),
+        "downbeats": analysis.downbeats.iter().take(128).copied().collect::<Vec<_>>(),
+        "downbeatConfidence": analysis.downbeat_confidence
     }))
 }
 
@@ -280,6 +336,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(ids.contains(&"audio.rhythm.onsets"));
         assert!(ids.contains(&"audio.rhythm.beatGrid"));
+        assert!(ids.contains(&"audio.rhythm.analyze"));
     }
 
     #[test]

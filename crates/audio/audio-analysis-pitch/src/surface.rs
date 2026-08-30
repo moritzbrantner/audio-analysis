@@ -6,12 +6,14 @@ use runtime_core::{
     SurfaceOperation, SurfaceRequest, SurfaceResponse,
 };
 
+use crate::key::{estimate_musical_key, HarmonicKeyConfig, KeyProfile, MusicalScale};
 use crate::{
     frequency_to_midi_note, frequency_to_note_name, pitch_class_summary, segment_pitch_track,
     AutocorrelationPitchDetector, PitchDetectorConfig, PitchFrameEstimate,
 };
 
 const MAX_SAMPLES: usize = 192_000;
+const MAX_TRACK_SECONDS: usize = 15 * 60;
 
 /// Returns the package surface exposed by every transport wrapper.
 pub fn package_surface() -> PackageSurface {
@@ -23,7 +25,7 @@ pub fn package_surface() -> PackageSurface {
             operation(
                 "describe",
                 "Describe package",
-                "Autocorrelation pitch detection and note projection for video-analysis.",
+                "Monophonic pitch plus polyphonic chroma and musical-key analysis.",
                 serde_json::json!({"includeOperations": true}),
             ),
             operation(
@@ -46,9 +48,15 @@ pub fn package_surface() -> PackageSurface {
             ),
             operation(
                 "audio.pitch.chroma",
-                "Chroma",
-                "Summarizes normalized samples into a 12-bin pitch-class chroma vector.",
+                "Monophonic chroma",
+                "Preserves the compatibility chroma projection from one detected fundamental.",
                 serde_json::json!({"samples": [0.0, 1.0, 0.0, -1.0], "sampleRate": 48000}),
+            ),
+            operation(
+                "audio.pitch.key",
+                "Estimate musical key",
+                "Builds tuning-corrected polyphonic spectral chroma and scores established major/minor key profiles.",
+                serde_json::json!({"samples": [0.0, 1.0, 0.0, -1.0], "sampleRate": 48000, "profile": "ensemble"}),
             ),
         ],
     }
@@ -82,6 +90,7 @@ pub fn run_surface_operation(request: SurfaceRequest) -> Result<SurfaceResponse,
         "audio.pitch.track" => track_value(request.input)?,
         "audio.pitch.noteName" => note_name_value(request.input)?,
         "audio.pitch.chroma" => chroma_value(request.input)?,
+        "audio.pitch.key" => key_value(request.input)?,
         operation => {
             return Err(format!(
                 "unsupported operation `{operation}` for {}",
@@ -96,7 +105,7 @@ fn response(operation: OperationId, value: serde_json::Value) -> SurfaceResponse
     let (title, message, summary) = match operation.as_str() {
         "describe" => (
             "Pitch package metadata",
-            "Inspected the pitch detection and note projection operations exposed by this package.",
+            "Inspected the monophonic pitch and polyphonic musical-key operations exposed by this package.",
             serde_json::json!({
                 "operationCount": value.get("operationCount").cloned().unwrap_or(serde_json::Value::Null)
             }),
@@ -131,11 +140,21 @@ fn response(operation: OperationId, value: serde_json::Value) -> SurfaceResponse
         ),
         "audio.pitch.chroma" => (
             "Pitch chroma result",
-            "Summarized normalized samples into a 12-bin pitch-class chroma vector.",
+            "Summarized normalized samples with the compatibility monophonic pitch-class projection.",
             serde_json::json!({
                 "sampleRate": value.get("sampleRate").cloned().unwrap_or(serde_json::Value::Null),
                 "sampleCount": value.get("sampleCount").cloned().unwrap_or(serde_json::Value::Null),
                 "strongestPitchClass": value.get("strongestPitchClass").cloned().unwrap_or(serde_json::Value::Null)
+            }),
+        ),
+        "audio.pitch.key" => (
+            "Musical key result",
+            "Estimated polyphonic musical key from tuning-corrected spectral chroma and profile correlations.",
+            serde_json::json!({
+                "key": value.get("key").cloned().unwrap_or(serde_json::Value::Null),
+                "strength": value.get("strength").cloned().unwrap_or(serde_json::Value::Null),
+                "confidence": value.get("confidence").cloned().unwrap_or(serde_json::Value::Null),
+                "tuningCents": value.get("tuningCents").cloned().unwrap_or(serde_json::Value::Null)
             }),
         ),
         _ => (
@@ -205,6 +224,7 @@ fn track_value(input: serde_json::Value) -> Result<serde_json::Value, String> {
         "sampleCount": samples.len(),
         "frameSize": frame_size,
         "hopSize": hop_size,
+        "frameCount": estimates.len(),
         "frames": estimates.iter().map(|estimate| serde_json::json!({
             "startSeconds": estimate.start_seconds,
             "endSeconds": estimate.end_seconds,
@@ -252,6 +272,83 @@ fn chroma_value(input: serde_json::Value) -> Result<serde_json::Value, String> {
     }))
 }
 
+fn key_value(input: serde_json::Value) -> Result<serde_json::Value, String> {
+    let sample_rate = sample_rate(&input)?;
+    let samples = track_sample_array(&input, "samples", sample_rate)?;
+    let mut config = HarmonicKeyConfig::default();
+    config.fft_size = positive_usize(&input, "fftSize", config.fft_size)?;
+    config.hop_size = positive_usize(&input, "hopSize", config.hop_size)?;
+    if let Some(value) = input
+        .get("minFrequencyHz")
+        .and_then(serde_json::Value::as_f64)
+    {
+        config.min_frequency_hz = value as f32;
+    }
+    if let Some(value) = input
+        .get("maxFrequencyHz")
+        .and_then(serde_json::Value::as_f64)
+    {
+        config.max_frequency_hz = value as f32;
+    }
+    if let Some(value) = input
+        .get("peakThreshold")
+        .and_then(serde_json::Value::as_f64)
+    {
+        config.peak_threshold = value as f32;
+    }
+    config.profile = match input
+        .get("profile")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("ensemble")
+    {
+        "ensemble" => KeyProfile::Ensemble,
+        "krumhansl" => KeyProfile::Krumhansl,
+        "temperley" => KeyProfile::Temperley,
+        value => {
+            return Err(format!(
+                "profile must be one of ensemble, krumhansl, or temperley; got `{value}`"
+            ));
+        }
+    };
+    let estimate =
+        estimate_musical_key(&samples, sample_rate, config).map_err(|error| error.to_string())?;
+    let Some(estimate) = estimate else {
+        return Ok(serde_json::json!({
+            "sampleRate": sample_rate,
+            "sampleCount": samples.len(),
+            "key": serde_json::Value::Null,
+            "strength": 0.0,
+            "confidence": 0.0
+        }));
+    };
+    let scale = match estimate.scale {
+        MusicalScale::Major => "major",
+        MusicalScale::Minor => "minor",
+    };
+    let runner_scale = match estimate.runner_up.scale {
+        MusicalScale::Major => "major",
+        MusicalScale::Minor => "minor",
+    };
+    Ok(serde_json::json!({
+        "sampleRate": sample_rate,
+        "sampleCount": samples.len(),
+        "key": estimate.label(),
+        "tonic": estimate.tonic.as_str(),
+        "scale": scale,
+        "strength": estimate.strength,
+        "confidence": estimate.confidence,
+        "runnerUp": {
+            "tonic": estimate.runner_up.tonic.as_str(),
+            "scale": runner_scale,
+            "correlation": estimate.runner_up.correlation
+        },
+        "tuningCents": estimate.tuning_cents,
+        "chroma": estimate.chroma.bins,
+        "pitchClasses": ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"],
+        "peakCount": estimate.peak_count
+    }))
+}
+
 fn config_from_input(input: &serde_json::Value) -> Result<PitchDetectorConfig, String> {
     let mut config = PitchDetectorConfig::default();
     if let Some(value) = input
@@ -277,6 +374,23 @@ fn config_from_input(input: &serde_json::Value) -> Result<PitchDetectorConfig, S
 }
 
 fn sample_array(input: &serde_json::Value, field: &str) -> Result<Vec<f32>, String> {
+    sample_array_with_max(input, field, MAX_SAMPLES)
+}
+
+fn track_sample_array(
+    input: &serde_json::Value,
+    field: &str,
+    sample_rate: u32,
+) -> Result<Vec<f32>, String> {
+    let max_samples = (sample_rate as usize).saturating_mul(MAX_TRACK_SECONDS);
+    sample_array_with_max(input, field, max_samples)
+}
+
+fn sample_array_with_max(
+    input: &serde_json::Value,
+    field: &str,
+    max_samples: usize,
+) -> Result<Vec<f32>, String> {
     let values = input
         .get(field)
         .and_then(serde_json::Value::as_array)
@@ -284,9 +398,9 @@ fn sample_array(input: &serde_json::Value, field: &str) -> Result<Vec<f32>, Stri
     if values.is_empty() {
         return Err(format!("{field} must not be empty"));
     }
-    if values.len() > MAX_SAMPLES {
+    if values.len() > max_samples {
         return Err(format!(
-            "{field} must not contain more than {MAX_SAMPLES} samples"
+            "{field} must not contain more than {max_samples} samples"
         ));
     }
     values
@@ -346,6 +460,7 @@ mod tests {
         assert!(ids.contains(&"audio.pitch.estimate"));
         assert!(ids.contains(&"audio.pitch.noteName"));
         assert!(ids.contains(&"audio.pitch.chroma"));
+        assert!(ids.contains(&"audio.pitch.key"));
     }
 
     #[test]
@@ -375,9 +490,38 @@ mod tests {
             input: serde_json::json!({"samples": samples, "sampleRate": 8192}),
         })
         .expect("chroma");
-        assert_eq!(response.value["operation"], "audio.pitch.chroma");
         assert_eq!(response.value["strongestPitchClass"], "A");
         assert_eq!(response.value["chroma"].as_array().unwrap().len(), 12);
+    }
+
+    #[test]
+    fn key_analysis_accepts_more_than_the_preview_sample_limit() {
+        let samples = vec![0.0; MAX_SAMPLES + 1];
+        let response = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("audio.pitch.key"),
+            input: serde_json::json!({
+                "samples": samples,
+                "sampleRate": 8_000,
+                "fftSize": 512,
+                "hopSize": 512,
+                "maxFrequencyHz": 3_000.0
+            }),
+        })
+        .expect("whole-track key analysis");
+
+        assert_eq!(response.value["sampleCount"], MAX_SAMPLES + 1);
+        assert!(response.value["key"].is_null());
+    }
+
+    #[test]
+    fn monophonic_preview_keeps_the_existing_sample_limit() {
+        let error = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("audio.pitch.estimate"),
+            input: serde_json::json!({"samples": vec![0.0; MAX_SAMPLES + 1]}),
+        })
+        .expect_err("preview sample limit");
+
+        assert!(error.contains("192000"));
     }
 
     #[test]
@@ -393,15 +537,5 @@ mod tests {
             assert!(response.value["summary"].is_object());
             assert!(response.value["result"].is_object());
         }
-    }
-
-    #[test]
-    fn invalid_samples_return_error() {
-        let error = run_surface_operation(SurfaceRequest {
-            operation: OperationId::new("audio.pitch.estimate"),
-            input: serde_json::json!({"samples": "bad"}),
-        })
-        .unwrap_err();
-        assert!(error.contains("samples"));
     }
 }

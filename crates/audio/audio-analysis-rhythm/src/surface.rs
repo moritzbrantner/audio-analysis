@@ -6,12 +6,14 @@ use runtime_core::{
     SurfaceOperation, SurfaceRequest, SurfaceResponse,
 };
 
+use crate::track::{analyze_rhythm_track, TrackRhythmConfig};
 use crate::{
     beat_grid, detect_onsets, estimate_tempo, onset_envelope, OnsetDetectorConfig,
     TempoEstimatorConfig,
 };
 
 const MAX_SAMPLES: usize = 192_000;
+const MAX_TRACK_SECONDS: usize = 15 * 60;
 
 /// Returns the package surface exposed by every transport wrapper.
 pub fn package_surface() -> PackageSurface {
@@ -23,7 +25,7 @@ pub fn package_surface() -> PackageSurface {
             operation(
                 "describe",
                 "Describe package",
-                "Onset detection and tempo estimation for video-analysis.",
+                "Onset detection, tempo estimation, and whole-track beat analysis.",
                 serde_json::json!({"includeOperations": true}),
             ),
             operation(
@@ -43,6 +45,12 @@ pub fn package_surface() -> PackageSurface {
                 "Beat grid",
                 "Creates a beat grid from start time, BPM, and beat count.",
                 serde_json::json!({"startSeconds": 0.0, "bpm": 120.0, "beats": 4}),
+            ),
+            operation(
+                "audio.rhythm.analyze",
+                "Analyze track rhythm",
+                "Uses spectral flux, tempo autocorrelation, dynamic-programming beat tracking, and bar-phase accents to estimate BPM, beats, and downbeats.",
+                serde_json::json!({"samples": [1.0, 0.0, 0.0, 1.0], "sampleRate": 48000}),
             ),
         ],
     }
@@ -75,6 +83,7 @@ pub fn run_surface_operation(request: SurfaceRequest) -> Result<SurfaceResponse,
         "audio.rhythm.onsets" => onsets_value(request.input)?,
         "audio.rhythm.tempo" => tempo_value(request.input)?,
         "audio.rhythm.beatGrid" => beat_grid_value(request.input)?,
+        "audio.rhythm.analyze" => track_analysis_value(request.input)?,
         operation => {
             return Err(format!(
                 "unsupported operation `{operation}` for {}",
@@ -89,7 +98,7 @@ fn response(operation: OperationId, value: serde_json::Value) -> SurfaceResponse
     let (title, message, summary) = match operation.as_str() {
         "describe" => (
             "Rhythm package metadata",
-            "Inspected the onset, tempo, and beat-grid operations exposed by this package.",
+            "Inspected the onset, tempo, beat-grid, and whole-track rhythm operations exposed by this package.",
             serde_json::json!({
                 "operationCount": value.get("operationCount").cloned().unwrap_or(serde_json::Value::Null)
             }),
@@ -117,6 +126,16 @@ fn response(operation: OperationId, value: serde_json::Value) -> SurfaceResponse
             serde_json::json!({
                 "bpm": value.get("bpm").cloned().unwrap_or(serde_json::Value::Null),
                 "beatCount": value.get("grid").and_then(serde_json::Value::as_array).map_or(0, Vec::len)
+            }),
+        ),
+        "audio.rhythm.analyze" => (
+            "Track rhythm analysis",
+            "Estimated whole-track tempo candidates, a globally consistent beat path, and 4/4 downbeats.",
+            serde_json::json!({
+                "bpm": value.get("bpm").cloned().unwrap_or(serde_json::Value::Null),
+                "confidence": value.get("confidence").cloned().unwrap_or(serde_json::Value::Null),
+                "beatCount": value.get("beats").and_then(serde_json::Value::as_array).map_or(0, Vec::len),
+                "downbeatCount": value.get("downbeats").and_then(serde_json::Value::as_array).map_or(0, Vec::len)
             }),
         ),
         _ => (
@@ -181,6 +200,40 @@ fn beat_grid_value(input: serde_json::Value) -> Result<serde_json::Value, String
     }))
 }
 
+fn track_analysis_value(input: serde_json::Value) -> Result<serde_json::Value, String> {
+    let sample_rate = sample_rate(&input)?;
+    let samples = track_sample_array(&input, "samples", sample_rate)?;
+    let mut config = TrackRhythmConfig::default();
+    config.min_bpm = finite_f64(&input, "minBpm", config.min_bpm as f64)? as f32;
+    config.max_bpm = finite_f64(&input, "maxBpm", config.max_bpm as f64)? as f32;
+    config.fft_size = positive_usize(&input, "fftSize", config.fft_size)?;
+    config.hop_size = positive_usize(&input, "hopSize", config.hop_size)?;
+    config.beats_per_bar = positive_usize(&input, "beatsPerBar", config.beats_per_bar)?;
+    config.tempo_candidate_count =
+        positive_usize(&input, "tempoCandidateCount", config.tempo_candidate_count)?.min(16);
+    let analysis =
+        analyze_rhythm_track(&samples, sample_rate, config).map_err(|error| error.to_string())?;
+    Ok(serde_json::json!({
+        "sampleRate": sample_rate,
+        "sampleCount": samples.len(),
+        "bpm": analysis.bpm,
+        "confidence": analysis.confidence,
+        "hopSeconds": analysis.hop_seconds,
+        "tempoCandidates": analysis.tempo_candidates.iter().map(|candidate| serde_json::json!({
+            "bpm": candidate.bpm,
+            "score": candidate.score
+        })).collect::<Vec<_>>(),
+        "beats": analysis.beats.iter().take(512).map(|beat| serde_json::json!({
+            "timestampSeconds": beat.timestamp_seconds,
+            "strength": beat.strength,
+            "beatInBar": beat.beat_in_bar,
+            "downbeat": beat.downbeat
+        })).collect::<Vec<_>>(),
+        "downbeats": analysis.downbeats.iter().take(128).copied().collect::<Vec<_>>(),
+        "downbeatConfidence": analysis.downbeat_confidence
+    }))
+}
+
 fn detected_onsets(
     input: &serde_json::Value,
 ) -> Result<(u32, FrameSpec, Vec<crate::OnsetStrength>, Vec<crate::Onset>), String> {
@@ -200,6 +253,23 @@ fn detected_onsets(
 }
 
 fn sample_array(input: &serde_json::Value, field: &str) -> Result<Vec<f32>, String> {
+    sample_array_with_max(input, field, MAX_SAMPLES)
+}
+
+fn track_sample_array(
+    input: &serde_json::Value,
+    field: &str,
+    sample_rate: u32,
+) -> Result<Vec<f32>, String> {
+    let max_samples = (sample_rate as usize).saturating_mul(MAX_TRACK_SECONDS);
+    sample_array_with_max(input, field, max_samples)
+}
+
+fn sample_array_with_max(
+    input: &serde_json::Value,
+    field: &str,
+    max_samples: usize,
+) -> Result<Vec<f32>, String> {
     let values = input
         .get(field)
         .and_then(serde_json::Value::as_array)
@@ -207,9 +277,9 @@ fn sample_array(input: &serde_json::Value, field: &str) -> Result<Vec<f32>, Stri
     if values.is_empty() {
         return Err(format!("{field} must not be empty"));
     }
-    if values.len() > MAX_SAMPLES {
+    if values.len() > max_samples {
         return Err(format!(
-            "{field} must not contain more than {MAX_SAMPLES} samples"
+            "{field} must not contain more than {max_samples} samples"
         ));
     }
     values
@@ -280,6 +350,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(ids.contains(&"audio.rhythm.onsets"));
         assert!(ids.contains(&"audio.rhythm.beatGrid"));
+        assert!(ids.contains(&"audio.rhythm.analyze"));
     }
 
     #[test]
@@ -309,6 +380,34 @@ mod tests {
             assert!(response.value["summary"].is_object());
             assert!(response.value["result"].is_object());
         }
+    }
+
+    #[test]
+    fn track_analysis_accepts_more_than_the_preview_sample_limit() {
+        let samples = vec![0.0; MAX_SAMPLES + 1];
+        let response = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("audio.rhythm.analyze"),
+            input: serde_json::json!({
+                "samples": samples,
+                "sampleRate": 8_000,
+                "fftSize": 512,
+                "hopSize": 512
+            }),
+        })
+        .expect("whole-track rhythm analysis");
+
+        assert_eq!(response.value["sampleCount"], MAX_SAMPLES + 1);
+    }
+
+    #[test]
+    fn onset_preview_keeps_the_existing_sample_limit() {
+        let error = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("audio.rhythm.onsets"),
+            input: serde_json::json!({"samples": vec![0.0; MAX_SAMPLES + 1]}),
+        })
+        .expect_err("preview sample limit");
+
+        assert!(error.contains("192000"));
     }
 
     #[test]

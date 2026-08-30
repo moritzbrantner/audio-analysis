@@ -27,11 +27,12 @@ use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use media_core::{DetectError, Result};
-use serde::{Deserialize, Serialize};
-use text_transcripts::{
-    normalize_transcription_contract, TranscriptCharContract, TranscriptSegmentContract,
-    TranscriptWordContract, TranscriptionContract,
+use media_core::{
+    TranscriptCharContract, TranscriptSegmentContract, TranscriptWordContract,
+    TranscriptionContract,
 };
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 mod whisper_cpp;
 pub use whisper_cpp::{
@@ -57,29 +58,182 @@ pub fn transcribe_whisper_cpp_file_with_progress(
     let segments = transcript
         .segments
         .into_iter()
-        .map(|segment| TranscriptSegmentContract {
-            index: segment.index,
-            start_seconds: segment.start_seconds,
-            end_seconds: segment.end_seconds,
-            text: segment.text,
-            language: language.clone(),
-            speaker: None,
-            confidence: segment.confidence,
-            is_final: true,
-            words: Vec::new(),
-            chars: Vec::new(),
-            attributes: BTreeMap::new(),
+        .map(|segment| {
+            let mut contract = TranscriptSegmentContract::new(segment.index, segment.text)
+                .with_time_range(segment.start_seconds, segment.end_seconds)
+                .map_err(|error| DetectError::Source(error.to_string()))?
+                .with_confidence(sanitize_confidence(segment.confidence))
+                .map_err(|error| DetectError::Source(error.to_string()))?;
+            contract.language = language.clone();
+            Ok(contract)
         })
-        .collect();
-    TranscriptionContract {
+        .collect::<Result<Vec<_>>>()?;
+    normalize_transcription_contract(TranscriptionContract {
         text: transcript.text,
         language,
         segments,
         source: transcript.source,
         attributes: BTreeMap::new(),
-    }
-    .normalized()
+    })
     .map_err(|error| DetectError::Source(error.to_string()))
+}
+
+#[allow(dead_code)] // Shared by tests and optional native/alignment feature modules.
+pub(crate) fn transcription_from_segments(
+    source: Option<String>,
+    language: Option<String>,
+    segments: Vec<TranscriptSegmentContract>,
+) -> Result<TranscriptionContract> {
+    normalize_transcription_contract_with_segment_language(
+        TranscriptionContract {
+            text: None,
+            language,
+            segments,
+            source,
+            ..TranscriptionContract::default()
+        },
+        true,
+    )
+}
+
+fn normalize_transcription_contract(
+    contract: TranscriptionContract,
+) -> Result<TranscriptionContract> {
+    normalize_transcription_contract_with_segment_language(contract, false)
+}
+
+fn normalize_transcription_contract_with_segment_language(
+    contract: TranscriptionContract,
+    propagate_language: bool,
+) -> Result<TranscriptionContract> {
+    let language = normalize_optional_string(contract.language);
+    let fallback_language = propagate_language.then_some(language.as_ref()).flatten();
+    let segments = contract
+        .segments
+        .iter()
+        .map(|segment| normalize_transcript_segment(segment, fallback_language))
+        .collect::<Result<Vec<_>>>()?;
+    let mut normalized = TranscriptionContract {
+        text: normalize_optional_string(contract.text),
+        language,
+        segments,
+        source: normalize_optional_string(contract.source),
+        attributes: contract.attributes,
+    };
+    if normalized.text.is_none() {
+        let joined = normalized
+            .segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if !joined.is_empty() {
+            normalized.text = Some(joined);
+        }
+    }
+    normalized.validate()?;
+    Ok(normalized)
+}
+
+fn normalize_transcript_segment(
+    segment: &TranscriptSegmentContract,
+    fallback_language: Option<&String>,
+) -> Result<TranscriptSegmentContract> {
+    let mut normalized = TranscriptSegmentContract::new(segment.index, segment.text.trim())
+        .with_time_range(segment.start_seconds(), segment.end_seconds())?
+        .with_confidence(segment.confidence())?;
+    normalized.language =
+        normalize_optional_string(segment.language.clone()).or_else(|| fallback_language.cloned());
+    normalized.speaker = normalize_optional_string(segment.speaker.clone());
+    normalized.is_final = segment.is_final;
+    normalized.attributes = segment.attributes.clone();
+
+    for word in segment.words() {
+        let text = word.text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        let mut normalized_word = TranscriptWordContract::new(text)
+            .with_time_range(word.start_seconds(), word.end_seconds())?
+            .with_confidence(word.confidence())?;
+        normalized_word.speaker = normalize_optional_string(word.speaker.clone());
+        normalized_word.attributes = word.attributes.clone();
+        normalized.push_word(normalized_word)?;
+    }
+    for character in segment.chars() {
+        if character.character.is_empty() {
+            continue;
+        }
+        let mut normalized_character = TranscriptCharContract::new(&character.character)
+            .with_time_range(character.start_seconds(), character.end_seconds())?
+            .with_confidence(character.confidence())?;
+        normalized_character.attributes = character.attributes.clone();
+        normalized.push_char(normalized_character)?;
+    }
+    Ok(normalized)
+}
+
+fn rebuild_transcript_segment(
+    segment: &TranscriptSegmentContract,
+    start_seconds: Option<f64>,
+    end_seconds: Option<f64>,
+    words: Vec<TranscriptWordContract>,
+    chars: Vec<TranscriptCharContract>,
+) -> Result<TranscriptSegmentContract> {
+    let mut rebuilt = TranscriptSegmentContract::new(segment.index, &segment.text)
+        .with_time_range(start_seconds, end_seconds)?
+        .with_confidence(segment.confidence())?;
+    rebuilt.language = segment.language.clone();
+    rebuilt.speaker = segment.speaker.clone();
+    rebuilt.is_final = segment.is_final;
+    rebuilt.attributes = segment.attributes.clone();
+    for word in words {
+        rebuilt.push_word(word)?;
+    }
+    for character in chars {
+        rebuilt.push_char(character)?;
+    }
+    Ok(rebuilt)
+}
+
+fn rebuild_transcript_word(
+    word: &TranscriptWordContract,
+    text: String,
+    start_seconds: Option<f64>,
+    end_seconds: Option<f64>,
+    confidence: Option<f32>,
+) -> Result<TranscriptWordContract> {
+    let mut rebuilt = TranscriptWordContract::new(text)
+        .with_time_range(start_seconds, end_seconds)?
+        .with_confidence(confidence)?;
+    rebuilt.speaker = word.speaker.clone();
+    rebuilt.attributes = word.attributes.clone();
+    Ok(rebuilt)
+}
+
+fn rebuild_transcript_char(
+    character: &TranscriptCharContract,
+    value: String,
+    start_seconds: Option<f64>,
+    end_seconds: Option<f64>,
+    confidence: Option<f32>,
+) -> Result<TranscriptCharContract> {
+    let mut rebuilt = TranscriptCharContract::new(value)
+        .with_time_range(start_seconds, end_seconds)?
+        .with_confidence(confidence)?;
+    rebuilt.attributes = character.attributes.clone();
+    Ok(rebuilt)
+}
+
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn sanitize_confidence(value: Option<f32>) -> Option<f32> {
+    value.and_then(|confidence| confidence.is_finite().then(|| confidence.clamp(0.0, 1.0)))
 }
 
 const CANDLE_WHISPER_AUTOREGRESSIVE_KV_CACHE_EXECUTION: &str =
@@ -2724,8 +2878,342 @@ fn ensure_pipeline_active(observer: &dyn TranscriptionPipelineObserver) -> Resul
 
 /// Parses existing WhisperX JSON without running external tools.
 pub fn import_whisperx_json(bytes: &[u8]) -> Result<TranscriptionContract> {
-    text_transcripts::parse_whisperx_json(bytes)
-        .map_err(|error| DetectError::InvalidArgument(error.to_string()))
+    let value: Value = serde_json::from_slice(bytes)
+        .map_err(|error| DetectError::InvalidArgument(error.to_string()))?;
+    let object = value.as_object().ok_or_else(|| {
+        DetectError::InvalidArgument("WhisperX JSON must be an object".to_string())
+    })?;
+    let language = object
+        .get("language")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let text = object
+        .get("text")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let source = object
+        .get("source")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let mut attributes = unknown_json_attributes(
+        object,
+        &["language", "text", "source", "segments", "word_segments"],
+    );
+    if let Some(count) = object.get("segment_count").and_then(Value::as_u64) {
+        attributes.insert("segment_count".to_string(), count.to_string());
+    }
+    let mut segments = object
+        .get("segments")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            DetectError::InvalidArgument("WhisperX JSON must include a segments array".to_string())
+        })?
+        .iter()
+        .enumerate()
+        .map(|(position, segment)| whisperx_segment(segment, position as u64, language.clone()))
+        .collect::<Result<Vec<_>>>()?;
+
+    if segments.iter().all(|segment| segment.words().is_empty()) {
+        if let Some(words) = object.get("word_segments").and_then(Value::as_array) {
+            attach_flat_whisperx_words(&mut segments, words)?;
+        }
+    }
+
+    let mut contract = normalize_transcription_contract(TranscriptionContract {
+        text,
+        language,
+        segments,
+        source,
+        attributes,
+    })?;
+    for segment in &mut contract.segments {
+        if segment.speaker.is_none() {
+            segment.speaker = infer_segment_speaker(segment.words());
+        }
+    }
+    contract.validate_strict()?;
+    Ok(contract)
+}
+
+fn whisperx_segment(
+    value: &Value,
+    fallback_index: u64,
+    language: Option<String>,
+) -> Result<TranscriptSegmentContract> {
+    let object = value.as_object().ok_or_else(|| {
+        DetectError::InvalidArgument("WhisperX segment must be an object".to_string())
+    })?;
+    let mut segment = TranscriptSegmentContract::new(
+        object
+            .get("id")
+            .or_else(|| object.get("index"))
+            .and_then(Value::as_u64)
+            .unwrap_or(fallback_index),
+        object
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    )
+    .with_time_range(
+        number_field(object, &["start", "start_seconds", "startSeconds"]),
+        number_field(object, &["end", "end_seconds", "endSeconds"]),
+    )?
+    .with_confidence(confidence_field(
+        object,
+        &["confidence", "score", "avg_logprob", "no_speech_prob"],
+    ))?;
+    segment.language = object
+        .get("language")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or(language);
+    segment.speaker = speaker_field(object);
+    segment.attributes = unknown_json_attributes(
+        object,
+        &[
+            "id",
+            "index",
+            "start",
+            "start_seconds",
+            "startSeconds",
+            "end",
+            "end_seconds",
+            "endSeconds",
+            "text",
+            "language",
+            "speaker",
+            "speaker_label",
+            "speakerLabel",
+            "confidence",
+            "score",
+            "avg_logprob",
+            "no_speech_prob",
+            "words",
+            "word_segments",
+            "chars",
+            "characters",
+        ],
+    );
+    if let Some(words) = object
+        .get("words")
+        .or_else(|| object.get("word_segments"))
+        .and_then(Value::as_array)
+    {
+        for word in words {
+            segment.push_word(whisperx_word(word)?)?;
+        }
+    }
+    if let Some(characters) = object
+        .get("chars")
+        .or_else(|| object.get("characters"))
+        .and_then(Value::as_array)
+    {
+        for character in characters {
+            segment.push_char(whisperx_char(character)?)?;
+        }
+    }
+    if segment.speaker.is_none() {
+        segment.speaker = infer_segment_speaker(segment.words());
+    }
+    Ok(segment)
+}
+
+fn whisperx_word(value: &Value) -> Result<TranscriptWordContract> {
+    let object = value.as_object().ok_or_else(|| {
+        DetectError::InvalidArgument("WhisperX word must be an object".to_string())
+    })?;
+    let mut word = TranscriptWordContract::new(
+        object
+            .get("word")
+            .or_else(|| object.get("text"))
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    )
+    .with_time_range(
+        number_field(object, &["start", "start_seconds", "startSeconds"]),
+        number_field(object, &["end", "end_seconds", "endSeconds"]),
+    )?
+    .with_confidence(confidence_field(
+        object,
+        &["confidence", "score", "probability"],
+    ))?;
+    word.speaker = speaker_field(object);
+    word.attributes = unknown_json_attributes(
+        object,
+        &[
+            "word",
+            "text",
+            "start",
+            "start_seconds",
+            "startSeconds",
+            "end",
+            "end_seconds",
+            "endSeconds",
+            "confidence",
+            "score",
+            "probability",
+            "speaker",
+            "speaker_label",
+            "speakerLabel",
+        ],
+    );
+    Ok(word)
+}
+
+fn whisperx_char(value: &Value) -> Result<TranscriptCharContract> {
+    let object = value.as_object().ok_or_else(|| {
+        DetectError::InvalidArgument("WhisperX char must be an object".to_string())
+    })?;
+    let mut character = TranscriptCharContract::new(
+        object
+            .get("char")
+            .or_else(|| object.get("character"))
+            .or_else(|| object.get("text"))
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    )
+    .with_time_range(
+        number_field(object, &["start", "start_seconds", "startSeconds"]),
+        number_field(object, &["end", "end_seconds", "endSeconds"]),
+    )?
+    .with_confidence(confidence_field(
+        object,
+        &["confidence", "score", "probability"],
+    ))?;
+    character.attributes = unknown_json_attributes(
+        object,
+        &[
+            "char",
+            "character",
+            "text",
+            "start",
+            "start_seconds",
+            "startSeconds",
+            "end",
+            "end_seconds",
+            "endSeconds",
+            "confidence",
+            "score",
+            "probability",
+        ],
+    );
+    Ok(character)
+}
+
+fn attach_flat_whisperx_words(
+    segments: &mut [TranscriptSegmentContract],
+    words: &[Value],
+) -> Result<()> {
+    for value in words {
+        let word = whisperx_word(value)?;
+        let midpoint = match (word.start_seconds(), word.end_seconds()) {
+            (Some(start), Some(end)) => Some((start + end) * 0.5),
+            (Some(start), None) => Some(start),
+            (None, Some(end)) => Some(end),
+            (None, None) => None,
+        };
+        let Some(segment) = segments.iter_mut().find(|segment| {
+            midpoint
+                .zip(segment.start_seconds().zip(segment.end_seconds()))
+                .map(|(midpoint, (start, end))| midpoint >= start && midpoint <= end)
+                .unwrap_or(false)
+        }) else {
+            continue;
+        };
+        segment.push_word(word)?;
+    }
+    for segment in segments {
+        if segment.speaker.is_none() {
+            segment.speaker = infer_segment_speaker(segment.words());
+        }
+    }
+    Ok(())
+}
+
+fn infer_segment_speaker(words: &[TranscriptWordContract]) -> Option<String> {
+    let mut scores: BTreeMap<&str, (f64, usize)> = BTreeMap::new();
+    for word in words {
+        let Some(speaker) = word
+            .speaker
+            .as_deref()
+            .filter(|speaker| !speaker.is_empty())
+        else {
+            continue;
+        };
+        let duration = word
+            .start_seconds()
+            .zip(word.end_seconds())
+            .map(|(start, end)| (end - start).max(0.0))
+            .filter(|duration| duration.is_finite() && *duration > 0.0)
+            .unwrap_or(1.0);
+        let entry = scores.entry(speaker).or_insert((0.0, 0));
+        entry.0 += duration;
+        entry.1 += 1;
+    }
+    scores
+        .into_iter()
+        .max_by(|left, right| {
+            left.1
+                 .0
+                .total_cmp(&right.1 .0)
+                .then(left.1 .1.cmp(&right.1 .1))
+                .then_with(|| right.0.cmp(left.0))
+        })
+        .map(|(speaker, _)| speaker.to_string())
+}
+
+fn speaker_field(object: &serde_json::Map<String, Value>) -> Option<String> {
+    object
+        .get("speaker")
+        .or_else(|| object.get("speaker_label"))
+        .or_else(|| object.get("speakerLabel"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn unknown_json_attributes(
+    object: &serde_json::Map<String, Value>,
+    known_fields: &[&str],
+) -> BTreeMap<String, String> {
+    object
+        .iter()
+        .filter(|(key, _)| !known_fields.contains(&key.as_str()))
+        .map(|(key, value)| (key.clone(), json_attribute(value)))
+        .collect()
+}
+
+fn json_attribute(value: &Value) -> String {
+    match value {
+        Value::String(value) => value.clone(),
+        Value::Number(value) => value.to_string(),
+        Value::Bool(value) => value.to_string(),
+        Value::Null => "null".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn number_field(object: &serde_json::Map<String, Value>, names: &[&str]) -> Option<f64> {
+    names
+        .iter()
+        .find_map(|name| object.get(*name).and_then(Value::as_f64))
+        .filter(|value| value.is_finite())
+}
+
+fn confidence_field(object: &serde_json::Map<String, Value>, names: &[&str]) -> Option<f32> {
+    for name in names {
+        let Some(value) = object.get(*name).and_then(Value::as_f64) else {
+            continue;
+        };
+        if !value.is_finite() {
+            continue;
+        }
+        return match *name {
+            "avg_logprob" => Some(value.exp().clamp(0.0, 1.0) as f32),
+            "no_speech_prob" => Some((1.0 - value).clamp(0.0, 1.0) as f32),
+            _ => Some(value.clamp(0.0, 1.0) as f32),
+        };
+    }
+    None
 }
 
 /// Returns provider plans.
@@ -2789,7 +3277,7 @@ pub fn whisperx_provider_plan() -> TranscriptionProviderPlan {
         diagnostics: vec![
             "WhisperX execution is opt-in and never required by default tests.".to_string(),
             "The compatibility command path forwards task=transcribe or task=translate to Python WhisperX.".to_string(),
-            "Transcript normalization and WhisperX JSON import are delegated to text-transcripts."
+            "Transcript normalization and WhisperX JSON import are owned by the provider adapter."
                 .to_string(),
         ],
     }
@@ -2954,10 +3442,10 @@ fn speech_spans_from_transcript(
     const AUDIO_DURATION_EPSILON: f64 = 1e-6;
 
     let has_timed_words = transcript.segments.iter().any(|segment| {
-        segment.words.iter().any(|word| {
+        segment.words().iter().any(|word| {
             !word.text.trim().is_empty()
-                && word.start_seconds.is_some()
-                && word.end_seconds.is_some()
+                && word.start_seconds().is_some()
+                && word.end_seconds().is_some()
         })
     });
 
@@ -2966,12 +3454,12 @@ fn speech_spans_from_transcript(
         for word in transcript
             .segments
             .iter()
-            .flat_map(|segment| &segment.words)
+            .flat_map(|segment| segment.words())
         {
             if word.text.trim().is_empty() {
                 continue;
             }
-            let Some((start, end)) = word.start_seconds.zip(word.end_seconds) else {
+            let Some((start, end)) = word.start_seconds().zip(word.end_seconds()) else {
                 continue;
             };
             spans.push(transcript_timing_span(
@@ -2986,7 +3474,7 @@ fn speech_spans_from_transcript(
             if segment.text.trim().is_empty() {
                 continue;
             }
-            let Some((start, end)) = segment.start_seconds.zip(segment.end_seconds) else {
+            let Some((start, end)) = segment.start_seconds().zip(segment.end_seconds()) else {
                 continue;
             };
             spans.push(transcript_timing_span(
@@ -3482,23 +3970,31 @@ fn offset_chunk_local_segments(
         {
             continue;
         }
-        if let Some(start) = &mut segment.start_seconds {
-            *start += chunk.start_seconds;
-        }
-        if let Some(end) = &mut segment.end_seconds {
-            *end += chunk.start_seconds;
-        }
-        for word in &mut segment.words {
-            if let Some(start) = &mut word.start_seconds {
-                *start += chunk.start_seconds;
-            }
-            if let Some(end) = &mut word.end_seconds {
-                *end += chunk.start_seconds;
-            }
-        }
-        segment
+        let offset = chunk.start_seconds;
+        let words = segment
+            .words()
+            .iter()
+            .map(|word| {
+                rebuild_transcript_word(
+                    word,
+                    word.text.clone(),
+                    word.start_seconds().map(|start| start + offset),
+                    word.end_seconds().map(|end| end + offset),
+                    word.confidence(),
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut rebuilt = rebuild_transcript_segment(
+            segment,
+            segment.start_seconds().map(|start| start + offset),
+            segment.end_seconds().map(|end| end + offset),
+            words,
+            segment.chars().to_vec(),
+        )?;
+        rebuilt
             .attributes
             .insert("timing".to_string(), "global".to_string());
+        *segment = rebuilt;
     }
     Ok(())
 }
@@ -3516,39 +4012,44 @@ fn apply_alignment_words(
                 "alignment output contains invalid word timing",
             ));
         }
-        let segment = transcript
+        let segment_index = transcript
             .segments
-            .iter_mut()
-            .find(|segment| segment.index == aligned.segment_index)
-            .ok_or_else(|| model_output_mismatch("alignment output references unknown segment"))?;
-        while segment.words.len() <= aligned.word_index {
-            segment.words.push(TranscriptWordContract {
-                text: String::new(),
-                start_seconds: None,
-                end_seconds: None,
-                confidence: None,
-                speaker: None,
-                attributes: BTreeMap::new(),
-            });
-        }
-        let word = &mut segment.words[aligned.word_index];
-        if word.text.trim().is_empty() {
-            word.text = aligned.text.clone();
-        }
-        word.start_seconds = Some(aligned.start_seconds);
-        word.end_seconds = Some(aligned.end_seconds);
-        word.confidence = aligned.confidence;
-    }
-    for segment in &mut transcript.segments {
-        let timed_words = segment
-            .words
             .iter()
-            .filter_map(|word| word.start_seconds.zip(word.end_seconds))
-            .collect::<Vec<_>>();
-        if let (Some((start, _)), Some((_, end))) = (timed_words.first(), timed_words.last()) {
-            segment.start_seconds = Some(*start);
-            segment.end_seconds = Some(*end);
+            .position(|segment| segment.index == aligned.segment_index)
+            .ok_or_else(|| model_output_mismatch("alignment output references unknown segment"))?;
+        let segment = &transcript.segments[segment_index];
+        let mut words = segment.words().to_vec();
+        while words.len() <= aligned.word_index {
+            words.push(TranscriptWordContract::new(String::new()));
         }
+        let word = &words[aligned.word_index];
+        let text = if word.text.trim().is_empty() {
+            aligned.text.clone()
+        } else {
+            word.text.clone()
+        };
+        words[aligned.word_index] = rebuild_transcript_word(
+            word,
+            text,
+            Some(aligned.start_seconds),
+            Some(aligned.end_seconds),
+            sanitize_confidence(aligned.confidence),
+        )?;
+        let timed_words = words
+            .iter()
+            .filter_map(|word| word.start_seconds().zip(word.end_seconds()))
+            .collect::<Vec<_>>();
+        let (start_seconds, end_seconds) = match (timed_words.first(), timed_words.last()) {
+            (Some((start, _)), Some((_, end))) => (Some(*start), Some(*end)),
+            _ => (segment.start_seconds(), segment.end_seconds()),
+        };
+        transcript.segments[segment_index] = rebuild_transcript_segment(
+            segment,
+            start_seconds,
+            end_seconds,
+            words,
+            segment.chars().to_vec(),
+        )?;
     }
     Ok(())
 }
@@ -3565,27 +4066,36 @@ fn apply_alignment_chars(
                 ));
             }
         }
-        let segment = transcript
+        let segment_index = transcript
             .segments
-            .iter_mut()
-            .find(|segment| segment.index == aligned.segment_index)
+            .iter()
+            .position(|segment| segment.index == aligned.segment_index)
             .ok_or_else(|| model_output_mismatch("alignment output references unknown segment"))?;
-        while segment.chars.len() <= aligned.char_index {
-            segment.chars.push(TranscriptCharContract {
-                character: String::new(),
-                start_seconds: None,
-                end_seconds: None,
-                confidence: None,
-                attributes: BTreeMap::new(),
-            });
+        let segment = &transcript.segments[segment_index];
+        let mut chars = segment.chars().to_vec();
+        while chars.len() <= aligned.char_index {
+            chars.push(TranscriptCharContract::new(String::new()));
         }
-        let character = &mut segment.chars[aligned.char_index];
-        if character.character.is_empty() {
-            character.character = aligned.character.clone();
-        }
-        character.start_seconds = aligned.start_seconds;
-        character.end_seconds = aligned.end_seconds;
-        character.confidence = aligned.confidence;
+        let character = &chars[aligned.char_index];
+        let value = if character.character.is_empty() {
+            aligned.character.clone()
+        } else {
+            character.character.clone()
+        };
+        chars[aligned.char_index] = rebuild_transcript_char(
+            character,
+            value,
+            aligned.start_seconds,
+            aligned.end_seconds,
+            sanitize_confidence(aligned.confidence),
+        )?;
+        transcript.segments[segment_index] = rebuild_transcript_segment(
+            segment,
+            segment.start_seconds(),
+            segment.end_seconds(),
+            segment.words().to_vec(),
+            chars,
+        )?;
     }
     Ok(())
 }
@@ -3715,7 +4225,7 @@ fn run_whisperx_command(
     let mut diagnostics = vec![
         format!("asrTask={}", task.as_whisper_task()),
         format!("ran WhisperX output in `{}`", output_dir.display()),
-        "parsed WhisperX JSON through text-transcripts".to_string(),
+        "parsed WhisperX JSON in the transcription provider adapter".to_string(),
     ];
     if task == TranscriptionTask::Translate {
         diagnostics.push("translationRuntime=whisperx-command".to_string());
@@ -3914,7 +4424,76 @@ pub(crate) fn unsupported_runtime(message: impl Into<String>) -> DetectError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use text_transcripts::TranscriptSegmentContract;
+    use media_core::TranscriptSegmentContract;
+
+    #[test]
+    fn whisperx_import_preserves_provider_fields_and_nested_attributes() {
+        let transcript = import_whisperx_json(
+            br#"{
+                "text": "hi there",
+                "language": "en",
+                "segment_count": 1,
+                "providerRevision": "fixture-v1",
+                "segments": [{
+                    "id": 7,
+                    "start": 1.0,
+                    "end": 2.0,
+                    "text": " hi there ",
+                    "words": [
+                        {"word": "hi", "start": 1.1, "end": 1.3, "score": 0.9, "speaker": "S0", "token": 4}
+                    ],
+                    "chars": [
+                        {"char": "h", "start": 1.1, "end": 1.2, "score": 0.8, "extra": "kept"}
+                    ]
+                }]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(transcript.segments[0].index, 7);
+        assert_eq!(transcript.segments[0].text, "hi there");
+        assert_eq!(transcript.segments[0].language.as_deref(), Some("en"));
+        assert_eq!(transcript.segments[0].speaker.as_deref(), Some("S0"));
+        assert_eq!(
+            transcript
+                .attributes
+                .get("providerRevision")
+                .map(String::as_str),
+            Some("fixture-v1")
+        );
+        assert_eq!(
+            transcript.segments[0].words()[0]
+                .attributes
+                .get("token")
+                .map(String::as_str),
+            Some("4")
+        );
+        assert_eq!(
+            transcript.segments[0].chars()[0]
+                .attributes
+                .get("extra")
+                .map(String::as_str),
+            Some("kept")
+        );
+    }
+
+    #[test]
+    fn whisperx_import_attaches_flat_words_and_requires_segments() {
+        let transcript = import_whisperx_json(
+            br#"{
+                "segments": [{"start": 0.0, "end": 1.0, "text": "hello"}],
+                "word_segments": [{"word": "hello", "start": 0.2, "end": 0.8, "speakerLabel": "S1"}]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(transcript.segments[0].words().len(), 1);
+        assert_eq!(transcript.segments[0].speaker.as_deref(), Some("S1"));
+        let error = import_whisperx_json(br#"{"text":"missing segments"}"#)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("segments array"));
+    }
 
     #[derive(Default)]
     struct MockAsrProvider;
@@ -3930,12 +4509,10 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(index, chunk)| {
-                    let mut segment = TranscriptSegmentContract::new(index as u64, " hello ");
-                    segment.start_seconds = Some(0.0);
-                    segment.end_seconds = Some(chunk.end_seconds - chunk.start_seconds);
-                    segment
+                    TranscriptSegmentContract::new(index as u64, " hello ")
+                        .with_time_range(Some(0.0), Some(chunk.end_seconds - chunk.start_seconds))
                 })
-                .collect::<Vec<_>>();
+                .collect::<Result<Vec<_>>>()?;
             Ok(AsrResponse {
                 model_id: request.model_id,
                 language: request
@@ -3943,7 +4520,7 @@ mod tests {
                     .output_language_hint()
                     .map(str::to_string)
                     .or(request.language),
-                transcript: TranscriptionContract::from_segments(
+                transcript: transcription_from_segments(
                     request.audio.source,
                     Some("en".to_string()),
                     segments,
@@ -4808,6 +5385,10 @@ mod tests {
     fn transcript_with_words(
         words: Vec<(&str, f64, f64)>,
     ) -> std::result::Result<TranscriptionContract, Box<dyn std::error::Error>> {
+        let segment_end = words
+            .iter()
+            .map(|(_, _, end_seconds)| *end_seconds)
+            .fold(2.0_f64, f64::max);
         let mut segment = TranscriptSegmentContract::new(
             0,
             words
@@ -4815,23 +5396,15 @@ mod tests {
                 .map(|(word, _, _)| *word)
                 .collect::<Vec<_>>()
                 .join(" "),
-        );
-        segment.start_seconds = Some(0.0);
-        segment.end_seconds = Some(2.0);
-        segment.words = words
-            .into_iter()
-            .map(
-                |(text, start_seconds, end_seconds)| TranscriptWordContract {
-                    text: text.to_string(),
-                    start_seconds: Some(start_seconds),
-                    end_seconds: Some(end_seconds),
-                    confidence: None,
-                    speaker: None,
-                    attributes: BTreeMap::new(),
-                },
-            )
-            .collect();
-        Ok(TranscriptionContract::from_segments(
+        )
+        .with_time_range(Some(0.0), Some(segment_end))?;
+        for (text, start_seconds, end_seconds) in words {
+            segment.push_word(
+                TranscriptWordContract::new(text)
+                    .with_time_range(Some(start_seconds), Some(end_seconds))?,
+            )?;
+        }
+        Ok(transcription_from_segments(
             None,
             Some("en".to_string()),
             vec![segment],
@@ -5191,7 +5764,7 @@ mod tests {
             .transcript
             .segments
             .iter()
-            .map(|segment| segment.start_seconds.unwrap())
+            .map(|segment| segment.start_seconds().unwrap())
             .collect::<Vec<_>>();
         assert_eq!(starts, vec![0.0, 0.20, 0.40]);
     }
@@ -5373,17 +5946,12 @@ mod tests {
     #[cfg(feature = "diarization")]
     fn speech_spans_from_transcript_falls_back_to_segments(
     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut first = TranscriptSegmentContract::new(0, "hello");
-        first.start_seconds = Some(0.2);
-        first.end_seconds = Some(0.5);
-        let mut second = TranscriptSegmentContract::new(1, "world");
-        second.start_seconds = Some(1.0);
-        second.end_seconds = Some(1.4);
-        let transcript = TranscriptionContract::from_segments(
-            None,
-            Some("en".to_string()),
-            vec![second, first],
-        )?;
+        let first =
+            TranscriptSegmentContract::new(0, "hello").with_time_range(Some(0.2), Some(0.5))?;
+        let second =
+            TranscriptSegmentContract::new(1, "world").with_time_range(Some(1.0), Some(1.4))?;
+        let transcript =
+            transcription_from_segments(None, Some("en".to_string()), vec![second, first])?;
 
         let spans = speech_spans_from_transcript(&transcript, 2.0)?;
 
@@ -5427,10 +5995,10 @@ mod tests {
             options: &DiarizationOptions,
         ) -> Result<SpeakerDiarizationResponse> {
             self.saw_aligned_words = transcript.segments.iter().any(|segment| {
-                segment.words.iter().any(|word| {
-                    word.start_seconds.is_some()
-                        && word.end_seconds.is_some()
-                        && word.confidence.is_some()
+                segment.words().iter().any(|word| {
+                    word.start_seconds().is_some()
+                        && word.end_seconds().is_some()
+                        && word.confidence().is_some()
                 })
             });
             assert!(
@@ -5682,11 +6250,11 @@ mod tests {
         )?;
 
         assert_eq!(
-            transcript.segments[0].words[0].speaker.as_deref(),
+            transcript.segments[0].words()[0].speaker.as_deref(),
             Some("speaker_0")
         );
         assert_eq!(
-            transcript.segments[0].words[1].speaker.as_deref(),
+            transcript.segments[0].words()[1].speaker.as_deref(),
             Some("speaker_1")
         );
         assert_eq!(transcript.segments[0].speaker.as_deref(), Some("speaker_0"));
@@ -5719,7 +6287,7 @@ mod tests {
         )?;
 
         assert_eq!(
-            transcript.segments[0].words[0].speaker.as_deref(),
+            transcript.segments[0].words()[0].speaker.as_deref(),
             Some("speaker_1")
         );
         Ok(())
@@ -5742,7 +6310,7 @@ mod tests {
             SpeakerAssignmentPolicy::StrictContained,
         )?;
 
-        assert!(transcript.segments[0].words[0].speaker.is_none());
+        assert!(transcript.segments[0].words()[0].speaker.is_none());
         assert!(transcript.segments[0].speaker.is_none());
         Ok(())
     }
@@ -5767,7 +6335,7 @@ mod tests {
 
         assert_eq!(transcript.segments[0].speaker.as_deref(), Some("manual"));
         assert_eq!(
-            transcript.segments[0].words[0].speaker.as_deref(),
+            transcript.segments[0].words()[0].speaker.as_deref(),
             Some("speaker_0")
         );
         Ok(())
@@ -5809,11 +6377,10 @@ mod tests {
     #[test]
     fn segment_without_words_uses_policy_fallback(
     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut segment = TranscriptSegmentContract::new(0, "hello");
-        segment.start_seconds = Some(0.5);
-        segment.end_seconds = Some(0.8);
+        let segment =
+            TranscriptSegmentContract::new(0, "hello").with_time_range(Some(0.5), Some(0.8))?;
         let mut transcript =
-            TranscriptionContract::from_segments(None, Some("en".to_string()), vec![segment])?;
+            transcription_from_segments(None, Some("en".to_string()), vec![segment])?;
         let diarization = diarization_response_for_tests(vec![
             SpeakerSegmentPrediction {
                 speaker: "speaker_0".to_string(),
@@ -5841,48 +6408,44 @@ mod tests {
 
     #[test]
     fn offset_chunk_local_segments_skips_global_timing() -> Result<()> {
-        let mut segment = TranscriptSegmentContract::new(0, "hello");
-        segment.start_seconds = Some(10.0);
-        segment.end_seconds = Some(10.5);
+        let mut segment =
+            TranscriptSegmentContract::new(0, "hello").with_time_range(Some(10.0), Some(10.5))?;
         segment
             .attributes
             .insert("timing".to_string(), "global".to_string());
-        segment.words.push(TranscriptWordContract {
-            text: "hello".to_string(),
-            start_seconds: Some(10.0),
-            end_seconds: Some(10.5),
-            confidence: None,
-            speaker: None,
-            attributes: BTreeMap::new(),
-        });
+        segment.push_word(
+            TranscriptWordContract::new("hello").with_time_range(Some(10.0), Some(10.5))?,
+        )?;
         let mut transcript =
-            TranscriptionContract::from_segments(None, Some("en".to_string()), vec![segment])
+            transcription_from_segments(None, Some("en".to_string()), vec![segment])
                 .map_err(|error| DetectError::InvalidArgument(error.to_string()))?;
         let chunks = vec![SpeechActivitySegment::new(5.0, 6.0, 0.8)?];
 
         offset_chunk_local_segments(&mut transcript, &chunks)?;
 
-        assert_eq!(transcript.segments[0].start_seconds, Some(10.0));
-        assert_eq!(transcript.segments[0].end_seconds, Some(10.5));
-        assert_eq!(transcript.segments[0].words[0].start_seconds, Some(10.0));
-        assert_eq!(transcript.segments[0].words[0].end_seconds, Some(10.5));
+        assert_eq!(transcript.segments[0].start_seconds(), Some(10.0));
+        assert_eq!(transcript.segments[0].end_seconds(), Some(10.5));
+        assert_eq!(
+            transcript.segments[0].words()[0].start_seconds(),
+            Some(10.0)
+        );
+        assert_eq!(transcript.segments[0].words()[0].end_seconds(), Some(10.5));
         Ok(())
     }
 
     #[test]
     fn offset_chunk_local_segments_offsets_local_timing() -> Result<()> {
-        let mut segment = TranscriptSegmentContract::new(0, "hello");
-        segment.start_seconds = Some(0.0);
-        segment.end_seconds = Some(0.5);
+        let segment =
+            TranscriptSegmentContract::new(0, "hello").with_time_range(Some(0.0), Some(0.5))?;
         let mut transcript =
-            TranscriptionContract::from_segments(None, Some("en".to_string()), vec![segment])
+            transcription_from_segments(None, Some("en".to_string()), vec![segment])
                 .map_err(|error| DetectError::InvalidArgument(error.to_string()))?;
         let chunks = vec![SpeechActivitySegment::new(5.0, 6.0, 0.8)?];
 
         offset_chunk_local_segments(&mut transcript, &chunks)?;
 
-        assert_eq!(transcript.segments[0].start_seconds, Some(5.0));
-        assert_eq!(transcript.segments[0].end_seconds, Some(5.5));
+        assert_eq!(transcript.segments[0].start_seconds(), Some(5.0));
+        assert_eq!(transcript.segments[0].end_seconds(), Some(5.5));
         assert_eq!(
             transcript.segments[0]
                 .attributes
@@ -5895,22 +6458,17 @@ mod tests {
 
     #[test]
     fn alignment_overwrites_projected_word_timings() -> Result<()> {
-        let mut segment = TranscriptSegmentContract::new(0, "hello");
-        segment.start_seconds = Some(0.0);
-        segment.end_seconds = Some(1.0);
-        segment.words.push(TranscriptWordContract {
-            text: "hello".to_string(),
-            start_seconds: Some(0.0),
-            end_seconds: Some(0.5),
-            confidence: None,
-            speaker: None,
-            attributes: BTreeMap::from([(
-                "timing".to_string(),
-                "whisperTimestampProjection".to_string(),
-            )]),
-        });
+        let mut segment =
+            TranscriptSegmentContract::new(0, "hello").with_time_range(Some(0.0), Some(1.0))?;
+        let mut word =
+            TranscriptWordContract::new("hello").with_time_range(Some(0.0), Some(0.5))?;
+        word.attributes = BTreeMap::from([(
+            "timing".to_string(),
+            "whisperTimestampProjection".to_string(),
+        )]);
+        segment.push_word(word)?;
         let mut transcript =
-            TranscriptionContract::from_segments(None, Some("en".to_string()), vec![segment])
+            transcription_from_segments(None, Some("en".to_string()), vec![segment])
                 .map_err(|error| DetectError::InvalidArgument(error.to_string()))?;
 
         apply_alignment_words(
@@ -5925,17 +6483,17 @@ mod tests {
             }],
         )?;
 
-        let word = &transcript.segments[0].words[0];
+        let word = &transcript.segments[0].words()[0];
         assert_eq!(word.text, "hello");
-        assert_eq!(word.start_seconds, Some(0.1));
-        assert_eq!(word.end_seconds, Some(0.4));
-        assert_eq!(word.confidence, Some(0.9));
+        assert_eq!(word.start_seconds(), Some(0.1));
+        assert_eq!(word.end_seconds(), Some(0.4));
+        assert_eq!(word.confidence(), Some(0.9));
         assert_eq!(
             word.attributes.get("timing").map(String::as_str),
             Some("whisperTimestampProjection")
         );
-        assert_eq!(transcript.segments[0].start_seconds, Some(0.1));
-        assert_eq!(transcript.segments[0].end_seconds, Some(0.4));
+        assert_eq!(transcript.segments[0].start_seconds(), Some(0.1));
+        assert_eq!(transcript.segments[0].end_seconds(), Some(0.4));
         Ok(())
     }
 
@@ -6221,13 +6779,13 @@ mod tests {
                     .filter(|window| window[0] <= 0.0 && window[1] > 0.0)
                     .count();
                 let label = if crossings > 120 { "high" } else { "low" };
-                let mut segment = TranscriptSegmentContract::new(0, label);
-                segment.start_seconds = Some(0.0);
-                segment.end_seconds = Some(request.audio.duration_seconds());
+                let segment = TranscriptSegmentContract::new(0, label)
+                    .with_time_range(Some(0.0), Some(request.audio.duration_seconds()))
+                    .map_err(|error| DetectError::InvalidArgument(error.to_string()))?;
                 Ok(AsrResponse {
                     model_id: request.model_id,
                     language: Some("en".to_string()),
-                    transcript: TranscriptionContract::from_segments(
+                    transcript: transcription_from_segments(
                         request.audio.source,
                         Some("en".to_string()),
                         vec![segment],
@@ -6383,7 +6941,9 @@ mod tests {
         assert_eq!(response.provider, "candle-whisper");
         assert_eq!(response.alignment.as_ref().unwrap().word_count, 1);
         assert_eq!(
-            response.transcript.segments[0].words[0].speaker.as_deref(),
+            response.transcript.segments[0].words()[0]
+                .speaker
+                .as_deref(),
             Some("SPEAKER_00")
         );
         assert_eq!(
@@ -6874,8 +7434,7 @@ mod tests {
             source: Some("synthetic".to_string()),
         };
         let segment = TranscriptSegmentContract::new(0, "hello without timing");
-        let transcript =
-            TranscriptionContract::from_segments(None, Some("en".to_string()), vec![segment])?;
+        let transcript = transcription_from_segments(None, Some("en".to_string()), vec![segment])?;
         let options = DiarizationOptions {
             enabled: true,
             speaker: SpeakerDiarizationOptions {
@@ -6935,12 +7494,12 @@ mod tests {
         assert_eq!(alignment.provider, "ctc-forced-aligner");
         assert_eq!(alignment.model_id, default_alignment_model());
         assert_eq!(alignment.word_count, 1);
-        let word = &response.transcript.segments[0].words[0];
+        let word = &response.transcript.segments[0].words()[0];
         assert_eq!(word.text, "hello");
-        assert!(word.start_seconds.is_some());
-        assert!(word.end_seconds.is_some());
+        assert!(word.start_seconds().is_some());
+        assert!(word.end_seconds().is_some());
         assert!(word
-            .confidence
+            .confidence()
             .is_some_and(|confidence| confidence.is_finite()));
         assert!(response
             .diagnostics
@@ -7077,9 +7636,9 @@ mod tests {
 
         assert!(diarizer.saw_aligned_words);
         assert!(response.diarization.is_some());
-        let word = &response.transcript.segments[0].words[0];
-        assert!(word.start_seconds.is_some());
-        assert!(word.end_seconds.is_some());
+        let word = &response.transcript.segments[0].words()[0];
+        assert!(word.start_seconds().is_some());
+        assert!(word.end_seconds().is_some());
         assert_eq!(word.speaker.as_deref(), Some("SPEAKER_ALIGNED"));
         assert_eq!(
             response.transcript.segments[0].speaker.as_deref(),
@@ -7129,11 +7688,11 @@ mod tests {
             .diagnostics
             .iter()
             .any(|item| item == "alignmentModelExecution=candle-wav2vec2"));
-        let word = &response.transcript.segments[0].words[0];
+        let word = &response.transcript.segments[0].words()[0];
         assert_eq!(word.text, "hello");
-        assert!(word.start_seconds.is_some());
-        assert!(word.end_seconds.is_some());
-        assert!(word.confidence.is_some());
+        assert!(word.start_seconds().is_some());
+        assert!(word.end_seconds().is_some());
+        assert!(word.confidence().is_some());
         response.transcript.validate_strict()?;
         Ok(())
     }
@@ -7269,7 +7828,9 @@ mod tests {
         assert!(response.accepted);
         assert_eq!(response.transcript.text.as_deref(), Some("hello"));
         assert_eq!(
-            response.transcript.segments[0].words[0].speaker.as_deref(),
+            response.transcript.segments[0].words()[0]
+                .speaker
+                .as_deref(),
             Some("SPEAKER_00")
         );
         assert_eq!(response.vad_segments.len(), 1);
@@ -7591,11 +8152,14 @@ mod tests {
                 path: audio_path,
             })
             .expect("alignment smoke requires readable WAV audio");
-            let mut segment = TranscriptSegmentContract::new(0, transcript_text.clone());
-            segment.start_seconds = Some(0.0);
-            segment.end_seconds = Some(audio.duration_seconds().clamp(1.0 / 16_000.0, 1.0));
+            let segment = TranscriptSegmentContract::new(0, transcript_text.clone())
+                .with_time_range(
+                    Some(0.0),
+                    Some(audio.duration_seconds().clamp(1.0 / 16_000.0, 1.0)),
+                )
+                .expect("alignment smoke transcript timing should validate");
             let transcript =
-                TranscriptionContract::from_segments(None, Some("en".to_string()), vec![segment])
+                transcription_from_segments(None, Some("en".to_string()), vec![segment])
                     .expect("alignment smoke transcript should validate");
             let request = AlignmentRequest {
                 audio,

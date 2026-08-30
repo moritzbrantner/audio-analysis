@@ -31,7 +31,6 @@ runtime-onnx = { workspace = true, optional = true }
 runtime-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-text-transcripts.workspace = true
 thiserror.workspace = true
 tokenizers = { workspace = true, optional = true }
 audio-analysis-io = { workspace = true, optional = true }

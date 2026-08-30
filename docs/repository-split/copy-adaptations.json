@@ -4,7 +4,10 @@
   "adapted_package_trees": [
     "crates/audio/audio-analysis-io",
     "crates/audio/audio-analysis-processing",
+    "crates/audio/audio-analysis-recognition",
+    "crates/audio/audio-analysis-speakers",
     "crates/audio/audio-analysis-transcription",
+    "crates/audio/audio-timed-text-compat",
     "crates/audio/audio-generation-tts",
     "packages/audio-analysis-core-app",
     "packages/audio-analysis-core-wasm",
@@ -29,7 +32,10 @@
   "reasons": {
     "crates/audio/audio-analysis-io": "owns the extracted audio-only source contracts and FFmpeg command adapter",
     "crates/audio/audio-analysis-processing": "consumes destination-owned audio source contracts",
+    "crates/audio/audio-analysis-recognition": "normalizes imported neutral timed-text contracts without depending on NLP implementation helpers",
+    "crates/audio/audio-analysis-speakers": "assigns speakers through the validated neutral timed-text builder and accessor API",
     "crates/audio/audio-analysis-transcription": "uses destination-owned audio fixture support instead of a visual dev dependency",
+    "crates/audio/audio-timed-text-compat": "private destination support preserving the historical Rust crate name while re-exporting media-core timed-text DTOs",
     "crates/audio/audio-generation-tts": "keeps unavailable Reference Voice Prompt ASR fallback as an explicit destination setup requirement",
     "packages/*-app": "retargeted to private destination-owned @moritzbrantner/audio-app-ui",
     "packages/audio-analysis-core-wasm": "destination policy makes the active Native WhisperX source-closure WASM package private until an independent npm consumer justifies publication",

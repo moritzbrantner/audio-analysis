@@ -2,9 +2,12 @@
 #![allow(deprecated)]
 
 use audio_contracts::{DetectError, Result};
+use media_core::{
+    TranscriptCharContract, TranscriptSegmentContract, TranscriptWordContract,
+    TranscriptionContract,
+};
 use model_runtime::{FallbackPolicy, ModelRuntimeBackend, ModelSpec, ModelTask};
 use serde::{Deserialize, Serialize};
-use text_transcripts::{TranscriptSegmentContract, TranscriptionContract};
 
 use crate::{AudioRuntime, AudioRuntimeSelection, SpeechRecognitionRequest};
 
@@ -189,12 +192,7 @@ impl AudioTranscriptionProvider for ImportedTranscriptionProvider {
         let model_id = selected_transcription_model_id(&request.runtime);
         let transcript = match request.input {
             TranscriptionInput::ImportedSegments { segments } => {
-                text_transcripts::normalize_imported_segments(
-                    request.source,
-                    request.language,
-                    segments,
-                )
-                .map_err(|error| DetectError::InvalidArgument(error.to_string()))?
+                normalize_imported_segments(request.source, request.language, segments)?
             }
             TranscriptionInput::ImportedContract { mut transcript } => {
                 if transcript.source.is_none() {
@@ -203,8 +201,7 @@ impl AudioTranscriptionProvider for ImportedTranscriptionProvider {
                 if transcript.language.is_none() {
                     transcript.language = request.language;
                 }
-                text_transcripts::normalize_transcription_contract(transcript)
-                    .map_err(|error| DetectError::InvalidArgument(error.to_string()))?
+                normalize_transcription_contract(transcript)?
             }
             TranscriptionInput::SourcePath { path } => {
                 return Err(DetectError::InvalidArgument(format!(
@@ -260,7 +257,7 @@ impl From<SpeechRecognitionRequest> for TranscriptionRequest {
 
 /// Runs a generic transcription request.
 #[deprecated(
-    note = "use audio-analysis-transcription for real ASR or text_transcripts::normalize_imported_segments for imported transcript normalization"
+    note = "use audio-analysis-transcription for real ASR or imported timed-text normalization"
 )]
 pub fn transcribe(request: TranscriptionRequest) -> Result<TranscriptionResponse> {
     match &request.input {
@@ -278,6 +275,119 @@ pub fn transcribe(request: TranscriptionRequest) -> Result<TranscriptionResponse
             )))
         }
     }
+}
+
+fn normalize_imported_segments(
+    source: Option<String>,
+    language: Option<String>,
+    segments: Vec<TranscriptSegmentContract>,
+) -> Result<TranscriptionContract> {
+    normalize_transcription_contract_with_segment_language(
+        TranscriptionContract {
+            text: None,
+            language,
+            segments,
+            source,
+            ..TranscriptionContract::default()
+        },
+        true,
+    )
+}
+
+fn normalize_transcription_contract(
+    contract: TranscriptionContract,
+) -> Result<TranscriptionContract> {
+    normalize_transcription_contract_with_segment_language(contract, false)
+}
+
+fn normalize_transcription_contract_with_segment_language(
+    contract: TranscriptionContract,
+    propagate_language: bool,
+) -> Result<TranscriptionContract> {
+    let language = normalize_optional_string(contract.language);
+    let fallback_language = propagate_language.then_some(language.as_ref()).flatten();
+    let segments = contract
+        .segments
+        .iter()
+        .map(|segment| normalize_segment(segment, fallback_language))
+        .collect::<Result<Vec<_>>>()?;
+    let mut normalized = TranscriptionContract {
+        text: normalize_optional_string(contract.text),
+        language,
+        segments,
+        source: normalize_optional_string(contract.source),
+        attributes: contract.attributes,
+    };
+    if normalized.text.is_none() {
+        let joined = normalized
+            .segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if !joined.is_empty() {
+            normalized.text = Some(joined);
+        }
+    }
+    normalized
+        .validate()
+        .map_err(|error| DetectError::InvalidArgument(error.to_string()))?;
+    Ok(normalized)
+}
+
+fn normalize_segment(
+    segment: &TranscriptSegmentContract,
+    fallback_language: Option<&String>,
+) -> Result<TranscriptSegmentContract> {
+    let mut normalized = TranscriptSegmentContract::new(segment.index, segment.text.trim())
+        .with_time_range(segment.start_seconds(), segment.end_seconds())
+        .map_err(|error| DetectError::InvalidArgument(error.to_string()))?
+        .with_confidence(segment.confidence())
+        .map_err(|error| DetectError::InvalidArgument(error.to_string()))?;
+    normalized.language =
+        normalize_optional_string(segment.language.clone()).or_else(|| fallback_language.cloned());
+    normalized.speaker = normalize_optional_string(segment.speaker.clone());
+    normalized.is_final = segment.is_final;
+    normalized.attributes = segment.attributes.clone();
+
+    for word in segment.words() {
+        let text = word.text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        let mut normalized_word = TranscriptWordContract::new(text)
+            .with_time_range(word.start_seconds(), word.end_seconds())
+            .map_err(|error| DetectError::InvalidArgument(error.to_string()))?
+            .with_confidence(word.confidence())
+            .map_err(|error| DetectError::InvalidArgument(error.to_string()))?;
+        normalized_word.speaker = normalize_optional_string(word.speaker.clone());
+        normalized_word.attributes = word.attributes.clone();
+        normalized
+            .push_word(normalized_word)
+            .map_err(|error| DetectError::InvalidArgument(error.to_string()))?;
+    }
+    for character in segment.chars() {
+        if character.character.is_empty() {
+            continue;
+        }
+        let mut normalized_character = TranscriptCharContract::new(&character.character)
+            .with_time_range(character.start_seconds(), character.end_seconds())
+            .map_err(|error| DetectError::InvalidArgument(error.to_string()))?
+            .with_confidence(character.confidence())
+            .map_err(|error| DetectError::InvalidArgument(error.to_string()))?;
+        normalized_character.attributes = character.attributes.clone();
+        normalized
+            .push_char(normalized_character)
+            .map_err(|error| DetectError::InvalidArgument(error.to_string()))?;
+    }
+    Ok(normalized)
+}
+
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 /// Builds a metadata-only transcription runtime plan.
@@ -414,7 +524,6 @@ fn audio_fallback_to_model_fallback(value: crate::FallbackPolicy) -> FallbackPol
 #[allow(deprecated)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
 
     #[test]
     fn transcribe_accepts_imported_segments_with_generic_request() {
@@ -422,19 +531,11 @@ mod tests {
             source: Some("clip.wav".to_string()),
             language: Some("en".to_string()),
             input: TranscriptionInput::ImportedSegments {
-                segments: vec![TranscriptSegmentContract {
-                    index: 0,
-                    start_seconds: Some(0.0),
-                    end_seconds: Some(1.0),
-                    text: " hello ".to_string(),
-                    language: None,
-                    speaker: None,
-                    confidence: Some(2.0),
-                    is_final: true,
-                    words: Vec::new(),
-                    chars: Vec::new(),
-                    attributes: BTreeMap::new(),
-                }],
+                segments: vec![TranscriptSegmentContract::new(0, " hello ")
+                    .with_time_range(Some(0.0), Some(1.0))
+                    .unwrap()
+                    .with_confidence(Some(0.9))
+                    .unwrap()],
             },
             runtime: TranscriptionRuntimeSelection::default(),
         })
@@ -444,7 +545,11 @@ mod tests {
         assert_eq!(response.transcript.text.as_deref(), Some("hello"));
         assert_eq!(response.transcript.source.as_deref(), Some("clip.wav"));
         assert_eq!(response.transcript.language.as_deref(), Some("en"));
-        assert_eq!(response.transcript.segments[0].confidence, Some(1.0));
+        assert_eq!(
+            response.transcript.segments[0].language.as_deref(),
+            Some("en")
+        );
+        assert_eq!(response.transcript.segments[0].confidence(), Some(0.9));
     }
 
     #[test]

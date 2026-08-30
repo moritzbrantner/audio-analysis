@@ -1,5 +1,5 @@
 {
-  "canonical_digest": "b3e231c734b8615c524b012971458ea1370997c20bc2c57ced41934e6af317fc",
+  "canonical_digest": "5aa9380ee57698e24537a43f538fe61407c3ca6bbfbeb4677b0ed0d788c66d8b",
   "destination_support": [
     {
       "ecosystem": "bun",
@@ -9,6 +9,27 @@
     }
   ],
   "packages": [
+    {
+      "automatic_publish_eligible": false,
+      "contract_owner": "moenarch-media-core",
+      "current_domain": "audio destination support",
+      "current_package_name": "moenarch-audio-timed-text-compat",
+      "current_published_version": null,
+      "current_release_workflow": "none",
+      "ecosystem": "cargo",
+      "extraction_phase": "audio",
+      "id": "cargo:moenarch-audio-timed-text-compat",
+      "intended_next_release_owner": null,
+      "intended_package_name": "moenarch-audio-timed-text-compat",
+      "manifest_path": "crates/audio/audio-timed-text-compat/Cargo.toml",
+      "migration_status": "private destination compatibility support for the media-core timed-text cutover",
+      "package_kind": "library",
+      "publication_class": "private",
+      "source_version": null,
+      "target_repository": "audio-analysis",
+      "temporary_boundary_violations": [],
+      "wrapped_library": "moenarch-media-core"
+    },
     {
       "automatic_publish_eligible": false,
       "contract_owner": "moenarch-audio-analysis-core",

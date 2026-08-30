@@ -6,55 +6,55 @@
       {
         "package": "moenarch-audio-contracts",
         "git": "https://github.com/moritzbrantner/moenarch-foundation",
-        "rev": "407bb3bb6d689e9add2a266bc565150bbed83ac2",
+        "rev": "1051dfdfab4b7d32f579b605d722a5d1184432c6",
         "localPath": "../moenarch-foundation/crates/audio/audio-contracts"
       },
       {
         "package": "moenarch-data-inversion-core",
         "git": "https://github.com/moritzbrantner/moenarch-foundation",
-        "rev": "407bb3bb6d689e9add2a266bc565150bbed83ac2",
+        "rev": "1051dfdfab4b7d32f579b605d722a5d1184432c6",
         "localPath": "../moenarch-foundation/crates/data/data-inversion-core"
       },
       {
         "package": "moenarch-jobs-core",
         "git": "https://github.com/moritzbrantner/moenarch-foundation",
-        "rev": "407bb3bb6d689e9add2a266bc565150bbed83ac2",
+        "rev": "1051dfdfab4b7d32f579b605d722a5d1184432c6",
         "localPath": "../moenarch-foundation/crates/jobs/jobs-core"
       },
       {
         "package": "moenarch-math-signal-core",
         "git": "https://github.com/moritzbrantner/moenarch-foundation",
-        "rev": "407bb3bb6d689e9add2a266bc565150bbed83ac2",
+        "rev": "1051dfdfab4b7d32f579b605d722a5d1184432c6",
         "localPath": "../moenarch-foundation/crates/math/math-signal-core"
       },
       {
         "package": "moenarch-media-core",
         "git": "https://github.com/moritzbrantner/moenarch-foundation",
-        "rev": "407bb3bb6d689e9add2a266bc565150bbed83ac2",
+        "rev": "1051dfdfab4b7d32f579b605d722a5d1184432c6",
         "localPath": "../moenarch-foundation/crates/media/media-core"
       },
       {
         "package": "moenarch-model-runtime",
         "git": "https://github.com/moritzbrantner/moenarch-foundation",
-        "rev": "407bb3bb6d689e9add2a266bc565150bbed83ac2",
+        "rev": "1051dfdfab4b7d32f579b605d722a5d1184432c6",
         "localPath": "../moenarch-foundation/crates/runtime/model-runtime"
       },
       {
         "package": "moenarch-runtime-core",
         "git": "https://github.com/moritzbrantner/moenarch-foundation",
-        "rev": "407bb3bb6d689e9add2a266bc565150bbed83ac2",
+        "rev": "1051dfdfab4b7d32f579b605d722a5d1184432c6",
         "localPath": "../moenarch-foundation/crates/runtime/runtime-core"
       },
       {
         "package": "moenarch-runtime-onnx",
         "git": "https://github.com/moritzbrantner/moenarch-foundation",
-        "rev": "407bb3bb6d689e9add2a266bc565150bbed83ac2",
+        "rev": "1051dfdfab4b7d32f579b605d722a5d1184432c6",
         "localPath": "../moenarch-foundation/crates/runtime/runtime-onnx"
       },
       {
         "package": "moenarch-tensor-data",
         "git": "https://github.com/moritzbrantner/moenarch-foundation",
-        "rev": "407bb3bb6d689e9add2a266bc565150bbed83ac2",
+        "rev": "1051dfdfab4b7d32f579b605d722a5d1184432c6",
         "localPath": "../moenarch-foundation/crates/data/tensor-data"
       }
     ]

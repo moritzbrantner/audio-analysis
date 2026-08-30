@@ -82,7 +82,7 @@ pub fn package_surface() -> PackageSurface {
             operation(
                 "audio.transcription.importWhisperX",
                 "Import WhisperX JSON",
-                "Parses existing WhisperX JSON output through text-transcripts without running models.",
+                "Parses existing WhisperX JSON output in the provider adapter without running models.",
                 serde_json::json!({"content": "{\"segments\":[{\"start\":0.0,\"end\":1.0,\"text\":\"Hello.\"}]}"}),
                 true,
             ),
@@ -317,7 +317,7 @@ fn response(operation: OperationId, value: serde_json::Value) -> SurfaceResponse
         ),
         "audio.transcription.importWhisperX" => (
             "WhisperX import result",
-            "Parsed existing WhisperX JSON through text-transcripts.",
+            "Parsed existing WhisperX JSON in the transcription provider adapter.",
             serde_json::json!({
                 "segmentCount": value.get("segments").and_then(serde_json::Value::as_array).map_or(0, Vec::len),
                 "hasText": value.get("text").and_then(serde_json::Value::as_str).map(|text| !text.is_empty()).unwrap_or(false)
@@ -416,7 +416,7 @@ fn plan_value(input: serde_json::Value) -> serde_json::Value {
             "cuda": "opt-in through the cuda feature and provider.device=cuda",
             "cpuFallback": true
         },
-        "normalizationOwner": "moenarch-text-transcripts",
+        "normalizationOwner": "moenarch-audio-analysis-transcription",
         "vadProvider": "energy-vad",
         "alignmentProvider": "ctc-forced-aligner",
         "diarizationProvider": "audio-analysis-speakers-native-baseline",
@@ -440,7 +440,7 @@ fn model_plan_value(input: serde_json::Value) -> serde_json::Value {
             "cuda": "optional Candle CUDA execution when built with cuda",
             "requiredFeature": "cuda"
         },
-        "normalizationOwner": "moenarch-text-transcripts",
+        "normalizationOwner": "moenarch-audio-analysis-transcription",
         "asr": candle_whisper_provider_plan(),
         "candleWhisperDecode": candle_whisper_decode_runtime_plan(),
         "compatibility": [whisper_cpp_provider_plan(), whisperx_provider_plan()],
@@ -478,7 +478,7 @@ fn candle_whisper_decode_runtime_plan() -> serde_json::Value {
 fn vad_plan_value(input: serde_json::Value) -> serde_json::Value {
     serde_json::json!({
         "defaultProvider": "energy-vad",
-        "normalizationOwner": "moenarch-text-transcripts",
+        "normalizationOwner": "moenarch-audio-analysis-transcription",
         "options": VadOptions::default(),
         "input": input
     })
@@ -489,7 +489,7 @@ fn alignment_plan_value(input: serde_json::Value) -> serde_json::Value {
         "defaultProvider": "candle-whisper",
         "provider": "ctc-forced-aligner",
         "modelId": "facebook/wav2vec2-base-960h",
-        "normalizationOwner": "moenarch-text-transcripts",
+        "normalizationOwner": "moenarch-audio-analysis-transcription",
         "requiresFeature": "alignment",
         "input": input
     })
@@ -820,7 +820,7 @@ mod tests {
         );
         assert_eq!(
             response.value["result"]["normalizationOwner"],
-            "moenarch-text-transcripts"
+            "moenarch-audio-analysis-transcription"
         );
         assert_eq!(
             response.value["result"]["translation"]["runtime"],

@@ -304,8 +304,8 @@ pub(crate) fn emit_wav2vec2_ctc_segments_with_load_observer(
     let mut segments = Vec::new();
     let audio_duration = request.audio.duration_seconds();
     for segment in &request.transcript.segments {
-        let segment_start = segment.start_seconds.unwrap_or(0.0);
-        let segment_end = segment.end_seconds.unwrap_or(audio_duration);
+        let segment_start = segment.start_seconds().unwrap_or(0.0);
+        let segment_end = segment.end_seconds().unwrap_or(audio_duration);
         if !segment_start.is_finite()
             || !segment_end.is_finite()
             || segment_end <= segment_start
@@ -986,8 +986,8 @@ fn char_midpoint(character: &AlignedChar) -> Option<f64> {
     Some((character.start_seconds? + character.end_seconds?) * 0.5)
 }
 
-fn segment_words(segment: &text_transcripts::TranscriptSegmentContract) -> Vec<String> {
-    if segment.words.is_empty() {
+fn segment_words(segment: &media_core::TranscriptSegmentContract) -> Vec<String> {
+    if segment.words().is_empty() {
         segment
             .text
             .split_whitespace()
@@ -996,7 +996,7 @@ fn segment_words(segment: &text_transcripts::TranscriptSegmentContract) -> Vec<S
             .collect()
     } else {
         segment
-            .words
+            .words()
             .iter()
             .map(|word| word.text.trim().to_string())
             .filter(|word| !word.is_empty())
@@ -1052,8 +1052,8 @@ fn token_id(tokens: &[String], token: &str) -> Option<usize> {
 mod tests {
     use super::*;
     use candle_core::{Device, Tensor};
+    use media_core::TranscriptSegmentContract;
     use std::collections::HashMap;
-    use text_transcripts::{TranscriptSegmentContract, TranscriptionContract};
 
     fn write_valid_bundle(root: &Path, nested: bool) {
         let file_root = if nested {
@@ -1313,11 +1313,11 @@ mod tests {
     }
 
     fn alignment_request(text: &str) -> AlignmentRequest {
-        let mut segment = TranscriptSegmentContract::new(7, text);
-        segment.start_seconds = Some(0.0);
-        segment.end_seconds = Some(1.0);
+        let segment = TranscriptSegmentContract::new(7, text)
+            .with_time_range(Some(0.0), Some(1.0))
+            .unwrap();
         let transcript =
-            TranscriptionContract::from_segments(None, Some("en".to_string()), vec![segment])
+            crate::transcription_from_segments(None, Some("en".to_string()), vec![segment])
                 .unwrap();
         AlignmentRequest {
             audio: crate::LoadedAudio {

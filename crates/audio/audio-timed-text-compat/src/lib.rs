@@ -8,7 +8,7 @@
 //! Do not add parsing, formatting, NLP enrichment, or other behavior here.
 
 pub use media_core::{
-    normalize_imported_segments, normalize_transcription_contract, TimedTextCharContract,
-    TimedTextContract, TimedTextSegmentContract, TimedTextWordContract, TranscriptCharContract,
-    TranscriptSegmentContract, TranscriptWordContract, TranscriptionContract,
+    TimedTextCharContract, TimedTextContract, TimedTextSegmentContract, TimedTextWordContract,
+    TranscriptCharContract, TranscriptSegmentContract, TranscriptWordContract,
+    TranscriptionContract,
 };

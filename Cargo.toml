@@ -58,10 +58,6 @@ model-runtime = { package = "moenarch-model-runtime", version = "=0.1.1" }
 runtime-core = { package = "moenarch-runtime-core", version = "=0.2.1" }
 runtime-onnx = { package = "moenarch-runtime-onnx", version = "=0.1.1" }
 tensor-data = { package = "moenarch-tensor-data", version = "=0.1.1" }
-# Private source-compatibility shim. The concrete timed-text types remain owned
-# by foundation/media-core; this only preserves the historical Rust crate name.
-text-transcripts = { package = "moenarch-audio-timed-text-compat", path = "crates/audio/audio-timed-text-compat" }
-
 candle-core = "0.10.2"
 candle-nn = "0.10.2"
 candle-transformers = "0.10.2"

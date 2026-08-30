@@ -480,12 +480,12 @@ fn deterministic_words_from_transcript(request: &AlignmentRequest) -> Result<Vec
     let mut aligned = Vec::new();
     let duration = request.audio.duration_seconds();
     for segment in &request.transcript.segments {
-        let segment_start = segment.start_seconds.unwrap_or(0.0);
-        let segment_end = segment.end_seconds.unwrap_or(duration);
+        let segment_start = segment.start_seconds().unwrap_or(0.0);
+        let segment_end = segment.end_seconds().unwrap_or(duration);
         if segment_end < segment_start {
             return Err(invalid_request("transcript segment has invalid timing"));
         }
-        let words = if segment.words.is_empty() {
+        let words = if segment.words().is_empty() {
             segment
                 .text
                 .split_whitespace()
@@ -494,7 +494,7 @@ fn deterministic_words_from_transcript(request: &AlignmentRequest) -> Result<Vec
                 .collect::<Vec<_>>()
         } else {
             segment
-                .words
+                .words()
                 .iter()
                 .map(|word| word.text.trim().to_string())
                 .collect::<Vec<_>>()
@@ -504,13 +504,13 @@ fn deterministic_words_from_transcript(request: &AlignmentRequest) -> Result<Vec
         }
         let width = (segment_end - segment_start) / words.len() as f64;
         for (word_index, word) in words.iter().enumerate() {
-            let contract_word = segment.words.get(word_index);
+            let contract_word = segment.words().get(word_index);
             let start_seconds = contract_word
-                .and_then(|word| word.start_seconds)
+                .and_then(|word| word.start_seconds())
                 .unwrap_or(segment_start + word_index as f64 * width)
                 .clamp(segment_start, segment_end);
             let end_seconds = contract_word
-                .and_then(|word| word.end_seconds)
+                .and_then(|word| word.end_seconds())
                 .unwrap_or((start_seconds + width).min(segment_end))
                 .clamp(segment_start, segment_end)
                 .max(start_seconds);
@@ -520,7 +520,9 @@ fn deterministic_words_from_transcript(request: &AlignmentRequest) -> Result<Vec
                 text: word.clone(),
                 start_seconds,
                 end_seconds,
-                confidence: contract_word.and_then(|word| word.confidence).or(Some(1.0)),
+                confidence: contract_word
+                    .and_then(|word| word.confidence())
+                    .or(Some(1.0)),
             });
         }
     }
@@ -530,15 +532,15 @@ fn deterministic_words_from_transcript(request: &AlignmentRequest) -> Result<Vec
 fn validate_transcript_ranges(request: &AlignmentRequest) -> Result<()> {
     let duration = request.audio.duration_seconds();
     for segment in &request.transcript.segments {
-        if let (Some(start), Some(end)) = (segment.start_seconds, segment.end_seconds) {
+        if let (Some(start), Some(end)) = (segment.start_seconds(), segment.end_seconds()) {
             if !start.is_finite() || !end.is_finite() || end < start || end > duration + 1e-6 {
                 return Err(invalid_request(
                     "transcript segment timing is outside audio range",
                 ));
             }
         }
-        for word in &segment.words {
-            if let (Some(start), Some(end)) = (word.start_seconds, word.end_seconds) {
+        for word in segment.words() {
+            if let (Some(start), Some(end)) = (word.start_seconds(), word.end_seconds()) {
                 if !start.is_finite() || !end.is_finite() || end < start || end > duration + 1e-6 {
                     return Err(invalid_request(
                         "transcript word timing is outside audio range",
@@ -577,8 +579,8 @@ fn validate_emissions(emissions: &[Vec<f32>], blank_id: usize, token_ids: &[usiz
 #[cfg(test)]
 mod tests {
     use super::*;
+    use media_core::TranscriptSegmentContract;
     use std::path::Path;
-    use text_transcripts::{TranscriptSegmentContract, TranscriptionContract};
 
     #[test]
     fn ctc_trellis_aligns_known_token_sequence() {
@@ -688,11 +690,11 @@ mod tests {
 
     #[test]
     fn alignment_without_bundle_or_cache_returns_setup_error() {
-        let mut segment = TranscriptSegmentContract::new(0, "hello world");
-        segment.start_seconds = Some(0.0);
-        segment.end_seconds = Some(1.0);
+        let segment = TranscriptSegmentContract::new(0, "hello world")
+            .with_time_range(Some(0.0), Some(1.0))
+            .unwrap();
         let transcript =
-            TranscriptionContract::from_segments(None, Some("en".to_string()), vec![segment])
+            crate::transcription_from_segments(None, Some("en".to_string()), vec![segment])
                 .unwrap();
         let response = align(
             &AlignmentOptions::default(),
@@ -769,11 +771,11 @@ mod tests {
     }
 
     fn alignment_request_for_tests() -> AlignmentRequest {
-        let mut segment = TranscriptSegmentContract::new(0, "hello world");
-        segment.start_seconds = Some(0.0);
-        segment.end_seconds = Some(1.0);
+        let segment = TranscriptSegmentContract::new(0, "hello world")
+            .with_time_range(Some(0.0), Some(1.0))
+            .unwrap();
         let transcript =
-            TranscriptionContract::from_segments(None, Some("en".to_string()), vec![segment])
+            crate::transcription_from_segments(None, Some("en".to_string()), vec![segment])
                 .unwrap();
         AlignmentRequest {
             audio: crate::LoadedAudio {

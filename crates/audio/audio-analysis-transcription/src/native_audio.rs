@@ -69,6 +69,30 @@ pub(crate) fn mono_16khz_from_source_with_diagnostics(
             ))
         }
         TranscriptionSource::Path { path } => load_path_mono_16khz_with_diagnostics(path),
+        #[cfg(feature = "audio-io")]
+        TranscriptionSource::Media { path, audio_stream } => {
+            let audio = mono_16khz_from_selected_media(path, Some(*audio_stream))
+                .map_err(|error| invalid_request(error.to_string()))?;
+            let output_sample_rate = audio.sample_rate;
+            let output_channels = audio.channels;
+            Ok((
+                audio,
+                NativeDecodeDiagnostics {
+                    decode_route: "audio-io-selected-media-decode",
+                    source_path_extension: path
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .map(|extension| extension.to_ascii_lowercase()),
+                    input_sample_rate: None,
+                    output_sample_rate,
+                    output_channels,
+                },
+            ))
+        }
+        #[cfg(not(feature = "audio-io"))]
+        TranscriptionSource::Media { .. } => Err(crate::setup_error(
+            "explicit media stream transcription requires the `audio-io` feature",
+        )),
     }
 }
 

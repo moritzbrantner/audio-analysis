@@ -18,6 +18,7 @@ const KRUMHANSL_MINOR: [f32; 12] = [
 ];
 const TEMPERLEY_MAJOR: [f32; 12] = [5.0, 2.0, 3.5, 2.0, 4.5, 4.0, 2.0, 4.5, 2.0, 3.5, 1.5, 4.0];
 const TEMPERLEY_MINOR: [f32; 12] = [5.0, 2.0, 3.5, 4.5, 2.0, 4.0, 2.0, 4.5, 3.5, 2.0, 1.5, 4.0];
+const MIN_TONAL_KEY_STRENGTH: f32 = 0.70;
 
 /// Key profile family used to score the chroma vector.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -261,6 +262,9 @@ pub fn estimate_musical_key(
     let best = candidates[0];
     let runner_up = candidates[1];
     let strength = ((best.correlation + 1.0) * 0.5).clamp(0.0, 1.0);
+    if strength < MIN_TONAL_KEY_STRENGTH {
+        return Ok(None);
+    }
     let confidence = ((best.correlation - runner_up.correlation).max(0.0) / 0.35).clamp(0.0, 1.0);
 
     Ok(Some(MusicalKeyEstimate {
@@ -531,5 +535,37 @@ mod tests {
         )
         .expect("silence");
         assert!(estimate.is_none());
+    }
+
+    #[test]
+    fn broadband_noise_has_no_key() {
+        let mut keyed_seeds = Vec::new();
+        for seed in 1_u32..=8 {
+            let mut state = seed;
+            let samples = (0..32_000)
+                .map(|_| {
+                    state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    (state as f32 / u32::MAX as f32) * 2.0 - 1.0
+                })
+                .collect::<Vec<_>>();
+            let estimate = estimate_musical_key(
+                &samples,
+                8_000,
+                HarmonicKeyConfig {
+                    fft_size: 1024,
+                    hop_size: 256,
+                    max_frequency_hz: 3_000.0,
+                    ..HarmonicKeyConfig::default()
+                },
+            )
+            .expect("broadband noise");
+            if estimate.is_some() {
+                keyed_seeds.push(seed);
+            }
+        }
+        assert!(
+            keyed_seeds.is_empty(),
+            "noise received keys for seeds {keyed_seeds:?}"
+        );
     }
 }

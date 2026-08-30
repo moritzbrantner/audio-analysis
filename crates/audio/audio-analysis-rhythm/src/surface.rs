@@ -13,6 +13,7 @@ use crate::{
 };
 
 const MAX_SAMPLES: usize = 192_000;
+const MAX_TRACK_SECONDS: usize = 15 * 60;
 
 /// Returns the package surface exposed by every transport wrapper.
 pub fn package_surface() -> PackageSurface {
@@ -200,8 +201,8 @@ fn beat_grid_value(input: serde_json::Value) -> Result<serde_json::Value, String
 }
 
 fn track_analysis_value(input: serde_json::Value) -> Result<serde_json::Value, String> {
-    let samples = sample_array(&input, "samples")?;
     let sample_rate = sample_rate(&input)?;
+    let samples = track_sample_array(&input, "samples", sample_rate)?;
     let mut config = TrackRhythmConfig::default();
     config.min_bpm = finite_f64(&input, "minBpm", config.min_bpm as f64)? as f32;
     config.max_bpm = finite_f64(&input, "maxBpm", config.max_bpm as f64)? as f32;
@@ -252,6 +253,23 @@ fn detected_onsets(
 }
 
 fn sample_array(input: &serde_json::Value, field: &str) -> Result<Vec<f32>, String> {
+    sample_array_with_max(input, field, MAX_SAMPLES)
+}
+
+fn track_sample_array(
+    input: &serde_json::Value,
+    field: &str,
+    sample_rate: u32,
+) -> Result<Vec<f32>, String> {
+    let max_samples = (sample_rate as usize).saturating_mul(MAX_TRACK_SECONDS);
+    sample_array_with_max(input, field, max_samples)
+}
+
+fn sample_array_with_max(
+    input: &serde_json::Value,
+    field: &str,
+    max_samples: usize,
+) -> Result<Vec<f32>, String> {
     let values = input
         .get(field)
         .and_then(serde_json::Value::as_array)
@@ -259,9 +277,9 @@ fn sample_array(input: &serde_json::Value, field: &str) -> Result<Vec<f32>, Stri
     if values.is_empty() {
         return Err(format!("{field} must not be empty"));
     }
-    if values.len() > MAX_SAMPLES {
+    if values.len() > max_samples {
         return Err(format!(
-            "{field} must not contain more than {MAX_SAMPLES} samples"
+            "{field} must not contain more than {max_samples} samples"
         ));
     }
     values
@@ -362,6 +380,34 @@ mod tests {
             assert!(response.value["summary"].is_object());
             assert!(response.value["result"].is_object());
         }
+    }
+
+    #[test]
+    fn track_analysis_accepts_more_than_the_preview_sample_limit() {
+        let samples = vec![0.0; MAX_SAMPLES + 1];
+        let response = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("audio.rhythm.analyze"),
+            input: serde_json::json!({
+                "samples": samples,
+                "sampleRate": 8_000,
+                "fftSize": 512,
+                "hopSize": 512
+            }),
+        })
+        .expect("whole-track rhythm analysis");
+
+        assert_eq!(response.value["sampleCount"], MAX_SAMPLES + 1);
+    }
+
+    #[test]
+    fn onset_preview_keeps_the_existing_sample_limit() {
+        let error = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("audio.rhythm.onsets"),
+            input: serde_json::json!({"samples": vec![0.0; MAX_SAMPLES + 1]}),
+        })
+        .expect_err("preview sample limit");
+
+        assert!(error.contains("192000"));
     }
 
     #[test]

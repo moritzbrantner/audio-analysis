@@ -13,6 +13,7 @@ use crate::{
 };
 
 const MAX_SAMPLES: usize = 192_000;
+const MAX_TRACK_SECONDS: usize = 15 * 60;
 
 /// Returns the package surface exposed by every transport wrapper.
 pub fn package_surface() -> PackageSurface {
@@ -272,8 +273,8 @@ fn chroma_value(input: serde_json::Value) -> Result<serde_json::Value, String> {
 }
 
 fn key_value(input: serde_json::Value) -> Result<serde_json::Value, String> {
-    let samples = sample_array(&input, "samples")?;
     let sample_rate = sample_rate(&input)?;
+    let samples = track_sample_array(&input, "samples", sample_rate)?;
     let mut config = HarmonicKeyConfig::default();
     config.fft_size = positive_usize(&input, "fftSize", config.fft_size)?;
     config.hop_size = positive_usize(&input, "hopSize", config.hop_size)?;
@@ -373,6 +374,23 @@ fn config_from_input(input: &serde_json::Value) -> Result<PitchDetectorConfig, S
 }
 
 fn sample_array(input: &serde_json::Value, field: &str) -> Result<Vec<f32>, String> {
+    sample_array_with_max(input, field, MAX_SAMPLES)
+}
+
+fn track_sample_array(
+    input: &serde_json::Value,
+    field: &str,
+    sample_rate: u32,
+) -> Result<Vec<f32>, String> {
+    let max_samples = (sample_rate as usize).saturating_mul(MAX_TRACK_SECONDS);
+    sample_array_with_max(input, field, max_samples)
+}
+
+fn sample_array_with_max(
+    input: &serde_json::Value,
+    field: &str,
+    max_samples: usize,
+) -> Result<Vec<f32>, String> {
     let values = input
         .get(field)
         .and_then(serde_json::Value::as_array)
@@ -380,9 +398,9 @@ fn sample_array(input: &serde_json::Value, field: &str) -> Result<Vec<f32>, Stri
     if values.is_empty() {
         return Err(format!("{field} must not be empty"));
     }
-    if values.len() > MAX_SAMPLES {
+    if values.len() > max_samples {
         return Err(format!(
-            "{field} must not contain more than {MAX_SAMPLES} samples"
+            "{field} must not contain more than {max_samples} samples"
         ));
     }
     values
@@ -474,6 +492,36 @@ mod tests {
         .expect("chroma");
         assert_eq!(response.value["strongestPitchClass"], "A");
         assert_eq!(response.value["chroma"].as_array().unwrap().len(), 12);
+    }
+
+    #[test]
+    fn key_analysis_accepts_more_than_the_preview_sample_limit() {
+        let samples = vec![0.0; MAX_SAMPLES + 1];
+        let response = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("audio.pitch.key"),
+            input: serde_json::json!({
+                "samples": samples,
+                "sampleRate": 8_000,
+                "fftSize": 512,
+                "hopSize": 512,
+                "maxFrequencyHz": 3_000.0
+            }),
+        })
+        .expect("whole-track key analysis");
+
+        assert_eq!(response.value["sampleCount"], MAX_SAMPLES + 1);
+        assert!(response.value["key"].is_null());
+    }
+
+    #[test]
+    fn monophonic_preview_keeps_the_existing_sample_limit() {
+        let error = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("audio.pitch.estimate"),
+            input: serde_json::json!({"samples": vec![0.0; MAX_SAMPLES + 1]}),
+        })
+        .expect_err("preview sample limit");
+
+        assert!(error.contains("192000"));
     }
 
     #[test]

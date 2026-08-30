@@ -36,3 +36,4 @@ external-tests = ["onnx", "model-bundles"]
 
 [dev-dependencies]
 hound.workspace = true
+tempfile.workspace = true

@@ -4,7 +4,10 @@
 pub mod pyannote;
 pub mod surface;
 use std::collections::BTreeMap;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use audio_analysis_core::{interleaved_to_mono, rms, zero_pad_to, ChannelMix, FrameSpec};
 pub use audio_analysis_recognition::AudioRuntime;
@@ -759,6 +762,16 @@ impl SpeakerProfile {
     }
 }
 
+/// Mutable identity fields for an existing speaker profile.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SpeakerProfileUpdate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<BTreeMap<String, String>>,
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 /// Speaker match result.
 pub struct SpeakerMatch {
@@ -951,6 +964,36 @@ impl SpeakerLibrary {
         profile.add_embedding(embedding)
     }
 
+    /// Updates reusable profile identity fields while preserving its stable id and embeddings.
+    pub fn update_profile(&mut self, id: &SpeakerId, update: SpeakerProfileUpdate) -> Result<()> {
+        if update.label.is_none() && update.metadata.is_none() {
+            return Err(DetectError::InvalidArgument(
+                "speaker profile update must include a label or metadata".to_string(),
+            ));
+        }
+        let profile = self.profiles.get_mut(id).ok_or_else(|| {
+            DetectError::InvalidArgument(format!("unknown speaker id `{}`", id.as_str()))
+        })?;
+        if let Some(label) = update.label {
+            profile.label = SpeakerLabel::new(label)?;
+        }
+        if let Some(metadata) = update.metadata {
+            profile.metadata = metadata;
+        }
+        Ok(())
+    }
+
+    /// Deletes a profile and returns the removed identity, embeddings, and metadata.
+    pub fn delete_profile(&mut self, id: &SpeakerId) -> Result<SpeakerProfile> {
+        let profile = self.profiles.remove(id).ok_or_else(|| {
+            DetectError::InvalidArgument(format!("unknown speaker id `{}`", id.as_str()))
+        })?;
+        if self.profiles.is_empty() {
+            self.embedding_model = None;
+        }
+        Ok(profile)
+    }
+
     /// Returns profile.
     pub fn profile(&self, id: &SpeakerId) -> Option<&SpeakerProfile> {
         self.profiles.get(id)
@@ -1096,6 +1139,102 @@ impl SpeakerLibrary {
         let snapshot = serde_json::from_str::<SpeakerLibrarySnapshot>(json)
             .map_err(|err| DetectError::Source(err.to_string()))?;
         Self::from_snapshot(snapshot)
+    }
+
+    /// Loads and validates a canonical Speaker Library snapshot from a caller-owned path.
+    pub fn load(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        let json = fs::read_to_string(path).map_err(|error| {
+            DetectError::Source(format!(
+                "failed to read Speaker Library `{}`: {error}",
+                path.display()
+            ))
+        })?;
+        Self::from_json_str(&json).map_err(|error| {
+            DetectError::InvalidArgument(format!(
+                "Speaker Library `{}` is malformed or incompatible: {error}",
+                path.display()
+            ))
+        })
+    }
+
+    /// Loads a Speaker Library when present, preserving the ordinary missing-file state.
+    pub fn load_if_present(path: impl AsRef<Path>) -> Result<Option<Self>> {
+        let path = path.as_ref();
+        match Self::load(path) {
+            Ok(library) => Ok(Some(library)),
+            Err(DetectError::Source(message)) if message.contains("os error 2") => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Serializes, validates, and atomically promotes this library at a caller-owned path.
+    pub fn save(&self, path: impl AsRef<Path>) -> Result<()> {
+        let path = path.as_ref();
+        if self.is_empty() {
+            return match fs::remove_file(path) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(DetectError::Source(format!(
+                    "failed to remove empty Speaker Library `{}`: {error}",
+                    path.display()
+                ))),
+            };
+        }
+        let json = self.to_json_string()?;
+        let _ = Self::from_json_str(&json)?;
+        let parent = path.parent().ok_or_else(|| {
+            DetectError::InvalidArgument(
+                "Speaker Library path must have a parent directory".to_string(),
+            )
+        })?;
+        fs::create_dir_all(parent).map_err(|error| {
+            DetectError::Source(format!(
+                "failed to create Speaker Library directory `{}`: {error}",
+                parent.display()
+            ))
+        })?;
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| {
+                DetectError::Source(format!(
+                    "failed to create Speaker Library temporary name: {error}"
+                ))
+            })?
+            .as_nanos();
+        let temporary = parent.join(format!(
+            ".{}.{}.tmp",
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("library"),
+            nonce
+        ));
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| {
+                DetectError::Source(format!(
+                    "failed to create Speaker Library temporary file `{}`: {error}",
+                    temporary.display()
+                ))
+            })?;
+        file.write_all(json.as_bytes())
+            .and_then(|_| file.sync_all())
+            .map_err(|error| {
+                let _ = fs::remove_file(&temporary);
+                DetectError::Source(format!(
+                    "failed to write Speaker Library `{}`: {error}",
+                    path.display()
+                ))
+            })?;
+        fs::rename(&temporary, path).map_err(|error| {
+            let _ = fs::remove_file(&temporary);
+            DetectError::Source(format!(
+                "failed to atomically save Speaker Library `{}`: {error}",
+                path.display()
+            ))
+        })
     }
 
     fn validate_model(&self, model: &SpeakerEmbeddingModel) -> Result<()> {
@@ -4138,6 +4277,46 @@ mod tests {
             }]
         }"#;
         assert!(SpeakerLibrary::from_json_str(model_mismatch_json).is_err());
+    }
+
+    #[test]
+    fn speaker_library_persistence_updates_profiles_and_removes_an_empty_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("library.json");
+        let mut library = SpeakerLibrary::new();
+        library
+            .add_profile(
+                SpeakerProfile::new(id("alice"), label("Alice"))
+                    .with_embedding(embedding([1.0, 0.0]))
+                    .unwrap(),
+            )
+            .unwrap();
+
+        library.save(&path).unwrap();
+        let mut loaded = SpeakerLibrary::load(&path).unwrap();
+        loaded
+            .update_profile(
+                &id("alice"),
+                SpeakerProfileUpdate {
+                    label: Some("Alice Updated".to_string()),
+                    metadata: Some(BTreeMap::from([(
+                        "status".to_string(),
+                        "draft".to_string(),
+                    )])),
+                },
+            )
+            .unwrap();
+        let profile = loaded.profile(&id("alice")).unwrap();
+        assert_eq!(profile.label().as_str(), "Alice Updated");
+        assert_eq!(profile.embeddings().len(), 1);
+        assert_eq!(
+            profile.metadata_map().get("status"),
+            Some(&"draft".to_string())
+        );
+
+        loaded.delete_profile(&id("alice")).unwrap();
+        loaded.save(&path).unwrap();
+        assert_eq!(SpeakerLibrary::load_if_present(&path).unwrap(), None);
     }
 
     #[test]

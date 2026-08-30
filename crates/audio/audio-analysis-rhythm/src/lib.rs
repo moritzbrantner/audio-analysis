@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 pub mod surface;
+pub mod track;
 use audio_analysis_core::{mono_samples, rms, FrameSpec};
 use audio_contracts::{AnalysisEvent, AudioAnalyzer, AudioFrame, DetectError, Result, Timestamp};
 

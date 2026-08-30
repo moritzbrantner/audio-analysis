@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 
+pub mod key;
 pub mod surface;
 use std::collections::VecDeque;
 

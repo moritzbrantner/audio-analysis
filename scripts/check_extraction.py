@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OWNERSHIP = ROOT / "docs/repository-split/package-ownership.json"
 ADAPTATIONS = ROOT / "docs/repository-split/copy-adaptations.json"
 IDENTITY = ROOT / "docs/repository-split/byte-identity.json"
-EXPECTED_DIGEST = "b3e231c734b8615c524b012971458ea1370997c20bc2c57ced41934e6af317fc"
+EXPECTED_DIGEST = "5aa9380ee57698e24537a43f538fe61407c3ca6bbfbeb4677b0ed0d788c66d8b"
 EXPECTED_EXTERNAL = {
     "audio-contracts": ("moenarch-audio-contracts", "=0.1.0"),
     "data-inversion-core": ("moenarch-data-inversion-core", "=0.1.1"),
@@ -24,8 +24,6 @@ EXPECTED_EXTERNAL = {
     "runtime-core": ("moenarch-runtime-core", "=0.2.1"),
     "runtime-onnx": ("moenarch-runtime-onnx", "=0.1.1"),
     "tensor-data": ("moenarch-tensor-data", "=0.1.1"),
-    "text-model-runtime": ("moenarch-text-model-runtime", "=0.1.1"),
-    "text-transcripts": ("moenarch-text-transcripts", "=0.1.3"),
 }
 FORBIDDEN = (
     "video-analysis-ffmpeg",
@@ -83,8 +81,8 @@ def main() -> int:
 
     cargo_records = [record for record in packages if record.get("ecosystem") == "cargo"]
     bun_records = [record for record in packages if record.get("ecosystem") == "bun"]
-    if len(cargo_records) != 53 or len(bun_records) != 26:
-        errors.append(f"expected 53 Cargo and 26 Bun records, got {len(cargo_records)} and {len(bun_records)}")
+    if len(cargo_records) != 54 or len(bun_records) != 26:
+        errors.append(f"expected 54 Cargo and 26 Bun records, got {len(cargo_records)} and {len(bun_records)}")
     for record in packages:
         if not (ROOT / record["manifest_path"]).is_file():
             errors.append(f"missing package manifest: {record['manifest_path']}")
@@ -94,7 +92,7 @@ def main() -> int:
     actual_cargo = sorted(path.relative_to(ROOT).as_posix() for path in (ROOT / "crates").rglob("Cargo.toml"))
     expected_cargo = sorted(record["manifest_path"] for record in cargo_records)
     if actual_cargo != expected_cargo:
-        errors.append("Cargo manifest set differs from the 53 reviewed records")
+        errors.append("Cargo manifest set differs from the 54 reviewed records")
     actual_bun = sorted(
         path.relative_to(ROOT).as_posix()
         for path in (ROOT / "packages").glob("*/package.json")

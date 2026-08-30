@@ -22,7 +22,7 @@ audio-analysis-fourier.workspace = true
 model-runtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-text-transcripts.workspace = true
+media-core.workspace = true
 audio-contracts.workspace = true
 
 [dev-dependencies]

@@ -12,9 +12,9 @@ use audio_analysis_core::{
 };
 use audio_analysis_fourier::{FourierTransform, Spectrum};
 use audio_contracts::{AnalysisEvent, AudioAnalyzer, AudioFrame, DetectError, Result, Timestamp};
+pub use media_core::{TranscriptSegmentContract, TranscriptionContract};
 use model_runtime::ModelSpec;
 use serde::Deserialize;
-pub use text_transcripts::{TranscriptSegmentContract, TranscriptionContract};
 
 #[allow(deprecated)]
 pub use transcription::{
@@ -303,7 +303,7 @@ pub struct AudioEmbeddingResponse {
 
 /// Request for speech recognition.
 #[deprecated(
-    note = "use audio-analysis-transcription for real ASR or text_transcripts::normalize_imported_segments for imported transcript normalization"
+    note = "use audio-analysis-transcription for real ASR or imported timed-text normalization"
 )]
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -344,7 +344,21 @@ impl SpeechRecognitionResponse {
     /// Returns the full transcript text, synthesizing it from segments when the
     /// transcript does not carry a separate aggregate text field.
     pub fn text(&self) -> String {
-        self.transcript.text_or_joined()
+        self.transcript
+            .text
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                self.transcript
+                    .segments
+                    .iter()
+                    .map(|segment| segment.text.trim())
+                    .filter(|text| !text.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
     }
 
     /// Returns transcript segments for compatibility with older callers.
@@ -1512,7 +1526,7 @@ pub fn embed_audio(request: AudioEmbeddingRequest) -> Result<AudioEmbeddingRespo
 
 /// Handles ASR from imported transcript segments.
 #[deprecated(
-    note = "use audio-analysis-transcription for real ASR or text_transcripts::normalize_imported_segments for imported transcript normalization"
+    note = "use audio-analysis-transcription for real ASR or imported timed-text normalization"
 )]
 #[allow(deprecated)]
 pub fn transcribe_audio(request: SpeechRecognitionRequest) -> Result<SpeechRecognitionResponse> {
@@ -1754,19 +1768,11 @@ mod tests {
             source: Some("clip.wav".to_string()),
             language: Some("en".to_string()),
             model: AudioRuntimeSelection::default(),
-            imported_segments: vec![TranscriptSegmentContract {
-                index: 0,
-                start_seconds: Some(0.0),
-                end_seconds: Some(1.0),
-                text: "hello".to_string(),
-                language: Some("en".to_string()),
-                speaker: None,
-                confidence: Some(0.9),
-                is_final: true,
-                words: Vec::new(),
-                chars: Vec::new(),
-                attributes: BTreeMap::new(),
-            }],
+            imported_segments: vec![TranscriptSegmentContract::new(0, "hello")
+                .with_time_range(Some(0.0), Some(1.0))
+                .unwrap()
+                .with_confidence(Some(0.9))
+                .unwrap()],
         })
         .unwrap();
 

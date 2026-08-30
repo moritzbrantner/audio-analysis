@@ -13,12 +13,12 @@ use candle_nn::{
 use candle_transformers::models::whisper::{self};
 use flate2::{write::ZlibEncoder, Compression};
 use media_core::Result;
+use media_core::TranscriptSegmentContract;
+#[cfg(test)]
+use media_core::TranscriptWordContract;
 use rustfft::{num_complex::Complex32, FftPlanner};
 use serde::Deserialize;
 use std::io::Write;
-#[cfg(test)]
-use text_transcripts::TranscriptWordContract;
-use text_transcripts::{TranscriptSegmentContract, TranscriptionContract};
 use tokenizers::Tokenizer;
 
 use crate::native_device::{resolve_native_device, ResolvedNativeDevice};
@@ -1972,7 +1972,7 @@ impl CandleWhisperSession {
                         window.global_start_seconds,
                         window.global_end_seconds,
                         self.setup.language.clone(),
-                    ));
+                    )?);
                     next_index += 1;
                 } else {
                     used_timestamp_tokens = true;
@@ -1982,10 +1982,10 @@ impl CandleWhisperSession {
                         window.global_start_seconds,
                         window.global_end_seconds,
                         self.setup.language.clone(),
-                    );
+                    )?;
                     if timestamp_segments
                         .iter()
-                        .any(|segment| !segment.words.is_empty())
+                        .any(|segment| !segment.words().is_empty())
                     {
                         used_timestamp_word_projection = true;
                     }
@@ -1993,7 +1993,7 @@ impl CandleWhisperSession {
                 }
             }
         }
-        let transcript = TranscriptionContract::from_segments(
+        let transcript = crate::transcription_from_segments(
             request.audio.source,
             request.language.clone(),
             segments,
@@ -3558,10 +3558,9 @@ fn window_fallback_segment(
     start_seconds: f64,
     end_seconds: f64,
     language: Option<String>,
-) -> TranscriptSegmentContract {
-    let mut segment = TranscriptSegmentContract::new(index, text);
-    segment.start_seconds = Some(start_seconds);
-    segment.end_seconds = Some(end_seconds);
+) -> Result<TranscriptSegmentContract> {
+    let mut segment = TranscriptSegmentContract::new(index, text)
+        .with_time_range(Some(start_seconds), Some(end_seconds))?;
     segment.language = language;
     segment
         .attributes
@@ -3569,7 +3568,7 @@ fn window_fallback_segment(
     segment
         .attributes
         .insert("timing".to_string(), "global".to_string());
-    segment
+    Ok(segment)
 }
 
 fn decoded_window_to_contract_segments(
@@ -3578,37 +3577,34 @@ fn decoded_window_to_contract_segments(
     window_start_seconds: f64,
     window_end_seconds: f64,
     language: Option<String>,
-) -> Vec<TranscriptSegmentContract> {
-    decoded
-        .segments
-        .into_iter()
-        .filter_map(|decoded_segment| {
-            let text = decoded_segment.text.trim().to_string();
-            if text.is_empty() {
-                return None;
-            }
-            let mut segment = TranscriptSegmentContract::new(*next_index, text);
-            *next_index += 1;
-            let global_start = (window_start_seconds + decoded_segment.start_seconds)
-                .clamp(window_start_seconds, window_end_seconds);
-            let global_end = (window_start_seconds + decoded_segment.end_seconds)
-                .clamp(window_start_seconds, window_end_seconds);
-            segment.start_seconds = Some(global_start);
-            segment.end_seconds = Some(global_end);
-            segment.language = language.clone();
-            segment
-                .attributes
-                .insert("provider".to_string(), "candle-whisper".to_string());
-            segment
-                .attributes
-                .insert("timing".to_string(), "global".to_string());
-            segment.attributes.insert(
-                "timingSource".to_string(),
-                "whisperTimestampTokens".to_string(),
-            );
-            Some(segment)
-        })
-        .collect()
+) -> Result<Vec<TranscriptSegmentContract>> {
+    let mut segments = Vec::new();
+    for decoded_segment in decoded.segments {
+        let text = decoded_segment.text.trim().to_string();
+        if text.is_empty() {
+            continue;
+        }
+        let global_start = (window_start_seconds + decoded_segment.start_seconds)
+            .clamp(window_start_seconds, window_end_seconds);
+        let global_end = (window_start_seconds + decoded_segment.end_seconds)
+            .clamp(window_start_seconds, window_end_seconds);
+        let mut segment = TranscriptSegmentContract::new(*next_index, text)
+            .with_time_range(Some(global_start), Some(global_end))?;
+        *next_index += 1;
+        segment.language = language.clone();
+        segment
+            .attributes
+            .insert("provider".to_string(), "candle-whisper".to_string());
+        segment
+            .attributes
+            .insert("timing".to_string(), "global".to_string());
+        segment.attributes.insert(
+            "timingSource".to_string(),
+            "whisperTimestampTokens".to_string(),
+        );
+        segments.push(segment);
+    }
+    Ok(segments)
 }
 
 #[cfg(test)]
@@ -3648,17 +3644,14 @@ fn project_words_from_timestamp_segment(
             };
             let word_end = projected_end.clamp(word_start, end);
             cursor = word_end;
-            TranscriptWordContract {
-                text: word.to_string(),
-                start_seconds: Some(word_start),
-                end_seconds: Some(word_end),
-                confidence: None,
-                speaker: None,
-                attributes: BTreeMap::from([(
-                    "timing".to_string(),
-                    "whisperTimestampProjection".to_string(),
-                )]),
-            }
+            let mut contract = TranscriptWordContract::new(word)
+                .with_time_range(Some(word_start), Some(word_end))
+                .expect("projected word timing stays inside its decoded segment");
+            contract.attributes = BTreeMap::from([(
+                "timing".to_string(),
+                "whisperTimestampProjection".to_string(),
+            )]);
+            contract
         })
         .collect()
 }
@@ -5534,8 +5527,8 @@ mod tests {
 
         assert_eq!(words.len(), 1);
         assert_eq!(words[0].text, "hello");
-        assert_eq!(words[0].start_seconds, Some(10.0));
-        assert_eq!(words[0].end_seconds, Some(12.0));
+        assert_eq!(words[0].start_seconds(), Some(10.0));
+        assert_eq!(words[0].end_seconds(), Some(12.0));
         assert_eq!(
             words[0].attributes.get("timing").map(String::as_str),
             Some("whisperTimestampProjection")
@@ -5550,10 +5543,10 @@ mod tests {
         assert_eq!(words.len(), 2);
         assert_eq!(words[0].text, "hello");
         assert_eq!(words[1].text, "rustaceans");
-        assert_approx_eq(words[0].start_seconds.unwrap(), 0.0);
-        assert_approx_eq(words[0].end_seconds.unwrap(), 1.0);
-        assert_approx_eq(words[1].start_seconds.unwrap(), 1.0);
-        assert_approx_eq(words[1].end_seconds.unwrap(), 3.0);
+        assert_approx_eq(words[0].start_seconds().unwrap(), 0.0);
+        assert_approx_eq(words[0].end_seconds().unwrap(), 1.0);
+        assert_approx_eq(words[1].start_seconds().unwrap(), 1.0);
+        assert_approx_eq(words[1].end_seconds().unwrap(), 3.0);
     }
 
     #[test]
@@ -5584,8 +5577,8 @@ mod tests {
 
         assert!(!words.is_empty());
         for word in words {
-            let start = word.start_seconds.unwrap();
-            let end = word.end_seconds.unwrap();
+            let start = word.start_seconds().unwrap();
+            let end = word.end_seconds().unwrap();
             assert!((5.0..=5.1).contains(&start));
             assert!((5.0..=5.1).contains(&end));
             assert!(end >= start);
@@ -5605,12 +5598,13 @@ mod tests {
             10.0,
             12.0,
             Some("en".to_string()),
-        );
+        )
+        .unwrap();
 
         assert_eq!(segments.len(), 1);
-        assert_eq!(segments[0].start_seconds, Some(10.5));
-        assert_eq!(segments[0].end_seconds, Some(11.5));
-        assert!(segments[0].words.is_empty());
+        assert_eq!(segments[0].start_seconds(), Some(10.5));
+        assert_eq!(segments[0].end_seconds(), Some(11.5));
+        assert!(segments[0].words().is_empty());
         assert!(!segments[0].attributes.contains_key("wordTiming"));
     }
 
@@ -5625,15 +5619,16 @@ mod tests {
         };
         let mut next_index = 0;
         let segments =
-            decoded_window_to_contract_segments(decoded, &mut next_index, 10.0, 12.0, None);
+            decoded_window_to_contract_segments(decoded, &mut next_index, 10.0, 12.0, None)
+                .unwrap();
 
         assert_eq!(segments.len(), 2);
         for segment in &segments {
-            let segment_start = segment.start_seconds.unwrap();
-            let segment_end = segment.end_seconds.unwrap();
+            let segment_start = segment.start_seconds().unwrap();
+            let segment_end = segment.end_seconds().unwrap();
             assert!(segment_start >= 10.0);
             assert!(segment_end <= 12.0);
-            assert!(segment.words.is_empty());
+            assert!(segment.words().is_empty());
         }
     }
 
@@ -5663,17 +5658,18 @@ mod tests {
             10.0,
             12.0,
             Some("en".to_string()),
-        );
+        )
+        .unwrap();
         assert_eq!(next_index, 9);
         assert_eq!(segments.len(), 2);
         assert_eq!(segments[0].index, 7);
         assert_eq!(segments[0].text, "hello");
-        assert_eq!(segments[0].start_seconds, Some(10.5));
-        assert_eq!(segments[0].end_seconds, Some(11.25));
+        assert_eq!(segments[0].start_seconds(), Some(10.5));
+        assert_eq!(segments[0].end_seconds(), Some(11.25));
         assert_eq!(segments[1].index, 8);
         assert_eq!(segments[1].text, "world");
-        assert_eq!(segments[1].start_seconds, Some(11.25));
-        assert_eq!(segments[1].end_seconds, Some(11.75));
+        assert_eq!(segments[1].start_seconds(), Some(11.25));
+        assert_eq!(segments[1].end_seconds(), Some(11.75));
         assert_eq!(segments[0].language.as_deref(), Some("en"));
         assert_eq!(
             segments[0].attributes.get("timing").map(String::as_str),
@@ -5686,7 +5682,7 @@ mod tests {
                 .map(String::as_str),
             Some("whisperTimestampTokens")
         );
-        TranscriptionContract::from_segments(None, Some("en".to_string()), segments).unwrap();
+        crate::transcription_from_segments(None, Some("en".to_string()), segments).unwrap();
     }
 
     #[test]
@@ -5702,9 +5698,10 @@ mod tests {
             3.0,
             5.0,
             Some("en".to_string()),
-        );
+        )
+        .unwrap();
         let transcript =
-            TranscriptionContract::from_segments(None, Some("en".to_string()), segments).unwrap();
+            crate::transcription_from_segments(None, Some("en".to_string()), segments).unwrap();
 
         transcript.validate_strict().unwrap();
     }
@@ -5712,9 +5709,10 @@ mod tests {
     #[test]
     fn window_fallback_segment_uses_global_timing() {
         let segment =
-            window_fallback_segment(3, "hello".to_string(), 4.0, 5.5, Some("en".to_string()));
-        assert_eq!(segment.start_seconds, Some(4.0));
-        assert_eq!(segment.end_seconds, Some(5.5));
+            window_fallback_segment(3, "hello".to_string(), 4.0, 5.5, Some("en".to_string()))
+                .unwrap();
+        assert_eq!(segment.start_seconds(), Some(4.0));
+        assert_eq!(segment.end_seconds(), Some(5.5));
         assert_eq!(
             segment.attributes.get("provider").map(String::as_str),
             Some("candle-whisper")
@@ -5733,9 +5731,10 @@ mod tests {
             4.0,
             5.5,
             Some("en".to_string()),
-        );
+        )
+        .unwrap();
 
-        assert!(segment.words.is_empty());
+        assert!(segment.words().is_empty());
         assert!(!segment.attributes.contains_key("wordTiming"));
     }
 

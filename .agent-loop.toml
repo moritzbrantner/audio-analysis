@@ -1,5 +1,7 @@
 schema_version = 1
-max_workers = 2
+# Queue issues sequentially: a PR must be fully integrated before the next
+# issue can be claimed, so every run has one unambiguous baseline.
+max_workers = 1
 
 [verification]
 # Restructuring-first extraction evidence is intentionally structural.

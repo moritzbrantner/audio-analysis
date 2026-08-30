@@ -373,6 +373,17 @@ impl TranscriptionPipelineObserver for NoopTranscriptionPipelineObserver {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", untagged)]
 pub enum TranscriptionSource {
+    /// A finite media path with an explicitly selected zero-based audio stream.
+    ///
+    /// [`Self::Path`] remains the compatibility/default-selection source. This
+    /// variant makes an explicit container-audio selection part of the
+    /// reusable transcription request instead of requiring callers to decode
+    /// samples before invoking the pipeline.
+    Media {
+        path: PathBuf,
+        #[serde(rename = "audioStream", alias = "audio_stream")]
+        audio_stream: usize,
+    },
     Path {
         path: PathBuf,
     },
@@ -390,6 +401,9 @@ impl TranscriptionSource {
     fn path(&self) -> Result<&Path> {
         match self {
             Self::Path { path } => Ok(path),
+            Self::Media { .. } => Err(invalid_request(
+                "external command transcription does not support explicit media stream selection",
+            )),
             Self::Samples { .. } => Err(invalid_request(
                 "external command transcription requires a path source",
             )),
@@ -2654,6 +2668,11 @@ fn predecode_selected_media_request(
 ) -> std::result::Result<TranscriptionPipelineRequest, SelectedMediaTranscriptionError> {
     let path = match &request.source {
         TranscriptionSource::Path { path } => path.clone(),
+        TranscriptionSource::Media { .. } => {
+            return Err(SelectedMediaTranscriptionError::Pipeline(invalid_request(
+                "selected-media transcription source is already decoded by the pipeline",
+            )))
+        }
         TranscriptionSource::Samples { .. } => {
             return Err(SelectedMediaTranscriptionError::Pipeline(invalid_request(
                 "selected-media transcription requires a path source",
@@ -6802,14 +6821,19 @@ mod tests {
 
         let run = |selection| {
             let mut request = sample_request();
-            request.source = TranscriptionSource::Path { path: path.clone() };
+            request.source = match selection {
+                Some(audio_stream) => TranscriptionSource::Media {
+                    path: path.clone(),
+                    audio_stream,
+                },
+                None => TranscriptionSource::Path { path: path.clone() },
+            };
             request.vad.enabled = false;
             let mut vad = EnergyVadTranscriptionProvider;
             let mut asr = FrequencyAsr;
             let mut observer = RecordingObserver::default();
-            run_transcription_pipeline_from_selected_media_with_observer(
+            run_transcription_pipeline_with_observer(
                 request,
-                selection,
                 &mut vad,
                 &mut asr,
                 None,

@@ -244,6 +244,7 @@ pub fn is_pyannote_diarization_model(model_id: &str) -> bool {
 
 #[cfg(feature = "pyannote-diarization")]
 pub use pyannote::{
+    inspect_pyannote_community_diarization_bundle, PyannoteCommunityDiarizationBundleReport,
     PyannoteCommunityDiarizationConfig, PyannoteCommunityDiarizationResult,
     PyannoteCommunityDiarizer,
 };

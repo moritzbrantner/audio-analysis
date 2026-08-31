@@ -75,6 +75,22 @@ pub struct PyannoteCommunityDiarizationResult {
     pub diagnostics: Vec<String>,
 }
 
+/// Offline inspection result for a pyannote community diarization bundle.
+///
+/// Inspection verifies the provider-owned provenance, manifest, checksums,
+/// companion files, and ONNX tensor contracts without constructing an ONNX
+/// inference session or loading model weights.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PyannoteCommunityDiarizationBundleReport {
+    pub bundle_path: PathBuf,
+    pub manifest_path: PathBuf,
+    pub model_id: String,
+    pub source_revision: String,
+    pub artifact_set_sha256: String,
+    pub required_files: Vec<PathBuf>,
+}
+
 /// ONNX-backed pyannote community diarizer.
 #[derive(Debug)]
 pub struct PyannoteCommunityDiarizer {
@@ -207,19 +223,11 @@ struct AssignedLocalSpeaker {
 impl PyannoteCommunityDiarizer {
     /// Builds a pyannote community diarizer from a local ONNX bundle.
     pub fn from_config(config: PyannoteCommunityDiarizationConfig) -> Result<Self> {
-        let resolved = resolve_config(config)?;
-        let manifest = load_manifest(&resolved.manifest_path)?;
-        validate_manifest(&manifest)?;
-        validate_bundle_files(&resolved, &manifest)?;
-        let plda = plda::Plda::load(&resolved.plda_transform_path, &resolved.plda_model_path)?;
-        if plda.input_dimension() != manifest.embedding.dimension {
-            return Err(setup_error(
-                "PLDA input dimension does not match embedding dimension",
-            ));
-        }
-        let clustering = load_clustering(&resolved.clustering_config_path)?;
-        vbx::validate_config(&clustering)?;
-        validate_clustering_matches_manifest(&clustering, &manifest.clustering)?;
+        let inspected = inspect_bundle(config)?;
+        let resolved = inspected.resolved;
+        let manifest = inspected.manifest;
+        let plda = inspected.plda;
+        let clustering = inspected.clustering;
         let segmentation = OnnxSession::from_file_with_options(
             &resolved.segmentation_model_path,
             runtime_onnx::OnnxSessionOptions::default(),
@@ -470,6 +478,76 @@ impl PyannoteCommunityDiarizer {
         }
         Ok(embeddings)
     }
+}
+
+struct InspectedPyannoteCommunityBundle {
+    resolved: ResolvedPyannoteConfig,
+    manifest: PyannoteDiarizationManifest,
+    plda: plda::Plda,
+    clustering: vbx::VbxConfig,
+}
+
+/// Validates a local pyannote community diarization bundle without inference.
+///
+/// The provider owns this contract: supported model and revision, required
+/// bundle files, provenance, checksums, and static ONNX tensor names/shapes.
+/// The function performs no network access and does not load ONNX weights.
+pub fn inspect_pyannote_community_diarization_bundle(
+    config: PyannoteCommunityDiarizationConfig,
+) -> Result<PyannoteCommunityDiarizationBundleReport> {
+    let inspected = inspect_bundle(config)?;
+    Ok(PyannoteCommunityDiarizationBundleReport {
+        bundle_path: inspected.resolved.bundle_path.clone(),
+        manifest_path: inspected.resolved.manifest_path.clone(),
+        model_id: inspected.manifest.model_id,
+        source_revision: inspected.manifest.source.revision,
+        artifact_set_sha256: inspected.manifest.artifact_set_sha256,
+        required_files: required_bundle_paths(&inspected.resolved),
+    })
+}
+
+fn inspect_bundle(
+    config: PyannoteCommunityDiarizationConfig,
+) -> Result<InspectedPyannoteCommunityBundle> {
+    let resolved = resolve_config(config)?;
+    let manifest = load_manifest(&resolved.manifest_path)?;
+    validate_manifest(&manifest)?;
+    validate_bundle_files(&resolved, &manifest)?;
+    let plda = plda::Plda::load(&resolved.plda_transform_path, &resolved.plda_model_path)?;
+    if plda.input_dimension() != manifest.embedding.dimension {
+        return Err(setup_error(
+            "PLDA input dimension does not match embedding dimension",
+        ));
+    }
+    let clustering = load_clustering(&resolved.clustering_config_path)?;
+    vbx::validate_config(&clustering)?;
+    validate_clustering_matches_manifest(&clustering, &manifest.clustering)?;
+    let segmentation_metadata =
+        runtime_onnx::inspect_model_metadata(&resolved.segmentation_model_path)
+            .map_err(map_onnx_session_error)?;
+    validate_segmentation_metadata(&segmentation_metadata, &manifest)?;
+    let embedding_metadata = runtime_onnx::inspect_model_metadata(&resolved.embedding_model_path)
+        .map_err(map_onnx_session_error)?;
+    validate_embedding_metadata(&embedding_metadata, &manifest)?;
+    Ok(InspectedPyannoteCommunityBundle {
+        resolved,
+        manifest,
+        plda,
+        clustering,
+    })
+}
+
+fn required_bundle_paths(resolved: &ResolvedPyannoteConfig) -> Vec<PathBuf> {
+    vec![
+        resolved.manifest_path.clone(),
+        resolved.segmentation_model_path.clone(),
+        resolved.embedding_model_path.clone(),
+        resolved.plda_transform_path.clone(),
+        resolved.plda_model_path.clone(),
+        resolved.clustering_config_path.clone(),
+        resolved.bundle_path.join("MODEL_PROVENANCE.md"),
+        resolved.bundle_path.join("LICENSE.md"),
+    ]
 }
 
 fn resolve_config(config: PyannoteCommunityDiarizationConfig) -> Result<ResolvedPyannoteConfig> {

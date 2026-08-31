@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 
+mod bounded_window;
 pub mod surface;
 
 #[cfg(feature = "alignment")]
@@ -35,6 +36,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 mod whisper_cpp;
+pub use bounded_window::{
+    BoundedPcmWindow, BoundedPcmWindowConfig, BoundedPcmWindowSession, BoundedPcmWindowStats,
+};
 pub use whisper_cpp::{
     transcription_catalog as whisper_cpp_catalog, whisper_cpp_system_info,
     ModelStore as WhisperCppModelStore, WhisperCppCatalog, WhisperCppConfig, WhisperCppError,
@@ -253,7 +257,10 @@ pub use native_whisper_quantized::{
     CandleQ8WhisperDecoderDiagnostics, CandleQ8WhisperDecoderOutput,
 };
 #[cfg(feature = "pyannote-vad")]
-pub use silero_vad::{PyannoteVadOptions, PyannoteVadTranscriptionProvider};
+pub use silero_vad::{
+    inspect_pyannote_vad_bundle, PyannoteVadBundleReport, PyannoteVadOptions,
+    PyannoteVadTranscriptionProvider,
+};
 #[cfg(feature = "silero-vad")]
 pub use silero_vad::{SileroVadOptions, SileroVadTranscriptionProvider};
 
@@ -2385,6 +2392,15 @@ pub struct NativeTranscriptionRunner {
     alignment_provider: Option<Box<dyn ForcedAlignmentProvider>>,
     diarization_provider: Option<Box<dyn TranscriptDiarizationProvider>>,
 }
+
+/// Backend-agnostic reusable session for sequential finite transcription requests.
+///
+/// This is the preferred public name for the reusable pipeline lifecycle. The
+/// legacy native name remains available for source compatibility.
+pub type ReusableTranscriptionSession = NativeTranscriptionRunner;
+
+/// Configuration for a [`ReusableTranscriptionSession`].
+pub type ReusableTranscriptionSessionOptions = NativeTranscriptionRunnerOptions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NativeTranscriptionRunnerMode {
@@ -4830,6 +4846,35 @@ mod tests {
             provider: TranscriptionProviderSelection::CandleWhisper(options),
             ..sample_request()
         }
+    }
+
+    #[test]
+    fn reusable_session_keeps_compatible_stack_and_replaces_incompatible_options() {
+        let compatible = batch_test_request(CandleWhisperOptions {
+            model_id: "openai/whisper-tiny.en".to_string(),
+            ..CandleWhisperOptions::default()
+        });
+        let mut session = ReusableTranscriptionSession::new(
+            ReusableTranscriptionSessionOptions::from_request(&compatible),
+        )
+        .expect("reusable session");
+
+        session
+            .prepare_for_request(&compatible)
+            .expect("compatible request must retain the owned stack");
+        assert_eq!(session.asr_provider.provider_id(), "candle-whisper");
+
+        let incompatible = batch_test_request(CandleWhisperOptions {
+            model_id: "openai/whisper-base.en".to_string(),
+            ..CandleWhisperOptions::default()
+        });
+        session
+            .prepare_for_request(&incompatible)
+            .expect("incompatible provider configuration must replace the owned stack");
+        assert_eq!(
+            session.options.provider, incompatible.provider,
+            "the session must retain the replacement provider configuration"
+        );
     }
 
     #[test]

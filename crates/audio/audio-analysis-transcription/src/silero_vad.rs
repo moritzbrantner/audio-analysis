@@ -20,6 +20,8 @@ use media_core::{DetectError, Result};
 use runtime_onnx::OnnxRunner;
 #[cfg(feature = "pyannote-vad")]
 use serde::Deserialize;
+#[cfg(feature = "pyannote-vad")]
+use sha2::{Digest, Sha256};
 
 use crate::{SpeechActivitySegment, TranscriptionVadProvider, VadRequest, VadResponse};
 
@@ -75,6 +77,22 @@ pub struct PyannoteVadOptions {
     pub onset: f32,
     pub offset: f32,
     pub chunk_size: f64,
+}
+
+/// Offline inspection result for a pyannote VAD bundle.
+///
+/// The report is produced from local files only. It validates the provider's
+/// manifest, checksums, and ONNX tensor contract without starting inference or
+/// loading model weights into an ONNX runtime session.
+#[cfg(feature = "pyannote-vad")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PyannoteVadBundleReport {
+    pub model_path: PathBuf,
+    pub manifest_path: PathBuf,
+    pub input_name: String,
+    pub output_name: Option<String>,
+    pub window_samples: usize,
+    pub supported_model_ids: Vec<String>,
 }
 
 #[cfg(any(feature = "pyannote-vad", test))]
@@ -636,11 +654,27 @@ struct PyannoteVadModelShape {
 #[serde(rename_all = "camelCase")]
 struct PyannoteVadManifest {
     #[serde(default)]
+    schema_version: Option<u32>,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    source: Option<PyannoteVadSourceManifest>,
+    #[serde(default)]
+    files: BTreeMap<String, String>,
+    #[serde(default)]
     sample_rate: Option<u32>,
     #[serde(default)]
     segmentation: Option<PyannoteVadSegmentationManifest>,
     #[serde(default)]
     tensor_contract: Option<PyannoteVadTensorContractManifest>,
+}
+
+#[cfg(feature = "pyannote-vad")]
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PyannoteVadSourceManifest {
+    model_id: String,
+    revision: String,
 }
 
 #[cfg(feature = "pyannote-vad")]
@@ -689,6 +723,41 @@ impl OnnxPyannoteRunner {
         let model = pyannote_model_shape(&metadata, &options, manifest.as_ref())?;
         Ok(Self { session, model })
     }
+}
+
+/// Validates the local pyannote VAD bundle consumed by this provider.
+///
+/// This defines the supported source models and requires an explicit local
+/// manifest with SHA-256 entries. No network access or model-weight loading is
+/// performed. Callers can translate the returned provider-owned error at their
+/// product boundary.
+#[cfg(feature = "pyannote-vad")]
+pub fn inspect_pyannote_vad_bundle(
+    options: &PyannoteVadOptions,
+) -> Result<PyannoteVadBundleReport> {
+    if !options.model_path.is_file() {
+        return Err(DetectError::InvalidArgument(format!(
+            "pyannote VAD model `{}` does not exist or is not a file",
+            options.model_path.display()
+        )));
+    }
+    let (manifest_path, manifest) = load_required_pyannote_manifest(&options.model_path)?;
+    validate_pyannote_vad_manifest(&manifest)?;
+    validate_pyannote_vad_checksums(&options.model_path, &manifest)?;
+    let metadata =
+        runtime_onnx::inspect_model_metadata(&options.model_path).map_err(pyannote_onnx_source)?;
+    let model = pyannote_model_shape(&metadata, options, Some(&manifest))?;
+    Ok(PyannoteVadBundleReport {
+        model_path: options.model_path.clone(),
+        manifest_path,
+        input_name: model.input_name,
+        output_name: model.output_name,
+        window_samples: model.window_samples,
+        supported_model_ids: vec![
+            "pyannote/segmentation-3.0".to_string(),
+            "pyannote/speaker-diarization-community-1".to_string(),
+        ],
+    })
 }
 
 #[cfg(feature = "pyannote-vad")]
@@ -777,6 +846,106 @@ fn load_pyannote_manifest(model_path: &Path) -> Result<Option<PyannoteVadManifes
         return Ok(Some(manifest));
     }
     Ok(None)
+}
+
+#[cfg(feature = "pyannote-vad")]
+fn load_required_pyannote_manifest(model_path: &Path) -> Result<(PathBuf, PyannoteVadManifest)> {
+    let parent = model_path.parent().ok_or_else(|| {
+        DetectError::InvalidArgument("pyannote VAD model path has no parent directory".to_string())
+    })?;
+    for file_name in [
+        "pyannote_vad_manifest.json",
+        "pyannote_diarization_manifest.json",
+    ] {
+        let path = parent.join(file_name);
+        if !path.is_file() {
+            continue;
+        }
+        let text = fs::read_to_string(&path).map_err(|error| {
+            DetectError::InvalidArgument(format!(
+                "failed to read pyannote VAD manifest `{}`: {error}",
+                path.display()
+            ))
+        })?;
+        let manifest = serde_json::from_str(&text).map_err(|error| {
+            DetectError::InvalidArgument(format!(
+                "failed to parse pyannote VAD manifest `{}`: {error}",
+                path.display()
+            ))
+        })?;
+        return Ok((path, manifest));
+    }
+    Err(DetectError::InvalidArgument(format!(
+        "pyannote VAD bundle `{}` is missing pyannote_vad_manifest.json or pyannote_diarization_manifest.json",
+        parent.display()
+    )))
+}
+
+#[cfg(feature = "pyannote-vad")]
+fn validate_pyannote_vad_manifest(manifest: &PyannoteVadManifest) -> Result<()> {
+    if manifest.schema_version != Some(1) {
+        return Err(DetectError::InvalidArgument(
+            "pyannote VAD manifest schemaVersion must be 1".to_string(),
+        ));
+    }
+    if !matches!(
+        manifest.kind.as_deref(),
+        Some("pyannote-vad" | "pyannote-diarization")
+    ) {
+        return Err(DetectError::InvalidArgument(
+            "pyannote VAD manifest kind must be pyannote-vad or pyannote-diarization".to_string(),
+        ));
+    }
+    let source = manifest.source.as_ref().ok_or_else(|| {
+        DetectError::InvalidArgument("pyannote VAD manifest source is required".to_string())
+    })?;
+    if !matches!(
+        source.model_id.as_str(),
+        "pyannote/segmentation-3.0" | "pyannote/speaker-diarization-community-1"
+    ) || source.revision.len() != 40
+        || !source.revision.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(DetectError::InvalidArgument(
+            "pyannote VAD manifest source modelId or pinned revision is unsupported".to_string(),
+        ));
+    }
+    if manifest.files.is_empty() {
+        return Err(DetectError::InvalidArgument(
+            "pyannote VAD manifest must checksum its local bundle files".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "pyannote-vad")]
+fn validate_pyannote_vad_checksums(
+    model_path: &Path,
+    manifest: &PyannoteVadManifest,
+) -> Result<()> {
+    let parent = model_path.parent().ok_or_else(|| {
+        DetectError::InvalidArgument("pyannote VAD model path has no parent directory".to_string())
+    })?;
+    for (file, expected) in &manifest.files {
+        if expected.len() != 64 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(DetectError::InvalidArgument(format!(
+                "pyannote VAD manifest checksum for `{file}` is not SHA-256"
+            )));
+        }
+        let path = parent.join(file);
+        let bytes = fs::read(&path).map_err(|error| {
+            DetectError::InvalidArgument(format!(
+                "failed to read checksummed pyannote VAD file `{}`: {error}",
+                path.display()
+            ))
+        })?;
+        let actual = format!("{:x}", Sha256::digest(bytes));
+        if !actual.eq_ignore_ascii_case(expected) {
+            return Err(DetectError::InvalidArgument(format!(
+                "pyannote VAD checksum mismatch for `{file}`"
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(feature = "pyannote-vad")]

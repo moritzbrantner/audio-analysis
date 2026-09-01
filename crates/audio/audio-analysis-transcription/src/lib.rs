@@ -2237,6 +2237,106 @@ impl AudioTranscriptionProvider for ReusableCandleWhisperTranscriber {
     }
 }
 
+/// Candle Whisper provider with complete request-scoped controls.
+///
+/// The adapter owns either a one-shot or reusable Candle provider and applies
+/// the current request configuration through the ordinary
+/// [`AudioTranscriptionProvider`] seam. This keeps runtime, decode, and window
+/// control execution in the transcription capability crate while callers
+/// compose the provider into their workflow.
+pub struct RequestConfiguredCandleWhisperTranscriber {
+    inner: RequestConfiguredCandleWhisperInner,
+    request_config: CandleWhisperTranscriptionRequestConfig,
+}
+
+enum RequestConfiguredCandleWhisperInner {
+    OneShot(CandleWhisperTranscriber),
+    Reusable(ReusableCandleWhisperTranscriber),
+}
+
+impl RequestConfiguredCandleWhisperTranscriber {
+    /// Builds a provider for one request lifecycle.
+    pub fn new(
+        options: CandleWhisperOptions,
+        request_config: CandleWhisperTranscriptionRequestConfig,
+    ) -> Self {
+        Self {
+            inner: RequestConfiguredCandleWhisperInner::OneShot(CandleWhisperTranscriber::new(
+                options,
+            )),
+            request_config,
+        }
+    }
+
+    /// Builds a provider that can reuse a compatible loaded model session.
+    pub fn reusable(
+        options: CandleWhisperOptions,
+        request_config: CandleWhisperTranscriptionRequestConfig,
+    ) -> Self {
+        Self {
+            inner: RequestConfiguredCandleWhisperInner::Reusable(
+                ReusableCandleWhisperTranscriber::new(options),
+            ),
+            request_config,
+        }
+    }
+
+    /// Returns the provider setup shared across request configurations.
+    pub fn options(&self) -> &CandleWhisperOptions {
+        match &self.inner {
+            RequestConfiguredCandleWhisperInner::OneShot(provider) => &provider.options,
+            RequestConfiguredCandleWhisperInner::Reusable(provider) => &provider.options,
+        }
+    }
+
+    /// Replaces the controls applied to subsequent requests.
+    pub fn set_request_config(&mut self, request_config: CandleWhisperTranscriptionRequestConfig) {
+        self.request_config = request_config;
+    }
+}
+
+impl std::fmt::Debug for RequestConfiguredCandleWhisperTranscriber {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RequestConfiguredCandleWhisperTranscriber")
+            .field("options", self.options())
+            .field("request_config", &self.request_config)
+            .finish_non_exhaustive()
+    }
+}
+
+impl AudioTranscriptionProvider for RequestConfiguredCandleWhisperTranscriber {
+    fn provider_id(&self) -> &str {
+        "candle-whisper"
+    }
+
+    fn transcribe(&mut self, request: AsrRequest) -> Result<AsrResponse> {
+        let mut observer = NoopTranscriptionPipelineObserver;
+        self.transcribe_with_observer(request, &mut observer)
+    }
+
+    fn transcribe_with_observer(
+        &mut self,
+        request: AsrRequest,
+        observer: &mut dyn TranscriptionPipelineObserver,
+    ) -> Result<AsrResponse> {
+        match &mut self.inner {
+            RequestConfiguredCandleWhisperInner::OneShot(provider) => provider
+                .transcribe_with_request_config_and_observer(
+                    request,
+                    self.request_config.clone(),
+                    observer,
+                ),
+            RequestConfiguredCandleWhisperInner::Reusable(provider) => provider
+                .transcribe_with_request_config_and_observer(
+                    request,
+                    self.request_config.clone(),
+                    observer,
+                ),
+        }
+    }
+}
+
 fn candle_whisper_setup_context(options: &CandleWhisperOptions) -> String {
     let model_location = options
         .model_bundle

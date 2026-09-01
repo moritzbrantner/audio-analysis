@@ -1,8 +1,9 @@
 use audio_analysis_transcription::{
-    AsrRequest, CandleWhisperOptions, CandleWhisperTimingMode, CandleWhisperTranscriber,
-    CandleWhisperTranscriptionRequestConfig, CandleWhisperWindowControls, LoadedAudio,
-    NoopTranscriptionPipelineObserver, ReusableCandleWhisperTranscriber, SpeechActivitySegment,
-    TranscriptionTask,
+    AsrRequest, AudioTranscriptionProvider, CandleWhisperOptions, CandleWhisperRuntimeControls,
+    CandleWhisperTimingMode, CandleWhisperTranscriber, CandleWhisperTranscriptionRequestConfig,
+    CandleWhisperWindowControls, LoadedAudio, NoopTranscriptionPipelineObserver,
+    RequestConfiguredCandleWhisperTranscriber, ReusableCandleWhisperTranscriber,
+    SpeechActivitySegment, TranscriptionTask,
 };
 
 #[test]
@@ -130,4 +131,50 @@ fn canonical_observer_entrypoints_validate_request_controls_before_runtime() {
     assert!(reusable_error
         .to_string()
         .contains("decoder_threads must be greater than zero"));
+}
+
+#[test]
+fn request_configured_provider_adapters_forward_controls_before_runtime() {
+    let request = || AsrRequest {
+        audio: LoadedAudio {
+            samples: vec![0.0; 16],
+            sample_rate: 16_000,
+            channels: 1,
+            source: Some("configured-provider-contract".to_string()),
+        },
+        chunks: vec![SpeechActivitySegment::new(0.0, 0.001, 1.0).unwrap()],
+        task: TranscriptionTask::Transcribe,
+        language: Some("en".to_string()),
+        model_id: "openai/whisper-tiny.en".to_string(),
+    };
+    let options = CandleWhisperOptions::default();
+    let invalid_config = CandleWhisperTranscriptionRequestConfig {
+        runtime: CandleWhisperRuntimeControls {
+            decoder_threads: Some(0),
+            ..CandleWhisperRuntimeControls::default()
+        },
+        ..CandleWhisperTranscriptionRequestConfig::default()
+    };
+    let mut single =
+        RequestConfiguredCandleWhisperTranscriber::new(options.clone(), invalid_config.clone());
+    let mut reusable = RequestConfiguredCandleWhisperTranscriber::reusable(
+        options.clone(),
+        CandleWhisperTranscriptionRequestConfig::default(),
+    );
+    reusable.set_request_config(invalid_config);
+    let mut observer = NoopTranscriptionPipelineObserver;
+
+    let single_error = single.transcribe(request()).unwrap_err();
+    let reusable_error = reusable
+        .transcribe_with_observer(request(), &mut observer)
+        .unwrap_err();
+
+    assert!(single_error
+        .to_string()
+        .contains("decoder_threads must be greater than zero"));
+    assert!(reusable_error
+        .to_string()
+        .contains("decoder_threads must be greater than zero"));
+    assert_eq!(single.provider_id(), "candle-whisper");
+    assert_eq!(reusable.options(), &options);
 }

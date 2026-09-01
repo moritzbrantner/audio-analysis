@@ -998,3 +998,405 @@ mod tests {
             "Provide an offline model bundle with config.json, generation_config.json, tokenizer.json, preprocessor_config.json, and model.safetensors."
         );
         assert_eq!(
+            fallback["message"],
+            "ASR fallback metadata is available, but this TTS operation does not execute transcription."
+        );
+    }
+
+    #[test]
+    fn plan_surface_explains_native_bundle_and_device_choice_without_side_effects() {
+        let response = run_surface_operation(SurfaceRequest {
+            operation: "audio.tts.plan".into(),
+            input: serde_json::json!({
+                "text": "Plan native TTS.",
+                "provider": {
+                    "providerId": "f5",
+                    "modelId": "f5-tts-v1-base",
+                    "native": true,
+                    "device": "auto",
+                    "modelBundle": {
+                        "autoDownload": true,
+                        "cacheOnly": true
+                    }
+                }
+            }),
+        })
+        .expect("plan response");
+
+        let result = &response.value["result"];
+        assert_eq!(result["willSynthesize"], false);
+        assert_eq!(result["runtime"]["runsInference"], false);
+        assert_eq!(result["runtime"]["downloadsModels"], false);
+        assert_eq!(result["device"]["preference"], "auto");
+        assert_eq!(
+            result["device"]["autoBehavior"],
+            "cudaPreferredWhenAvailable"
+        );
+        assert_eq!(result["modelBundle"]["modelId"], "f5-tts-v1-base");
+        assert_eq!(result["modelBundle"]["cacheOnly"], true);
+        assert_eq!(result["modelBundle"]["autoDownloadRequested"], true);
+        assert_eq!(result["modelBundle"]["downloadAllowed"], false);
+    }
+
+    #[test]
+    fn plan_and_synthesize_report_long_text_chunking_without_audio_chunks() {
+        let long_text = [
+            "The first sentence establishes the speaker-conditioned synthesis request.",
+            "The second sentence is intentionally long enough to force chunk planning at the package surface boundary.",
+            "The final sentence verifies that chunking metadata stays separate from the core in-memory PCM output contract.",
+        ]
+        .join(" ");
+
+        let plan = run_surface_operation(SurfaceRequest {
+            operation: "audio.tts.plan".into(),
+            input: serde_json::json!({"text": long_text}),
+        })
+        .expect("plan response");
+        let chunking = &plan.value["result"]["textChunking"];
+
+        assert_eq!(chunking["strategy"], "sentence-boundary");
+        assert!(chunking["chunkCount"].as_u64().expect("chunk count") > 1);
+        assert_eq!(chunking["preservesInMemoryOutputContract"], true);
+        assert!(chunking["chunks"].as_array().expect("chunks").len() > 1);
+
+        let synthesis = run_surface_operation(SurfaceRequest {
+            operation: "audio.tts.synthesize".into(),
+            input: serde_json::json!({"text": long_text}),
+        })
+        .expect("synthesis response");
+        let result = &synthesis.value["result"];
+
+        assert_eq!(result["audioGenerated"], false);
+        assert!(result.get("audioChunks").is_none());
+        assert_eq!(
+            result["plan"]["textChunking"]["preservesInMemoryOutputContract"],
+            true
+        );
+    }
+
+    #[test]
+    fn models_surface_lists_explicit_tts_presets_with_license_metadata() {
+        let response = run_surface_operation(SurfaceRequest {
+            operation: "audio.tts.models".into(),
+            input: serde_json::json!({}),
+        })
+        .expect("models response");
+
+        assert_eq!(response.value["result"]["defaultModelSelected"], false);
+        let models = response.value["result"]["models"]
+            .as_array()
+            .expect("models array");
+        let ids = models
+            .iter()
+            .map(|model| model["id"].as_str().expect("model id"))
+            .collect::<Vec<_>>();
+        assert!(ids.contains(&"f5-tts-v1-base"));
+        assert!(ids.contains(&"f5-tts-base"));
+        assert!(ids.contains(&"e2-tts-base"));
+        assert!(ids.contains(&"vocos-mel-24khz"));
+
+        let f5 = models
+            .iter()
+            .find(|model| model["id"] == "f5-tts-v1-base")
+            .expect("f5 v1 preset");
+        assert_eq!(f5["repoId"], "SWivid/F5-TTS");
+        assert_eq!(f5["task"], "speaker_conditioned_tts");
+        assert_eq!(f5["license"]["id"], "cc-by-nc-4.0");
+        assert_eq!(f5["explicitOptIn"], true);
+        assert!(f5["requiredFiles"]
+            .as_array()
+            .expect("required files")
+            .contains(&serde_json::json!(
+                "F5TTS_v1_Base/model_1250000.safetensors"
+            )));
+
+        let e2 = models
+            .iter()
+            .find(|model| model["id"] == "e2-tts-base")
+            .expect("e2 preset");
+        assert_eq!(e2["repoId"], "SWivid/E2-TTS");
+        assert_eq!(e2["license"]["id"], "cc-by-nc-4.0");
+
+        let vocos = models
+            .iter()
+            .find(|model| model["id"] == "vocos-mel-24khz")
+            .expect("vocos preset");
+        assert_eq!(vocos["repoId"], "charactr/vocos-mel-24khz");
+        assert_eq!(vocos["license"]["id"], "mit");
+    }
+
+    #[test]
+    fn models_surface_reports_native_tts_feature_flags() {
+        let response = run_surface_operation(SurfaceRequest {
+            operation: "audio.tts.models".into(),
+            input: serde_json::json!({}),
+        })
+        .expect("models response");
+
+        let feature_flags = response.value["result"]["featureFlags"]
+            .as_array()
+            .expect("feature flags");
+        let names = feature_flags
+            .iter()
+            .map(|feature| feature["name"].as_str().expect("feature name"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            [
+                "candle",
+                "cuda",
+                "model-bundles",
+                "audio-io",
+                "asr",
+                "external-tests"
+            ]
+        );
+    }
+
+    #[test]
+    fn vocos_debug_surface_reports_missing_bundle_setup_error() {
+        let response = run_surface_operation(SurfaceRequest {
+            operation: "audio.tts.debug.vocosVocoder".into(),
+            input: serde_json::json!({
+                "modelId": "vocos-mel-24khz",
+                "device": "cpu"
+            }),
+        })
+        .expect("vocos vocoder diagnostic");
+
+        let result = &response.value["result"];
+        assert_eq!(result["status"], "setupRequired");
+        assert_eq!(result["audioGenerated"], false);
+        assert_eq!(result["device"]["selected"], "cpu");
+        assert!(result["diagnostics"]
+            .as_array()
+            .expect("diagnostics")
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "vocos_bundle_missing"));
+    }
+
+    #[cfg(feature = "candle")]
+    #[test]
+    fn f5_debug_surface_returns_mel_diagnostic_for_local_bundle() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let bundle = temp.path();
+        crate::native_f5::test_support::write_test_f5_bundle(
+            bundle,
+            serde_json::json!({
+                "model_type": "f5-tts",
+                "architectures": ["F5TTS"],
+                "n_mel_channels": 4,
+                "sample_rate": 24000,
+                "hop_length": 256
+            }),
+        );
+
+        let response = run_surface_operation(SurfaceRequest {
+            operation: "audio.tts.debug.f5Mel".into(),
+            input: serde_json::json!({
+                "text": "diagnose f5",
+                "bundlePath": bundle,
+                "modelId": "f5-tts-v1-base",
+                "device": "cpu",
+                "options": {
+                    "maxDurationSeconds": 0.05
+                }
+            }),
+        })
+        .expect("f5 mel diagnostic");
+
+        let result = &response.value["result"];
+        assert_eq!(result["status"], "ready");
+        assert_eq!(result["vocoderRequired"], true);
+        assert_eq!(result["audioGenerated"], false);
+        assert_eq!(result["device"]["selected"], "cpu");
+        assert_eq!(result["bundle"]["vocabEntries"], 2);
+        assert_eq!(result["bundle"]["tensorCount"], 1);
+        assert_eq!(result["mel"]["channels"], 4);
+        assert!(result["diagnostics"]
+            .as_array()
+            .expect("diagnostics")
+            .is_empty());
+    }
+
+    #[cfg(feature = "candle")]
+    #[test]
+    fn synthesize_surface_runs_f5_and_vocos_for_local_native_bundles() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let f5_bundle = temp.path().join("f5");
+        let vocos_bundle = temp.path().join("vocos");
+        crate::native_f5::test_support::write_test_f5_bundle(
+            &f5_bundle,
+            serde_json::json!({
+                "model_type": "f5-tts",
+                "architectures": ["F5TTS"],
+                "n_mel_channels": 4,
+                "sample_rate": 24000,
+                "hop_length": 256
+            }),
+        );
+        crate::native_vocos::test_support::write_test_vocos_bundle(
+            &vocos_bundle,
+            &crate::native_vocos::test_support::test_config(4, 24_000, 256),
+            &[1, 2, 3, 4],
+        );
+
+        let response = run_surface_operation(SurfaceRequest {
+            operation: "audio.tts.synthesize".into(),
+            input: serde_json::json!({
+                "text": "Synthesize with the reference speaker.",
+                "referenceVoicePrompt": {
+                    "audio": example_pcm_audio(),
+                    "transcript": "Reference voice prompt text.",
+                    "language": "en"
+                },
+                "provider": {
+                    "providerId": "f5",
+                    "modelId": "f5-tts-v1-base",
+                    "native": true,
+                    "device": "cpu",
+                    "modelBundle": {
+                        "bundlePath": f5_bundle
+                    },
+                    "vocoder": {
+                        "providerId": "vocos",
+                        "modelId": "vocos-mel-24khz",
+                        "modelBundle": {
+                            "bundlePath": vocos_bundle
+                        }
+                    }
+                },
+                "options": {
+                    "seed": 41,
+                    "steps": 3,
+                    "cfgStrength": 1.25,
+                    "speed": 1.5,
+                    "maxDurationSeconds": 0.02,
+                    "removeSilence": true
+                }
+            }),
+        })
+        .expect("native synthesize");
+
+        let result = &response.value["result"];
+        assert_eq!(result["status"], "ready");
+        assert_eq!(result["audioGenerated"], true);
+        assert_eq!(result["audio"]["sampleRateHz"], 24_000);
+        assert!(
+            result["audio"]["samples"]
+                .as_array()
+                .expect("samples")
+                .len()
+                > 0
+        );
+        assert_eq!(result["nativeDiagnostics"]["provider"], "f5");
+        assert_eq!(result["nativeDiagnostics"]["modelId"], "f5-tts-v1-base");
+        assert_eq!(result["nativeDiagnostics"]["vocoder"], "vocos");
+        assert_eq!(
+            result["nativeDiagnostics"]["vocoderModelId"],
+            "vocos-mel-24khz"
+        );
+        assert_eq!(result["nativeDiagnostics"]["runtime"], "candle");
+        assert_eq!(result["nativeDiagnostics"]["device"], "cpu");
+        assert_eq!(result["nativeDiagnostics"]["inference"]["seed"], 41);
+        assert_eq!(result["nativeDiagnostics"]["inference"]["steps"], 3);
+        assert_eq!(
+            result["nativeDiagnostics"]["inference"]["cfgStrength"],
+            1.25
+        );
+        assert_eq!(result["nativeDiagnostics"]["inference"]["speed"], 1.5);
+        let max_duration = result["nativeDiagnostics"]["inference"]["maxDurationSeconds"]
+            .as_f64()
+            .expect("max duration");
+        assert!((max_duration - 0.02).abs() < 1.0e-6);
+        assert_eq!(
+            result["nativeDiagnostics"]["inference"]["removeSilence"],
+            true
+        );
+        assert_eq!(
+            result["nativeDiagnostics"]["bundleSource"],
+            "explicitBundlePath"
+        );
+        assert!(result["diagnostics"]
+            .as_array()
+            .expect("diagnostics")
+            .is_empty());
+    }
+
+    #[cfg(feature = "candle")]
+    #[test]
+    fn synthesize_surface_concatenates_long_text_chunks_into_one_pcm_output() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let f5_bundle = temp.path().join("f5");
+        let vocos_bundle = temp.path().join("vocos");
+        crate::native_f5::test_support::write_test_f5_bundle(
+            &f5_bundle,
+            serde_json::json!({
+                "model_type": "f5-tts",
+                "architectures": ["F5TTS"],
+                "n_mel_channels": 4,
+                "sample_rate": 24000,
+                "hop_length": 256
+            }),
+        );
+        crate::native_vocos::test_support::write_test_vocos_bundle(
+            &vocos_bundle,
+            &crate::native_vocos::test_support::test_config(4, 24_000, 256),
+            &[1, 2, 3, 4],
+        );
+        let long_text = [
+            "The first sentence establishes the native synthesis request for a reference speaker.",
+            "The second sentence is long enough to require chunk planning while using the same local diagnostic bundles.",
+            "The third sentence verifies that chunked synthesis still returns one in-memory PCM audio object.",
+        ]
+        .join(" ");
+
+        let response = run_surface_operation(SurfaceRequest {
+            operation: "audio.tts.synthesize".into(),
+            input: serde_json::json!({
+                "text": long_text,
+                "referenceVoicePrompt": {
+                    "audio": example_pcm_audio(),
+                    "transcript": "Reference voice prompt text.",
+                    "language": "en"
+                },
+                "provider": {
+                    "providerId": "f5",
+                    "modelId": "f5-tts-v1-base",
+                    "native": true,
+                    "device": "cpu",
+                    "modelBundle": {
+                        "bundlePath": f5_bundle
+                    },
+                    "vocoder": {
+                        "providerId": "vocos",
+                        "modelId": "vocos-mel-24khz",
+                        "modelBundle": {
+                            "bundlePath": vocos_bundle
+                        }
+                    }
+                },
+                "options": {
+                    "maxDurationSeconds": 0.02,
+                    "steps": 1
+                }
+            }),
+        })
+        .expect("native synthesize");
+        let result = &response.value["result"];
+        let chunk_count = result["nativeDiagnostics"]["textChunking"]["chunkCount"]
+            .as_u64()
+            .expect("chunk count");
+        let samples = result["audio"]["samples"].as_array().expect("samples");
+
+        assert_eq!(result["status"], "ready");
+        assert_eq!(result["audioGenerated"], true);
+        assert!(chunk_count > 1);
+        assert!(samples.len() > chunk_count as usize);
+        assert!(result.get("audioChunks").is_none());
+        assert_eq!(
+            result["nativeDiagnostics"]["textChunking"]["preservesInMemoryOutputContract"],
+            true
+        );
+    }
+}

@@ -178,3 +178,21 @@ fn request_configured_provider_adapters_forward_controls_before_runtime() {
     assert_eq!(single.provider_id(), "candle-whisper");
     assert_eq!(reusable.options(), &options);
 }
+
+#[test]
+fn candle_request_serializes_prompt_text_for_loaded_tokenizer_resolution() {
+    let config = CandleWhisperTranscriptionRequestConfig {
+        decode: audio_analysis_transcription::CandleWhisperDecodeRequestConfig {
+            initial_prompt: Some("Moenarch Whisper vocabulary".to_string()),
+            ..audio_analysis_transcription::CandleWhisperDecodeRequestConfig::default()
+        },
+        ..CandleWhisperTranscriptionRequestConfig::default()
+    };
+
+    let serialized = serde_json::to_value(config).expect("request config should serialize");
+
+    assert_eq!(
+        serialized["decode"]["initialPrompt"],
+        "Moenarch Whisper vocabulary"
+    );
+}

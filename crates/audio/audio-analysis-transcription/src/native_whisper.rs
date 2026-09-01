@@ -1846,7 +1846,8 @@ impl CandleWhisperSession {
         request: AsrRequest,
     ) -> Result<AsrResponse> {
         let controls = &config.runtime;
-        let decode = &config.decode;
+        let decode = self.resolve_request_decode_config(&config.decode)?;
+        let decode = &decode;
         let window_controls = &config.window;
         debug_assert!(
             decode.preserves_legacy_greedy_path() || !decode.search.temperature_schedule.is_empty()
@@ -2037,6 +2038,16 @@ impl CandleWhisperSession {
         diagnostics.extend([
             format!("decodeStrategy={decode_strategy}"),
             format!(
+                "initialPromptTokenCount={}",
+                decode.initial_prompt_tokens.len()
+            ),
+            format!("suppressedTokenCount={}", decode.suppressed_token_ids.len()),
+            format!("suppressNumerals={}", decode.suppress_numerals),
+            format!(
+                "conditionOnPreviousText={}",
+                decode.condition_on_previous_text
+            ),
+            format!(
                 "temperatureSchedule={}",
                 decode
                     .search
@@ -2173,6 +2184,35 @@ impl CandleWhisperSession {
             transcript,
             diagnostics,
         })
+    }
+
+    fn resolve_request_decode_config(
+        &self,
+        config: &CandleWhisperDecodeRequestConfig,
+    ) -> Result<CandleWhisperDecodeRequestConfig> {
+        let mut resolved = config.clone();
+        if let Some(prompt) = config
+            .initial_prompt
+            .as_deref()
+            .filter(|prompt| !prompt.is_empty())
+        {
+            let encoding = self.tokenizer.encode(prompt, false).map_err(|error| {
+                invalid_request(format!(
+                    "Candle Whisper could not tokenize initial_prompt: {error}"
+                ))
+            })?;
+            resolved
+                .initial_prompt_tokens
+                .extend_from_slice(encoding.get_ids());
+        }
+        for token_id in &resolved.suppressed_token_ids {
+            if self.tokenizer.id_to_token(*token_id).is_none() {
+                return Err(invalid_request(format!(
+                    "Whisper suppressed token id `{token_id}` is not in the tokenizer vocabulary"
+                )));
+            }
+        }
+        Ok(resolved)
     }
 
     fn decode_window_with_timing_mode(

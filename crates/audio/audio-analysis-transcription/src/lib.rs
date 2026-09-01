@@ -732,6 +732,9 @@ pub struct CandleWhisperDecodeRequestConfig {
     /// Token search settings used by each ordered fallback attempt.
     #[serde(default)]
     pub search: CandleWhisperDecodeConfig,
+    /// Prompt text tokenized by the loaded Whisper tokenizer for this request.
+    #[serde(default)]
+    pub initial_prompt: Option<String>,
     /// Token IDs placed after `<|startofprev|>` and before Whisper's
     /// SOT/language/task/timestamp controls.
     ///
@@ -802,6 +805,7 @@ impl CandleWhisperDecodeRequestConfig {
     #[cfg_attr(not(feature = "candle"), allow(dead_code))]
     fn preserves_legacy_greedy_path(&self) -> bool {
         self.search.uses_default_greedy_path()
+            && self.initial_prompt.as_ref().is_none_or(String::is_empty)
             && self.initial_prompt_tokens.is_empty()
             && self.suppressed_token_ids.is_empty()
             && !self.suppress_numerals

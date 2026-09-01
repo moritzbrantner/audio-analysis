@@ -717,6 +717,7 @@ fn transcription_source_kind(
     match source {
         audio_analysis_transcription::TranscriptionSource::Samples { .. } => "samples",
         audio_analysis_transcription::TranscriptionSource::Path { .. } => "path",
+        audio_analysis_transcription::TranscriptionSource::Media { .. } => "media",
     }
 }
 

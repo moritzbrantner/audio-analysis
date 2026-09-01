@@ -1690,6 +1690,10 @@ mod tests {
             Some(runtime_onnx::OnnxTensorElementType::F32),
         );
         let manifest = PyannoteVadManifest {
+            schema_version: None,
+            kind: None,
+            source: None,
+            files: BTreeMap::new(),
             sample_rate: Some(PYANNOTE_SAMPLE_RATE),
             segmentation: Some(PyannoteVadSegmentationManifest {
                 input_name: Some("waveform".to_string()),

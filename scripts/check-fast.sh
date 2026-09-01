@@ -2,4 +2,5 @@
 set -euo pipefail
 
 cargo metadata --format-version 1 --no-deps
-cargo test
+cargo clippy --workspace --all-targets
+cargo test --workspace

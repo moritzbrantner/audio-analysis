@@ -1762,6 +1762,18 @@ enum WhisperFeatureExtractorMode {
     Transformers,
 }
 
+fn whisper_max_generated_tokens(
+    generation: &GenerationConfig,
+    config: &whisper::Config,
+    prompt_length: usize,
+) -> usize {
+    let total_max_length = generation
+        .max_length
+        .unwrap_or(config.max_target_positions)
+        .min(config.max_target_positions);
+    (total_max_length / 2).min(total_max_length.saturating_sub(prompt_length))
+}
+
 impl CandleWhisperSession {
     fn load(setup: WhisperRunSetup) -> Result<Self> {
         let device = candle_device(&setup.resolved_device)?;
@@ -2653,13 +2665,12 @@ impl CandleWhisperSession {
         decode: &CandleWhisperDecodeRequestConfig,
     ) -> Result<WhisperTokenDecodeResult> {
         let eos = self.eos_token_id()?;
-        let max_length = self
-            .generation
-            .max_length
-            .unwrap_or(self.model.config().max_target_positions)
-            .min(self.model.config().max_target_positions);
         let initial_tokens = self.initial_tokens(mode, &decode.initial_prompt_tokens)?;
-        let max_generated_tokens = max_length.saturating_sub(initial_tokens.token_ids.len());
+        let max_generated_tokens = whisper_max_generated_tokens(
+            &self.generation,
+            self.model.config(),
+            initial_tokens.token_ids.len(),
+        );
         let mut stats = WhisperGenerationStats::default();
         let temperatures = decode.search.temperature_schedule.clone();
         let (
@@ -2790,12 +2801,12 @@ impl CandleWhisperSession {
     ) -> Result<Vec<WhisperTokenDecodeResult>> {
         self.model.reset_cache();
         let eos = self.eos_token_id()?;
-        let max_length = self
-            .generation
-            .max_length
-            .unwrap_or(self.model.config().max_target_positions)
-            .min(self.model.config().max_target_positions);
         let initial_tokens = self.initial_tokens(mode, &decode.initial_prompt_tokens)?;
+        let max_generated_tokens = whisper_max_generated_tokens(
+            &self.generation,
+            self.model.config(),
+            initial_tokens.token_ids.len(),
+        );
         let mut active_rows = (0..row_count)
             .map(|original_index| ActiveWhisperDecodeRow {
                 original_index,
@@ -2808,7 +2819,9 @@ impl CandleWhisperSession {
         let mut active_features = audio_features.clone();
         let mut completed: Vec<Option<WhisperTokenDecodeResult>> = vec![None; row_count];
 
-        while !active_rows.is_empty() && active_rows[0].row.tokens.len() < max_length {
+        while !active_rows.is_empty()
+            && active_rows[0].row.generated_tokens().len() < max_generated_tokens
+        {
             let active_len_before_step = active_rows.len();
             let input = active_rows[0].row.next_decoder_input();
             debug_assert!(active_rows.iter().all(|active| active
@@ -4244,6 +4257,175 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires the retained full German WAV, WhisperX 3.8.6 JSON, and pinned Whisper-small bundle; run explicitly with --ignored"]
+    fn german_long_window_stops_at_whisperx_greedy_generation_limit() {
+        let bundle = std::env::var_os("CANDLE_WHISPER_SMALL_BUNDLE")
+            .map(PathBuf::from)
+            .expect("CANDLE_WHISPER_SMALL_BUNDLE must point at the pinned Whisper-small revision");
+        let audio_path = std::env::var_os("CANDLE_WHISPER_GERMAN_LONG_WAV")
+            .map(PathBuf::from)
+            .expect("CANDLE_WHISPER_GERMAN_LONG_WAV must point at the retained full German WAV");
+        let oracle_path = std::env::var_os("CANDLE_WHISPER_GERMAN_LONG_WHISPERX_ORACLE")
+            .map(PathBuf::from)
+            .expect(
+                "CANDLE_WHISPER_GERMAN_LONG_WHISPERX_ORACLE must point at the retained WhisperX 3.8.6 JSON",
+            );
+        let assert_sha256 = |path: &Path, expected: &str| {
+            let bytes = std::fs::read(path).expect("pinned long-window parity resource");
+            let actual = format!("{:x}", Sha256::digest(bytes));
+            assert_eq!(
+                actual,
+                expected,
+                "pinned long-window resource changed: {}",
+                path.display()
+            );
+        };
+        assert_sha256(
+            &audio_path,
+            "193a1cfbe84eaac2585a5bfa8519d28c2b74ba84d630c3ed73403565310f979c",
+        );
+        assert_sha256(
+            &oracle_path,
+            "531b6a990798a9caccb35991dd22ea5311b22c4c8c4451198390e443f175727c",
+        );
+        assert_sha256(
+            &bundle.join("model.safetensors"),
+            "1d7734884874f1a1513ed9aa760a4f8e97aaa02fd6d93a3a85d27b2ae9ca596b",
+        );
+
+        let oracle_bytes = std::fs::read(&oracle_path).expect("retained WhisperX oracle");
+        let oracle: serde_json::Value =
+            serde_json::from_slice(&oracle_bytes).expect("WhisperX JSON");
+        let oracle_segment = &oracle["segments"][3];
+        assert_eq!(oracle_segment["start"], serde_json::json!(61.538));
+        assert_eq!(oracle_segment["end"], serde_json::json!(91.504));
+        let oracle_text = oracle_segment["text"]
+            .as_str()
+            .expect("WhisperX segment text");
+
+        let mut reader = hound::WavReader::open(&audio_path).expect("German PCM fixture");
+        let spec = reader.spec();
+        assert_eq!(spec.sample_rate, whisper::SAMPLE_RATE as u32);
+        assert_eq!(spec.channels, 1);
+        assert_eq!(spec.bits_per_sample, 16);
+        let samples = reader
+            .samples::<i16>()
+            .map(|sample| sample.expect("PCM sample") as f32 / 32_768.0)
+            .collect::<Vec<_>>();
+        let request = AsrRequest {
+            audio: crate::LoadedAudio {
+                samples,
+                sample_rate: spec.sample_rate,
+                channels: spec.channels,
+                source: Some("retained-full-german-parity-fixture".to_string()),
+            },
+            chunks: vec![SpeechActivitySegment::new(61.538, 91.504, 1.0)
+                .expect("exact WhisperX 3.8.6 long speech span")],
+            task: TranscriptionTask::Transcribe,
+            language: Some("de".to_string()),
+            model_id: "openai/whisper-small".to_string(),
+        };
+        let options = CandleWhisperOptions {
+            model_id: request.model_id.clone(),
+            language: request.language.clone(),
+            device: crate::NativeDevicePreference::Cpu,
+            compute_type: CandleWhisperComputeType::Fp32,
+            model_bundle: Some(bundle),
+            model_cache_only: true,
+            batch_chunks: false,
+            max_batch_size: Some(1),
+            ..CandleWhisperOptions::default()
+        };
+        let config = CandleWhisperTranscriptionRequestConfig {
+            window: CandleWhisperWindowControls {
+                timing_mode: CandleWhisperTimingMode::NoTimestamps,
+                leading_context_seconds: 0.0,
+                trailing_context_seconds: 0.0,
+            },
+            ..CandleWhisperTranscriptionRequestConfig::default()
+        };
+        let setup =
+            WhisperRunSetup::from_options_and_request(&options, &request).expect("run setup");
+        let mut session = CandleWhisperSession::load(setup).expect("load Whisper-small");
+        let windows = collect_chunk_windows(
+            &request.audio.samples,
+            request.audio.sample_rate,
+            &request.chunks,
+            &config.window,
+        )
+        .expect("zero-context long window");
+        assert_eq!(windows.len(), 1);
+        let features = session
+            .encode_window_batch(&windows, WhisperFeatureExtractorMode::Transformers)
+            .expect("encoder features");
+        let initial = session
+            .initial_tokens(WhisperDecodeMode::WithoutTimestamps, &[])
+            .expect("German no-timestamps prompt");
+        let oracle_tokens = session
+            .tokenizer
+            .encode(oracle_text, false)
+            .expect("tokenize WhisperX text")
+            .get_ids()
+            .to_vec();
+        assert_eq!(oracle_tokens.len(), 224);
+        assert_eq!(
+            decode_text_tokens(&session.tokenizer, &oracle_tokens)
+                .expect("decode oracle token IDs"),
+            oracle_text
+        );
+        let mut no_speech_probability = None;
+        let mut stats = WhisperGenerationStats::default();
+        let full_prefix_logits = session
+            .configured_search_logits(
+                &features,
+                &initial.token_ids,
+                initial.sot_position,
+                &oracle_tokens,
+                WhisperDecodeMode::WithoutTimestamps,
+                &config.decode,
+                &mut no_speech_probability,
+                &mut stats,
+            )
+            .expect("full-prefix logits at WhisperX generation boundary");
+        let full_prefix_next =
+            argmax_finite(&full_prefix_logits).expect("finite full-prefix logits");
+
+        assert_eq!(
+            full_prefix_next, 674,
+            "the retained oracle must exercise a generation-limit boundary, not EOS"
+        );
+        assert_eq!(
+            whisper_max_generated_tokens(
+                &session.generation,
+                session.model.config(),
+                initial.token_ids.len(),
+            ),
+            oracle_tokens.len()
+        );
+
+        let decoded = session
+            .decode_tokens_batch(
+                &features,
+                1,
+                WhisperDecodeMode::WithoutTimestamps,
+                &config.decode,
+            )
+            .expect("KV-cached greedy decode");
+        assert_eq!(decoded.len(), 1);
+        assert_eq!(
+            decoded[0].token_ids.len(),
+            oracle_tokens.len(),
+            "KV-cached Candle decode must stop at the Whisper generation limit"
+        );
+        assert_eq!(
+            decode_text_tokens(&session.tokenizer, &decoded[0].token_ids)
+                .expect("decode KV-cached token IDs")
+                .trim(),
+            oracle_text
+        );
+    }
+
+    #[test]
     fn model_resolution_observer_can_cancel_before_resolution_work() {
         let mut observed = 0;
 
@@ -4491,6 +4673,32 @@ mod tests {
             suppress_tokens: Vec::new(),
             begin_suppress_tokens: Vec::new(),
         }
+    }
+
+    #[test]
+    fn whisper_generation_limit_reserves_half_the_decoder_context_for_output() {
+        let config: whisper::Config = serde_json::from_value(serde_json::json!({
+            "num_mel_bins": 2,
+            "max_source_positions": 4,
+            "d_model": 32,
+            "encoder_attention_heads": 4,
+            "encoder_layers": 1,
+            "vocab_size": 15,
+            "max_target_positions": 8,
+            "decoder_attention_heads": 4,
+            "decoder_layers": 1,
+            "suppress_tokens": []
+        }))
+        .expect("test Whisper config");
+
+        assert_eq!(
+            whisper_max_generated_tokens(&test_generation(), &config, 4),
+            4
+        );
+        assert_eq!(
+            whisper_max_generated_tokens(&test_generation(), &config, 7),
+            1
+        );
     }
 
     fn test_tokenizer() -> Tokenizer {

@@ -139,6 +139,30 @@ cargo test -p moenarch-audio-analysis-transcription --features candle \
   -- --ignored --nocapture
 ```
 
+Whisper decoding reserves at most half of the model's total target context for
+new tokens, while also leaving enough positions for the complete prompt. For a
+448-position model with the standard four-token prompt, the generated-token
+limit is therefore 224. This matches CTranslate2's Whisper generation contract
+and prevents a non-EOS sequence from consuming the prompt half of the decoder
+context.
+
+The opt-in long-window contract retains the exact `61.538–91.504s` span from
+the full German fixture. It proves that the real KV-cached path emits the same
+decoded text as WhisperX when both reach the 224-token generation limit. The
+test fails closed unless the full WAV hash is
+`193a1cfbe84eaac2585a5bfa8519d28c2b74ba84d630c3ed73403565310f979c`
+and the WhisperX JSON hash is
+`531b6a990798a9caccb35991dd22ea5311b22c4c8c4451198390e443f175727c`.
+
+```bash
+CANDLE_WHISPER_SMALL_BUNDLE=/path/to/973afd24965f72e36ca33b3055d56a652f456b4d \
+CANDLE_WHISPER_GERMAN_LONG_WAV=/path/to/full-german-parity.wav \
+CANDLE_WHISPER_GERMAN_LONG_WHISPERX_ORACLE=/path/to/whisperx-3.8.6-full.json \
+cargo test -p moenarch-audio-analysis-transcription --features candle \
+  german_long_window_stops_at_whisperx_greedy_generation_limit \
+  -- --ignored --nocapture
+```
+
 The corresponding external reference is WhisperX 3.8.6 with `--no_align`,
 `--device cpu`, `--compute_type float32`, `--language de`, `--temperature 0`,
 `--best_of 1`, and `--beam_size 1`. Model resolution remains cache-only and

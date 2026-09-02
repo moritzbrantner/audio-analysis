@@ -2,6 +2,8 @@
 set -euo pipefail
 
 root="$(git rev-parse --show-toplevel)"
+cd "$root"
+
 tooling_dir="${CODING_TOOLING_DIR:-$root/../coding-tooling}"
 backup="$root/.cargo/registry-Cargo.lock"
 fingerprint_file="$root/.coding-tooling.source-lock.sha256"
@@ -41,7 +43,7 @@ case "$action" in
       printf '%s\n' "source dependency session already has a registry-lock backup; deactivate it first" >&2
       exit 2
     fi
-    if ! git diff --quiet -- Cargo.lock; then
+    if ! git diff --quiet -- Cargo.lock || ! git diff --cached --quiet -- Cargo.lock; then
       printf '%s\n' "Cargo.lock has uncommitted changes; commit or restore the registry lock before source activation" >&2
       exit 2
     fi

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cargo metadata --format-version 1 --no-deps
-cargo clippy --workspace --all-targets
-cargo test --workspace
+cargo metadata --locked --format-version 1 --no-deps
+cargo clippy --locked --workspace --all-targets
+cargo test --locked --workspace

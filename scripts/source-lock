@@ -107,14 +107,16 @@ run_scoped() {
     return 2
   fi
 
-  local had_snapshot=false owns_snapshot=false
   if [[ -f "$snapshot" ]]; then
-    had_snapshot=true
+    printf '%s\n' 'source-lock state already exists from another or interrupted scope.' >&2
+    printf '%s\n' 'Inspect it with scripts/source-lock status and recover with scripts/source-lock restore before starting a new scope.' >&2
+    return 1
   fi
 
+  local owns_snapshot=false
   prepare
 
-  if [[ "$had_snapshot" != "true" && -f "$snapshot" ]]; then
+  if [[ -f "$snapshot" ]]; then
     owns_snapshot=true
     trap restore_snapshot EXIT
   fi
@@ -140,6 +142,10 @@ case "${1:-}" in
     ;;
   status)
     if ! managed_source_active; then
+      if [[ -f "$snapshot" ]]; then
+        printf '%s\n' 'source lock: stale snapshot while source mode is inactive' >&2
+        exit 1
+      fi
       printf '%s\n' 'source lock: inactive'
     elif [[ -f "$snapshot" ]]; then
       expected="$(expected_hash)"

@@ -56,6 +56,10 @@ jobs:
         run: bash scripts/check-agent-readiness.sh --with-source
       - name: Run preflight
         run: scripts/check-preflight.sh
+      - name: Require source verification to restore registry lock
+        run: |
+          test ! -e .cargo/source-lock-state
+          git diff --exit-code -- Cargo.lock
       - name: Deactivate source dependencies
         if: always()
         run: bash scripts/source-deps deactivate

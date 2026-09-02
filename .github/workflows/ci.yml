@@ -54,13 +54,13 @@ jobs:
         run: bash scripts/source-deps activate
       - name: Verify source-development agent readiness
         run: bash scripts/check-agent-readiness.sh --with-source
-      - name: Diagnose source-mode lockfile resolution
+      - name: Diagnose source-mode lock fingerprint
         run: |
           cargo metadata --format-version 1 >/dev/null
-          if ! git diff --exit-code -- Cargo.lock; then
-            echo "::error::source-mode full resolution changes Cargo.lock; commit the deterministic lockfile delta"
-            exit 1
-          fi
+          sha256sum Cargo.lock
+          git hash-object Cargo.lock
+          git diff --stat -- Cargo.lock
+          exit 1
       - name: Run preflight
         run: scripts/check-preflight.sh
       - name: Deactivate source dependencies

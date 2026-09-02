@@ -5,6 +5,9 @@ This is the capability repository for audio analysis and generation packages.
 - Keep reusable Rust code under `crates/` and focused package surfaces under `packages/`.
 - Do not reintroduce sibling paths, moving Git dependencies, visual-analysis dependencies, or NLP implementation dependencies into committed package manifests.
 - `packages/audio-app-ui` is private destination support, not an automatically publishable package.
+- On a fresh machine or after the declared toolchain/environment contract changes, run `bash scripts/codex-environment.sh setup`. Use `maintenance` for an existing environment when dependency state changes.
+- Before starting implementation, run `bash scripts/check-agent-readiness.sh`. It verifies the semantic environment fingerprint, locked Cargo metadata, and free build-disk capacity before model time is spent. Use `--with-source` when the task requires the exact Foundation source graph.
+- The default free-space floor is 8 GiB. `AGENT_MIN_FREE_GIB` may be raised for larger builds; lower it only for an intentionally constrained environment, never to hide an exhausted target filesystem.
 - Ordinary feature work is source-first. Use `bash scripts/source-deps activate` when it needs unreleased `moenarch-foundation` changes; the committed declaration pins one exact reviewed foundation revision.
 - Timed-text interchange belongs to `moenarch-media-core`; transcript parsing, formatting, and NLP enrichment remain optional downstream behavior rather than audio dependencies.
 - Source mode is local-workspace owned: every declared sibling checkout must exist at the exact pinned revision. Do not add private-repository tokens or authenticated Git fallback so hosted CI can reproduce the multi-repository workspace.

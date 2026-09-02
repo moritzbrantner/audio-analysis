@@ -89,7 +89,11 @@ print(verified)
 PY
 )"
 
-cargo metadata --locked --format-version 1 --no-deps >/dev/null
+if [[ "$mode" == "--with-source" ]]; then
+  bash scripts/source-lock run -- cargo metadata --locked --format-version 1 >/dev/null
+else
+  cargo metadata --locked --format-version 1 --no-deps >/dev/null
+fi
 
 if [[ "$activated_here" == "true" ]]; then
   run_tooling source-deps deactivate --config "$root/.coding-tooling.source-deps.json" --json >/dev/null

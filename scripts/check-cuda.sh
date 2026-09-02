@@ -6,7 +6,11 @@ if ! command -v nvcc >/dev/null 2>&1; then
   exit 2
 fi
 
-cargo test -p moenarch-audio-analysis-transcription --features cuda
-cargo test -p moenarch-audio-generation-tts --features cuda
-cargo test -p moenarch-audio-generation-tts-cli --features cuda
-cargo test -p moenarch-audio-generation-tts-server --features cuda
+if [[ "${AUDIO_ANALYSIS_SOURCE_LOCK_SCOPE:-0}" != "1" ]]; then
+  exec bash scripts/source-lock run -- bash "$0" "$@"
+fi
+
+cargo test --locked -p moenarch-audio-analysis-transcription --features cuda
+cargo test --locked -p moenarch-audio-generation-tts --features cuda
+cargo test --locked -p moenarch-audio-generation-tts-cli --features cuda
+cargo test --locked -p moenarch-audio-generation-tts-server --features cuda

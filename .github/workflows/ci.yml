@@ -52,10 +52,29 @@ jobs:
           git -C ../moenarch-foundation checkout --detach FETCH_HEAD
       - name: Activate pinned source dependencies
         run: bash scripts/source-deps activate
+      - name: Capture source lock candidate
+        run: |
+          mkdir -p .artifacts/source-lock
+          cp Cargo.lock .artifacts/source-lock/registry-Cargo.lock
+          cargo metadata --format-version 1 >/dev/null
+          cp Cargo.lock .artifacts/source-lock/Cargo.lock
+          cp .artifacts/source-lock/registry-Cargo.lock Cargo.lock
+          sha256sum .artifacts/source-lock/Cargo.lock
+      - name: Upload source lock candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: source-lock-candidate-${{ github.sha }}
+          path: .artifacts/source-lock/Cargo.lock
+          if-no-files-found: error
+          retention-days: 1
       - name: Verify source-development agent readiness
         run: bash scripts/check-agent-readiness.sh --with-source
       - name: Run preflight
         run: scripts/check-preflight.sh
+      - name: Require source verification to restore registry lock
+        run: |
+          test ! -e .cargo/source-lock-state
+          git diff --exit-code -- Cargo.lock
       - name: Deactivate source dependencies
         if: always()
         run: bash scripts/source-deps deactivate

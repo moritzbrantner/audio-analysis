@@ -6,6 +6,8 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "check:structure": "python3 scripts/check_extraction.py",
-    "check": "bun run check:structure"
+    "check:fast": "bash scripts/check-fast.sh",
+    "check:handoff": "bash scripts/check-handoff.sh",
+    "check": "bun run check:handoff"
   }
 }

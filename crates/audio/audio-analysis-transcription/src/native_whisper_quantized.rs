@@ -4,8 +4,10 @@ use candle_core::quantized::GgmlDType;
 use candle_core::{DType, Device, IndexOp, Module, Result, Tensor, D};
 use candle_nn::{Conv1d, Conv1dConfig, LayerNorm};
 use candle_transformers::models::whisper;
-use candle_transformers::quantized_nn::{layer_norm, linear, linear_no_bias, Embedding, Linear};
+use candle_transformers::quantized_nn::{layer_norm, Embedding};
 use candle_transformers::quantized_var_builder::VarBuilder;
+
+use crate::native_whisper_q8_cpu::{Q8CpuKernelRoute, Q8CpuLinear};
 
 /// Observable cache behavior for one Q8 Whisper decoder operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,31 +72,69 @@ struct AttentionCacheStats {
 
 #[derive(Debug, Clone)]
 struct Q8WhisperAttention {
-    query: Linear,
-    key: Linear,
-    value: Linear,
-    out: Linear,
+    query: Q8CpuLinear,
+    key: Q8CpuLinear,
+    value: Q8CpuLinear,
+    out: Q8CpuLinear,
     n_head: usize,
     kv_cache: Option<(Tensor, Tensor)>,
 }
 
 impl Q8WhisperAttention {
-    fn load(n_state: usize, n_head: usize, vb: VarBuilder) -> Result<Self> {
+    fn load_quantized(n_state: usize, n_head: usize, vb: VarBuilder) -> Result<Self> {
         require_q8_weight(&vb, (n_state, n_state), "q_proj.weight")?;
         require_q8_weight(&vb, (n_state, n_state), "k_proj.weight")?;
         require_q8_weight(&vb, (n_state, n_state), "v_proj.weight")?;
         require_q8_weight(&vb, (n_state, n_state), "out_proj.weight")?;
         Ok(Self {
-            query: linear(n_state, n_state, vb.pp("q_proj"))?,
-            key: linear_no_bias(n_state, n_state, vb.pp("k_proj"))?,
-            value: linear(n_state, n_state, vb.pp("v_proj"))?,
-            out: linear(n_state, n_state, vb.pp("out_proj"))?,
+            query: Q8CpuLinear::load_quantized(n_state, n_state, true, vb.pp("q_proj"))?,
+            key: Q8CpuLinear::load_quantized(n_state, n_state, false, vb.pp("k_proj"))?,
+            value: Q8CpuLinear::load_quantized(n_state, n_state, true, vb.pp("v_proj"))?,
+            out: Q8CpuLinear::load_quantized(n_state, n_state, true, vb.pp("out_proj"))?,
             n_head,
             kv_cache: None,
         })
     }
 
-    fn forward_self(&mut self, x: &Tensor, mask: &Tensor) -> Result<(Tensor, AttentionCacheStats)> {
+    fn load_dequantized(n_state: usize, n_head: usize, vb: VarBuilder) -> Result<Self> {
+        require_q8_weight(&vb, (n_state, n_state), "q_proj.weight")?;
+        require_q8_weight(&vb, (n_state, n_state), "k_proj.weight")?;
+        require_q8_weight(&vb, (n_state, n_state), "v_proj.weight")?;
+        require_q8_weight(&vb, (n_state, n_state), "out_proj.weight")?;
+        Ok(Self {
+            query: Q8CpuLinear::load_dequantized(n_state, n_state, true, vb.pp("q_proj"))?,
+            key: Q8CpuLinear::load_dequantized(n_state, n_state, false, vb.pp("k_proj"))?,
+            value: Q8CpuLinear::load_dequantized(n_state, n_state, true, vb.pp("v_proj"))?,
+            out: Q8CpuLinear::load_dequantized(n_state, n_state, true, vb.pp("out_proj"))?,
+            n_head,
+            kv_cache: None,
+        })
+    }
+
+    fn load_cross_hybrid(n_state: usize, n_head: usize, vb: VarBuilder) -> Result<Self> {
+        require_q8_weight(&vb, (n_state, n_state), "q_proj.weight")?;
+        require_q8_weight(&vb, (n_state, n_state), "k_proj.weight")?;
+        require_q8_weight(&vb, (n_state, n_state), "v_proj.weight")?;
+        require_q8_weight(&vb, (n_state, n_state), "out_proj.weight")?;
+        Ok(Self {
+            query: Q8CpuLinear::load_quantized(n_state, n_state, true, vb.pp("q_proj"))?,
+            key: Q8CpuLinear::load_dequantized(n_state, n_state, false, vb.pp("k_proj"))?,
+            value: Q8CpuLinear::load_dequantized(n_state, n_state, true, vb.pp("v_proj"))?,
+            out: Q8CpuLinear::load_quantized(n_state, n_state, true, vb.pp("out_proj"))?,
+            n_head,
+            kv_cache: None,
+        })
+    }
+
+    fn kernel_route(&self) -> Q8CpuKernelRoute {
+        self.query.route()
+    }
+
+    fn forward_self(
+        &mut self,
+        x: &Tensor,
+        mask: Option<&Tensor>,
+    ) -> Result<(Tensor, AttentionCacheStats)> {
         let q = self.query.forward(x)?;
         let current_k = self.key.forward(x)?;
         let current_v = self.value.forward(x)?;
@@ -107,9 +147,7 @@ impl Q8WhisperAttention {
             None => (current_k, current_v),
         };
         self.kv_cache = Some((k.clone(), v.clone()));
-        let output = self
-            .out
-            .forward(&self.qkv_attention(&q, &k, &v, Some(mask))?)?;
+        let output = self.out.forward(&self.qkv_attention(&q, &k, &v, mask)?)?;
         Ok((
             output,
             AttentionCacheStats {
@@ -208,8 +246,8 @@ struct Q8WhisperBlock {
     self_attention_layer_norm: LayerNorm,
     cross_attention: Q8WhisperAttention,
     cross_attention_layer_norm: LayerNorm,
-    mlp_linear1: Linear,
-    mlp_linear2: Linear,
+    mlp_linear1: Q8CpuLinear,
+    mlp_linear2: Q8CpuLinear,
     final_layer_norm: LayerNorm,
 }
 
@@ -217,8 +255,8 @@ struct Q8WhisperBlock {
 struct Q8WhisperEncoderBlock {
     self_attention: Q8WhisperAttention,
     self_attention_layer_norm: LayerNorm,
-    mlp_linear1: Linear,
-    mlp_linear2: Linear,
+    mlp_linear1: Q8CpuLinear,
+    mlp_linear2: Q8CpuLinear,
     final_layer_norm: LayerNorm,
 }
 
@@ -227,19 +265,23 @@ impl Q8WhisperEncoderBlock {
         require_q8_weight(&vb, (n_state * 4, n_state), "fc1.weight")?;
         require_q8_weight(&vb, (n_state, n_state * 4), "fc2.weight")?;
         Ok(Self {
-            self_attention: Q8WhisperAttention::load(n_state, n_head, vb.pp("self_attn"))?,
+            self_attention: Q8WhisperAttention::load_dequantized(
+                n_state,
+                n_head,
+                vb.pp("self_attn"),
+            )?,
             self_attention_layer_norm: layer_norm(n_state, 1e-5, vb.pp("self_attn_layer_norm"))?,
-            mlp_linear1: linear(n_state, n_state * 4, vb.pp("fc1"))?,
-            mlp_linear2: linear(n_state * 4, n_state, vb.pp("fc2"))?,
+            mlp_linear1: Q8CpuLinear::load_dequantized(n_state, n_state * 4, true, vb.pp("fc1"))?,
+            mlp_linear2: Q8CpuLinear::load_dequantized(n_state * 4, n_state, true, vb.pp("fc2"))?,
             final_layer_norm: layer_norm(n_state, 1e-5, vb.pp("final_layer_norm"))?,
         })
     }
 
-    fn forward(&mut self, x: &Tensor, mask: &Tensor) -> Result<Tensor> {
+    fn forward(&mut self, x: &Tensor) -> Result<Tensor> {
         self.self_attention.reset_cache();
         let (attention, _) = self
             .self_attention
-            .forward_self(&self.self_attention_layer_norm.forward(x)?, mask)?;
+            .forward_self(&self.self_attention_layer_norm.forward(x)?, None)?;
         let x = (x + attention)?;
         let mlp = self.mlp_linear2.forward(
             &self
@@ -313,9 +355,8 @@ impl CandleQ8WhisperEncoder {
         let (_, sequence_len, _) = x.dims3()?;
         let positions = self.positional_embedding.narrow(0, 0, sequence_len)?;
         let mut x = x.broadcast_add(&positions)?;
-        let mask = Tensor::zeros((sequence_len, sequence_len), DType::F32, x.device())?;
         for block in &mut self.blocks {
-            x = block.forward(&x, &mask)?;
+            x = block.forward(&x)?;
         }
         self.layer_norm.forward(&x)
     }
@@ -363,6 +404,14 @@ impl CandleQ8WhisperModel {
         self.decoder.reset_cache();
     }
 
+    pub(crate) fn execution_route(&self) -> &'static str {
+        "hybrid-f32-encoder-cross-projection-q8-decoder"
+    }
+
+    pub(crate) fn kernel_route(&self) -> Q8CpuKernelRoute {
+        self.decoder.kernel_route()
+    }
+
     pub(crate) fn select_cache_rows(&mut self, row_indices: &Tensor) -> Result<()> {
         self.decoder.select_cache_rows(row_indices)
     }
@@ -402,16 +451,24 @@ impl Q8WhisperBlock {
         require_q8_weight(&vb, (n_state * 4, n_state), "fc1.weight")?;
         require_q8_weight(&vb, (n_state, n_state * 4), "fc2.weight")?;
         Ok(Self {
-            self_attention: Q8WhisperAttention::load(n_state, n_head, vb.pp("self_attn"))?,
+            self_attention: Q8WhisperAttention::load_quantized(
+                n_state,
+                n_head,
+                vb.pp("self_attn"),
+            )?,
             self_attention_layer_norm: layer_norm(n_state, 1e-5, vb.pp("self_attn_layer_norm"))?,
-            cross_attention: Q8WhisperAttention::load(n_state, n_head, vb.pp("encoder_attn"))?,
+            cross_attention: Q8WhisperAttention::load_cross_hybrid(
+                n_state,
+                n_head,
+                vb.pp("encoder_attn"),
+            )?,
             cross_attention_layer_norm: layer_norm(
                 n_state,
                 1e-5,
                 vb.pp("encoder_attn_layer_norm"),
             )?,
-            mlp_linear1: linear(n_state, n_state * 4, vb.pp("fc1"))?,
-            mlp_linear2: linear(n_state * 4, n_state, vb.pp("fc2"))?,
+            mlp_linear1: Q8CpuLinear::load_quantized(n_state, n_state * 4, true, vb.pp("fc1"))?,
+            mlp_linear2: Q8CpuLinear::load_quantized(n_state * 4, n_state, true, vb.pp("fc2"))?,
             final_layer_norm: layer_norm(n_state, 1e-5, vb.pp("final_layer_norm"))?,
         })
     }
@@ -424,7 +481,7 @@ impl Q8WhisperBlock {
     ) -> Result<(Tensor, Q8WhisperBlockStats)> {
         let (self_attention, self_stats) = self
             .self_attention
-            .forward_self(&self.self_attention_layer_norm.forward(x)?, mask)?;
+            .forward_self(&self.self_attention_layer_norm.forward(x)?, Some(mask))?;
         let x = (x + self_attention)?;
         let (cross_attention, cross_stats) = self.cross_attention.forward_cross(
             &self.cross_attention_layer_norm.forward(&x)?,
@@ -531,6 +588,13 @@ impl CandleQ8WhisperDecoder {
             cache_start_position: None,
             cached_token_count: 0,
         })
+    }
+
+    fn kernel_route(&self) -> Q8CpuKernelRoute {
+        self.blocks
+            .first()
+            .map(|block| block.self_attention.kernel_route())
+            .unwrap_or_else(Q8CpuKernelRoute::detected)
     }
 
     /// Decodes newly supplied token positions while retaining attention state.

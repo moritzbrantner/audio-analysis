@@ -2012,6 +2012,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
 ]
 
 [[package]]
@@ -2111,6 +2112,7 @@ dependencies = [
  "candle-transformers",
  "cmake",
  "flate2",
+ "half",
  "hound",
  "moenarch-audio-analysis-io",
  "moenarch-audio-analysis-speakers",

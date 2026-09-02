@@ -1002,6 +1002,13 @@ fn whisper_setup_diagnostics(setup: &WhisperRunSetup) -> Vec<String> {
     ]
 }
 
+fn q8_execution_diagnostics(execution_route: &str, kernel_route: &str) -> [String; 2] {
+    [
+        format!("q8ExecutionRoute={execution_route}"),
+        format!("q8LinearKernel={kernel_route}"),
+    ]
+}
+
 pub(crate) fn resolve_whisper_bundle_paths(bundle: &Path) -> Result<WhisperBundlePaths> {
     if !bundle.exists() {
         return Err(setup_error(format!(
@@ -2014,6 +2021,12 @@ impl CandleWhisperSession {
         .map_err(|error| model_output_mismatch(error.to_string()))?;
         let device_label = device_label(&self.setup.resolved_device);
         let mut diagnostics = whisper_setup_diagnostics(&self.setup);
+        if let WhisperModel::Q8(model) = &self.model {
+            diagnostics.extend(q8_execution_diagnostics(
+                model.execution_route(),
+                model.kernel_route().as_str(),
+            ));
+        }
         diagnostics.extend([
             "provider=candle-whisper".to_string(),
             format!("device={device_label}"),
@@ -5570,6 +5583,13 @@ mod tests {
         assert!(diagnostics
             .iter()
             .any(|item| item == "modelFormat=gguf-q8_0"));
+        assert_eq!(
+            q8_execution_diagnostics("hybrid-f32-encoder-cross-projection-q8-decoder", "avx2-fma"),
+            [
+                "q8ExecutionRoute=hybrid-f32-encoder-cross-projection-q8-decoder",
+                "q8LinearKernel=avx2-fma",
+            ]
+        );
         assert_eq!(format_cache_reuse(true, true), "self-and-cross-attention");
     }
 

@@ -24,6 +24,7 @@ hound.workspace = true
 sha2 = { version = "0.10.9", optional = true }
 ureq = { version = "2.12.1", default-features = true, optional = true }
 flate2 = { workspace = true, optional = true }
+half = { version = "2.7.1", optional = true }
 rayon = { workspace = true, optional = true }
 rustfft = { workspace = true, optional = true }
 model-runtime = { workspace = true, optional = true }
@@ -38,7 +39,7 @@ audio-analysis-speakers = { package = "moenarch-audio-analysis-speakers", versio
 
 [features]
 default = []
-candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:flate2", "dep:rayon", "dep:rustfft", "dep:tokenizers"]
+candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:flate2", "dep:half", "dep:rayon", "dep:rustfft", "dep:tokenizers"]
 cuda = ["candle", "candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
 alignment = ["candle", "dep:tokenizers"]
 diarization = []

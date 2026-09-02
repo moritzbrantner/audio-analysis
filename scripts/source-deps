@@ -3,14 +3,90 @@ set -euo pipefail
 
 root="$(git rev-parse --show-toplevel)"
 tooling_dir="${CODING_TOOLING_DIR:-$root/../coding-tooling}"
+backup="$root/.cargo/registry-Cargo.lock"
+fingerprint_file="$root/.coding-tooling.source-lock.sha256"
 
-if command -v coding-tooling >/dev/null 2>&1; then
-  exec coding-tooling source-deps "$@"
-fi
+run_tooling() {
+  if command -v coding-tooling >/dev/null 2>&1; then
+    coding-tooling source-deps "$@"
+    return
+  fi
 
-if [[ -f "$tooling_dir/src/cli.ts" ]]; then
-  exec bun "$tooling_dir/src/cli.ts" source-deps "$@"
-fi
+  if [[ -f "$tooling_dir/src/cli.ts" ]]; then
+    bun "$tooling_dir/src/cli.ts" source-deps "$@"
+    return
+  fi
 
-printf '%s\n' "coding-tooling is required. Install it or set CODING_TOOLING_DIR to a sibling checkout." >&2
-exit 2
+  printf '%s\n' "coding-tooling is required. Install it or set CODING_TOOLING_DIR to a sibling checkout." >&2
+  exit 2
+}
+
+source_lock_hash() {
+  python3 - <<'PY'
+from hashlib import sha256
+from pathlib import Path
+print(sha256(Path("Cargo.lock").read_bytes()).hexdigest())
+PY
+}
+
+action="${1:-}"
+
+case "$action" in
+  activate)
+    if [[ ! -f "$fingerprint_file" ]]; then
+      printf '%s\n' "missing source-lock fingerprint: $fingerprint_file" >&2
+      exit 2
+    fi
+    if [[ -f "$backup" ]]; then
+      printf '%s\n' "source dependency session already has a registry-lock backup; deactivate it first" >&2
+      exit 2
+    fi
+    if ! git diff --quiet -- Cargo.lock; then
+      printf '%s\n' "Cargo.lock has uncommitted changes; commit or restore the registry lock before source activation" >&2
+      exit 2
+    fi
+
+    mkdir -p "$root/.cargo"
+    cp "$root/Cargo.lock" "$backup"
+
+    if ! run_tooling "$@"; then
+      cp "$backup" "$root/Cargo.lock"
+      rm -f "$backup"
+      exit 1
+    fi
+
+    if ! cargo metadata --format-version 1 >/dev/null; then
+      run_tooling deactivate >/dev/null 2>&1 || true
+      cp "$backup" "$root/Cargo.lock"
+      rm -f "$backup"
+      exit 1
+    fi
+
+    expected="$(tr -d '[:space:]' < "$fingerprint_file")"
+    actual="$(source_lock_hash)"
+    if [[ "$actual" != "$expected" ]]; then
+      run_tooling deactivate >/dev/null 2>&1 || true
+      cp "$backup" "$root/Cargo.lock"
+      rm -f "$backup"
+      printf 'source dependency lock fingerprint mismatch\nexpected: %s\nactual:   %s\n' "$expected" "$actual" >&2
+      printf '%s\n' "refresh the source baseline deliberately before continuing" >&2
+      exit 1
+    fi
+
+    printf 'source dependency lock: verified (%s)\n' "$actual"
+    ;;
+
+  deactivate)
+    status=0
+    run_tooling "$@" || status=$?
+    if [[ -f "$backup" ]]; then
+      cp "$backup" "$root/Cargo.lock"
+      rm -f "$backup"
+    fi
+    exit "$status"
+    ;;
+
+  *)
+    run_tooling "$@"
+    ;;
+esac

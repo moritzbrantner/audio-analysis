@@ -1,5 +1,6 @@
 .cargo-target/
 /.cargo/config.toml
+/.cargo/registry-Cargo.lock
 target/
 .external-test-tools/
 .audio-tools/

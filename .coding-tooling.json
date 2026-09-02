@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "profile": "repository-foundation-v1",
+  "tiers": {
+    "fast": ["format:check", "lint", "build", "test:unit"]
+  },
+  "requiredCapabilities": ["format:check", "lint", "build", "test:unit"],
+  "capabilityCommands": {
+    "@moritzbrantner/audio-analysis-workspace": {
+      "format:check": ["cargo", "fmt", "--all", "--", "--check"],
+      "lint": ["cargo", "clippy", "--locked", "--workspace", "--all-targets", "--", "-D", "warnings"],
+      "build": ["cargo", "build", "--locked", "--workspace"],
+      "test:unit": ["cargo", "test", "--locked", "--workspace"]
+    }
+  }
+}

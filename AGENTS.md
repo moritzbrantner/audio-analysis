@@ -19,10 +19,12 @@ This is the capability repository for audio analysis and generation packages.
 - The capability library crates are the default Cargo workspace members. Existing per-capability CLI, server, WASM, and app packages are compatibility shells, not the default development surface.
 - Do not create another per-capability CLI/server/WASM/app shell. If a genuinely new transport surface is required, prefer one repository-level adapter and reuse the library-owned operation contracts.
 - Do not mechanically update compatibility shells when only implementation internals change. Touch them when their public operation/transport contract actually changes.
-- Use `scripts/check-fast.sh` for the ordinary local library loop. Run `bash scripts/check-adapters.sh` when adapter shells change or when distribution compatibility is being checked. CPU CI covers the full workspace with default features plus the important non-CUDA optional feature combinations.
+- Use `bash scripts/check-fast.sh` for the repeated local library loop. It validates the committed lockfile, workspace Clippy, and workspace tests without expanding into adapter/distribution checks.
+- Before handing work to review, run `bash scripts/check-handoff.sh` once. It runs diff hygiene, verifies the active environment/source profile, and then runs the fast library gate. `.agent-loop.toml` owns this handoff tier.
+- `bash scripts/check-preflight.sh` is the exhaustive CPU/distribution gate: it adds adapter feature combinations, docs, and packageability. Hosted CI owns this tier; do not replay it after every edit.
+- Run `bash scripts/check-adapters.sh` directly only when adapter shells change or when distribution compatibility is being investigated before the full preflight.
 - CUDA is resource-backed. Do not enable workspace `--all-features` on ordinary CPU CI and then treat missing `nvcc` as an application failure. Run `bash scripts/check-cuda.sh` on a CUDA-equipped machine and keep CPU and CUDA evidence distinct.
 - Treat repeated co-change across independently versioned library crates as evidence for future consolidation. Consolidate only when the ownership and public API boundary are clear; do not create another abstraction layer to hide the problem.
 - If a consumer task expands beyond the consumer plus two upstream repositories, treat that as an architecture boundary problem unless broader migration scope was explicitly assigned.
 - Publication and source removal require separate exact authorization.
 - Registry-only consumer verification is release evidence; it is not required before source-mode implementation evidence is useful.
-- For the restructuring-first extraction, use only the structural commands in `.agent-loop.toml`; do not imply that skipped behavioral checks passed.

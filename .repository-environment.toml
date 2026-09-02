@@ -1,0 +1,24 @@
+schema_version = 1
+
+[policy]
+track = "latest-stable"
+
+[system]
+apt = []
+
+[setup]
+commands = [
+  "cargo fetch --locked",
+  "bun install --frozen-lockfile",
+]
+
+[maintenance]
+commands = [
+  "cargo fetch --locked",
+  "bun install --frozen-lockfile",
+]
+
+[cache]
+paths = ["~/.cargo", "target", "node_modules"]
+
+[compatibility_holds]

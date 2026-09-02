@@ -10,7 +10,6 @@ permissions:
 
 env:
   CODING_TOOLING_REV: 51b2e386eb1461a75afae56504f4700940613d94
-  FOUNDATION_REV: 1051dfdfab4b7d32f579b605d722a5d1184432c6
 
 jobs:
   verification:
@@ -33,6 +32,21 @@ jobs:
           git -C ../coding-tooling checkout --detach FETCH_HEAD
           (cd ../coding-tooling && bun install --frozen-lockfile)
 
+          FOUNDATION_REV="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path('.coding-tooling.source-deps.json').read_text())
+          revisions = {
+              patch['rev']
+              for patch in manifest['cargo']['patches']
+              if patch['git'] == 'https://github.com/moritzbrantner/moenarch-foundation'
+          }
+          if len(revisions) != 1:
+              raise SystemExit(f'expected one Foundation revision, found {sorted(revisions)}')
+          print(revisions.pop())
+          PY
+          )"
           git init ../moenarch-foundation
           git -C ../moenarch-foundation fetch --depth=1 https://github.com/moritzbrantner/moenarch-foundation.git "$FOUNDATION_REV"
           git -C ../moenarch-foundation checkout --detach FETCH_HEAD

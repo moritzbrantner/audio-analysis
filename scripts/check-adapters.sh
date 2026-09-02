@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${AUDIO_ANALYSIS_SOURCE_LOCK_SCOPE:-0}" != "1" ]]; then
+  exec bash scripts/source-lock run -- bash "$0" "$@"
+fi
+
 # The handoff gate already covers the complete workspace with default features.
 # This script adds the important non-CUDA optional feature combinations and
 # compatibility adapter surfaces. CUDA remains resource-backed and is checked

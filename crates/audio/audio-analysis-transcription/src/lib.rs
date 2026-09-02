@@ -17,6 +17,8 @@ mod native_whisper;
 #[cfg(feature = "candle")]
 mod native_whisper_decode;
 #[cfg(feature = "candle")]
+mod native_whisper_q8_cpu;
+#[cfg(feature = "candle")]
 mod native_whisper_quantized;
 #[cfg(any(feature = "silero-vad", feature = "pyannote-vad", test))]
 mod silero_vad;

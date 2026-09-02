@@ -1247,6 +1247,7 @@ impl SpeakerLibrary {
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 /// Stable serialized speaker library format.
 pub struct SpeakerLibrarySnapshot {
     /// Snapshot format version.
@@ -4318,6 +4319,26 @@ mod tests {
         loaded.delete_profile(&id("alice")).unwrap();
         loaded.save(&path).unwrap();
         assert_eq!(SpeakerLibrary::load_if_present(&path).unwrap(), None);
+    }
+
+    #[test]
+    fn speaker_library_rejects_unknown_snapshot_fields() {
+        let mut library = SpeakerLibrary::new();
+        library
+            .add_profile(
+                SpeakerProfile::new(id("alice"), label("Alice"))
+                    .with_embedding(embedding([1.0, 0.0]))
+                    .unwrap(),
+            )
+            .unwrap();
+        let mut snapshot: serde_json::Value =
+            serde_json::from_str(&library.to_json_string().unwrap()).unwrap();
+        snapshot["speaker_trace"] = serde_json::json!({"files": []});
+
+        let error = SpeakerLibrary::from_json_str(&snapshot.to_string())
+            .expect_err("unknown product-owned fields must not enter the canonical snapshot");
+
+        assert!(error.to_string().contains("unknown field `speaker_trace`"));
     }
 
     #[test]

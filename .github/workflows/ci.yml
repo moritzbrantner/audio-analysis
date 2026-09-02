@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  CODING_TOOLING_REV: 51b2e386eb1461a75afae56504f4700940613d94
+  CODING_TOOLING_REV: c9e071995abf65d2326930efb05e47e585af0efd
 
 jobs:
   verification:
@@ -52,6 +52,8 @@ jobs:
           git -C ../moenarch-foundation checkout --detach FETCH_HEAD
       - name: Activate pinned source dependencies
         run: bash scripts/source-deps activate
+      - name: Verify source-development agent readiness
+        run: bash scripts/check-agent-readiness.sh --with-source
       - name: Run preflight
         run: scripts/check-preflight.sh
       - name: Deactivate source dependencies

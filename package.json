@@ -2,7 +2,7 @@
   "name": "@moritzbrantner/audio-analysis-workspace",
   "private": true,
   "type": "module",
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.0",
   "workspaces": ["packages/*"],
   "scripts": {
     "check:structure": "python3 scripts/check_extraction.py",

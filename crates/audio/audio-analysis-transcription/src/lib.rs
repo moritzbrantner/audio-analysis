@@ -1,6 +1,8 @@
 #![doc = include_str!("../README.md")]
 
 mod bounded_window;
+#[cfg(feature = "burn-webgpu")]
+pub mod burn_whisper_webgpu;
 pub mod surface;
 
 #[cfg(feature = "alignment")]

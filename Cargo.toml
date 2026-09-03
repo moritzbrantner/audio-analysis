@@ -58,6 +58,8 @@ model-runtime = { package = "moenarch-model-runtime", version = "=0.1.1" }
 runtime-core = { package = "moenarch-runtime-core", version = "=0.2.1" }
 runtime-onnx = { package = "moenarch-runtime-onnx", version = "=0.1.1" }
 tensor-data = { package = "moenarch-tensor-data", version = "=0.1.1" }
+burn = { version = "0.21.0", default-features = false, features = ["std"] }
+burn-wgpu = { version = "0.21.0", default-features = false, features = ["std", "webgpu"] }
 candle-core = "0.10.2"
 candle-nn = "0.10.2"
 candle-transformers = "0.10.2"

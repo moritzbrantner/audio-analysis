@@ -9,4 +9,5 @@ fi
 
 cargo check --locked \
   -p moenarch-audio-analysis-transcription-wasm \
-  --target "$target"
+  --target "$target" \
+  --features burn-webgpu

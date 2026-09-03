@@ -28,3 +28,7 @@ audio-analysis-transcription.workspace = true
 # (currently ring via the model-runtime graph), not a general library choice.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2.17", features = ["js"] }
+
+[features]
+default = []
+burn-webgpu = ["audio-analysis-transcription/burn-webgpu"]

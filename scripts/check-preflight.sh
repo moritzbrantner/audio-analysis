@@ -3,5 +3,6 @@ set -euo pipefail
 
 scripts/check-fast.sh
 bash scripts/check-adapters.sh
+bash scripts/check-wasm.sh
 cargo doc --locked --workspace --no-deps
 cargo package --workspace --locked --no-verify

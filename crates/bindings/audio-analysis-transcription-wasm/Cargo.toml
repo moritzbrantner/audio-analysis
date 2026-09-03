@@ -22,3 +22,9 @@ serde_json.workspace = true
 serde-wasm-bindgen = "0.6.5"
 wasm-bindgen = "0.2.105"
 audio-analysis-transcription.workspace = true
+
+# The browser adapter already requires wasm-bindgen/js-sys. Enabling getrandom's
+# JS backend here is therefore target plumbing for transitive browser users
+# (currently ring via the model-runtime graph), not a general library choice.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2.17", features = ["js"] }

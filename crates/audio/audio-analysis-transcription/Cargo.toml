@@ -37,9 +37,14 @@ tokenizers = { workspace = true, optional = true }
 audio-analysis-io = { workspace = true, optional = true }
 audio-analysis-speakers = { package = "moenarch-audio-analysis-speakers", version = "0.1.4", path = "../audio-analysis-speakers" }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+burn = { workspace = true, optional = true }
+burn-wgpu = { workspace = true, optional = true }
+
 [features]
 default = []
 candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:flate2", "dep:half", "dep:rayon", "dep:rustfft", "dep:tokenizers"]
+burn-webgpu = ["dep:burn", "dep:burn-wgpu"]
 cuda = ["candle", "candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
 alignment = ["candle", "dep:tokenizers"]
 diarization = []

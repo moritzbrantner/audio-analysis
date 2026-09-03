@@ -325,13 +325,6 @@ mod tests {
     #[test]
     fn rejects_non_tiny_model_dimensions_before_webgpu_work() {
         let mut assets = tiny_assets();
-        assets.config_json = assets
-            .config_json
-            .windows(3)
-            .fold(Vec::new(), |mut output, window| {
-                output.extend_from_slice(window);
-                output
-            });
         assets.config_json = br#"{
             "model_type":"whisper",
             "d_model":512,

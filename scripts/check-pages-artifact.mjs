@@ -63,6 +63,11 @@ for (const entry of manifest.browserPackages) {
   );
   assert.match(
     wrapperSource,
+    /value instanceof Map/,
+    `${entry.package}/index.js must normalize serde-wasm-bindgen Map values`,
+  );
+  assert.match(
+    wrapperSource,
     /const result = surfaceValue\?\.result;/,
     `${entry.package}/index.js must normalize the structured surface result`,
   );

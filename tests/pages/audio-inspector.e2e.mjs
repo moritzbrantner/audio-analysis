@@ -84,7 +84,12 @@ try {
 
   const spectralBox = await page.locator("#spectral-timeline").boundingBox();
   assert.ok(spectralBox, "expected a rendered spectral timeline");
-  await page.mouse.move(spectralBox.x + spectralBox.width / 2, spectralBox.y + spectralBox.height / 2);
+  await page.locator("#spectral-timeline").hover({
+    position: { x: spectralBox.width / 2, y: spectralBox.height / 2 },
+  });
+  assert.match(await page.locator("#spectral-readout").innerText(), /Frame \d+\/\d+/);
+  await page.locator("#spectral-timeline").focus();
+  await page.keyboard.press("End");
   assert.match(await page.locator("#spectral-readout").innerText(), /Frame \d+\/\d+/);
 
   await page.locator('.report-nav a[href="#technical"]').click();

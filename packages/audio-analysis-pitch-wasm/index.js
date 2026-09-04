@@ -1,7 +1,7 @@
 let wasmModulePromise;
 
 export async function init() {
-  const wasmEntry = "./pkg/moenarch_audio_analysis_pitch_wasm.js";
+  const wasmEntry = "./pkg/audio_analysis_pitch_wasm.js";
   wasmModulePromise ??= import(/* @vite-ignore */ wasmEntry).then(async (module) => {
     if (typeof module.default === "function") {
       await module.default();

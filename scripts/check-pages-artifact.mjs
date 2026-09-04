@@ -43,7 +43,8 @@ assert.match(appSource, /automaticUpload: false/);
 for (const entry of manifest.browserPackages) {
   const packageRoot = join(outputDir, "wasm", entry.package);
   assert.ok(existsSync(packageRoot), `missing packaged WASM adapter: ${entry.package}`);
-  assert.ok(existsSync(join(packageRoot, "index.js")), `missing ${entry.package}/index.js`);
+  const wrapperPath = join(packageRoot, "index.js");
+  assert.ok(existsSync(wrapperPath), `missing ${entry.package}/index.js`);
 
   const pkgRoot = join(packageRoot, "pkg");
   assert.ok(existsSync(pkgRoot), `missing ${entry.package}/pkg`);
@@ -51,6 +52,14 @@ for (const entry of manifest.browserPackages) {
   assert.ok(
     packageFiles.some((file) => file.endsWith(".wasm")),
     `missing compiled .wasm payload for ${entry.package}`,
+  );
+
+  const wrapperSource = readFileSync(wrapperPath, "utf8");
+  const importMatch = wrapperSource.match(/const wasmEntry = "\.\/pkg\/([^"\n]+\.js)"/);
+  assert.ok(importMatch, `could not resolve generated JS import from ${entry.package}/index.js`);
+  assert.ok(
+    packageFiles.includes(importMatch[1]),
+    `${entry.package}/index.js imports missing generated entry ${importMatch[1]}`,
   );
 
   for (const operation of entry.operations) {

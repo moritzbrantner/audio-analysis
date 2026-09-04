@@ -79,9 +79,10 @@ try {
 }
 
 async function readRenderedReport(page) {
-  const rawJson = page.locator("#raw-json");
-  await rawJson.waitFor({ state: "visible" });
-  const text = await rawJson.textContent();
+  await page.waitForFunction(() => Boolean(document.querySelector("#raw-json")?.textContent?.trim()), null, {
+    timeout: 30_000,
+  });
+  const text = await page.locator("#raw-json").textContent();
   assert.ok(text?.trim(), "expected rendered raw report JSON");
   return JSON.parse(text);
 }

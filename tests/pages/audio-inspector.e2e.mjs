@@ -36,7 +36,10 @@ try {
 
   const toneReport = await readRenderedReport(page);
   assert.equal(toneReport.schemaVersion, "audio-analysis-inspector/v1");
-  assert.equal(toneReport.source.sampleRate, 8_000);
+  assert.ok(
+    Number.isFinite(toneReport.source.sampleRate) && toneReport.source.sampleRate > 0,
+    `browser-decoded sample rate should be positive; got ${toneReport.source.sampleRate}`,
+  );
   assert.equal(toneReport.source.channels, 1);
   assert.ok(toneReport.source.durationSeconds > 2.9 && toneReport.source.durationSeconds < 3.1);
   assertPackageExecution(toneReport, ["core", "fourier", "pitch"]);

@@ -50,13 +50,31 @@ describe("Audio Inspector public capability contract", () => {
     expect(appSource).toContain('kind: "representative-center-window-resampled"');
   });
 
-  test("ships the intended input, examples, export, and provenance surfaces", () => {
+  test("ships the intended input, examples, export, provenance, and usability surfaces", () => {
     expect(html).toContain('id="file-input"');
+    expect(html).toContain('id="choose-file"');
     expect(html).toContain('accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg,.opus,.webm"');
     expect(html).toContain('data-example="tone"');
     expect(html).toContain('data-example="clicks"');
+    expect(html).toContain('aria-label="Report sections"');
+    expect(html).toContain('id="waveform-readout"');
+    expect(html).toContain('id="spectral-readout"');
+    expect(html).toContain('id="technical"');
     expect(html).toContain('id="export-json"');
     expect(html).toContain('id="provenance"');
     expect(html).toContain('<script type="module" src="./app.js"></script>');
+  });
+
+  test("keeps engineering detail progressively disclosed and visualizations keyboard-operable", () => {
+    expect(html).toContain('<details id="technical"');
+    expect(html).toContain('id="waveform"');
+    expect(html).toContain('role="slider"');
+    expect(html).toContain('id="spectral-timeline"');
+    expect(html).toContain('tabindex="0"');
+    expect(appSource).toContain('event.key === "ArrowLeft"');
+    expect(appSource).toContain('event.key === "ArrowRight"');
+    expect(appSource).toContain('event.key === "Home"');
+    expect(appSource).toContain('event.key === "End"');
+    expect(appSource).toContain("state.analysisGeneration");
   });
 });

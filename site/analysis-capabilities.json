@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "audio-analysis-pages-capabilities/v1",
+  "defaultRuntime": "client-wasm",
+  "privacy": {
+    "githubPages": "browser-only",
+    "automaticUpload": false,
+    "backendDiscovery": "localhost or explicit ?backend=<base-url> only"
+  },
+  "browserPackages": [
+    {
+      "package": "audio-analysis-core",
+      "operations": ["audio.levels"]
+    },
+    {
+      "package": "audio-analysis-fourier",
+      "operations": ["audio.fourier.spectrum", "audio.fourier.spectrogram", "audio.fourier.features"]
+    },
+    {
+      "package": "audio-analysis-pitch",
+      "operations": ["audio.pitch.estimate", "audio.pitch.key"]
+    },
+    {
+      "package": "audio-analysis-rhythm",
+      "operations": ["audio.rhythm.analyze"]
+    }
+  ],
+  "coverage": {
+    "fileStatistics": "whole decoded file when practical; deterministic stride sampling for very large inputs",
+    "spectralPitchKey": "bounded representative center window required by package surface limits",
+    "rhythm": "bounded representative center window resampled to 16 kHz"
+  },
+  "backend": {
+    "defaultLocalBaseUrl": "http://127.0.0.1:3000",
+    "githubPagesEnabled": false,
+    "capabilityProbe": "/api/rust/packages/audio-analysis-transcription/api/package",
+    "note": "Heavy model execution is an opt-in local deployment boundary and is never triggered automatically by the public Pages site."
+  }
+}

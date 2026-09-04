@@ -97,7 +97,11 @@ function assertPackageExecution(report, packageIds) {
   for (const packageId of packageIds) {
     const entry = packages.get(packageId);
     assert.ok(entry, `missing ${packageId} package provenance`);
-    assert.equal(entry.available, true, `${packageId} WASM package should be available`);
+    assert.equal(
+      entry.available,
+      true,
+      `${packageId} WASM package should be available; initialization error: ${entry.error ?? "none reported"}`,
+    );
     assert.equal(entry.runtime, "client-wasm");
   }
 }

@@ -38,7 +38,7 @@ EOF
 
 (
   cd "$TOOL_DIR"
-  bun install --no-progress
+  bun install
   if [[ "${CI:-}" == "true" ]]; then
     ./node_modules/.bin/playwright install --with-deps chromium
   else

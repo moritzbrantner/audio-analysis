@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "configurations": [
+    {
+      "rule": "TS-003",
+      "path": "modules/typescript/technologies/typescript/TS-003.oxlint.json",
+      "tool": "oxlint",
+      "capability": "lint",
+      "module": "typescript"
+    }
+  ]
+}

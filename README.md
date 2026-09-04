@@ -4,6 +4,22 @@ Rust-first audio analysis, recognition, transcription, synthesis, and generation
 
 For the Rust packages assigned to `audio-analysis`, this repository is the canonical source, test, issue, version, and release authority. Historical copies in `rust-packages` are compatibility/provenance material rather than a competing implementation or release source. Ownership does not itself publish, tag, or remove historical source; those remain explicit destination-local release or migration operations.
 
+## Audio Inspector
+
+The repository includes a GitHub Pages Audio Inspector at <https://moritzbrantner.github.io/audio-analysis/>. Drop an audio file to inspect file metadata, waveform, levels and dynamics, clipping and near-silence indicators, spectral features, pitch and musical key estimates, and rhythm information.
+
+The public Pages deployment is browser-local: the browser decodes the selected file and the existing Rust package surfaces run through WASM. The report distinguishes whole-file statistics from bounded representative-window analyses so package surface limits are visible instead of hidden. Reports can be exported as JSON and include package/version provenance.
+
+Local deployments retain a separate backend seam for heavier model-backed capabilities. Browser-local analysis remains the default; a backend is discovered on localhost at `http://127.0.0.1:3000` or can be selected with `?backend=<base-url>`. The public Pages deployment never enables backend upload automatically.
+
+Build the exact Pages artifact locally with:
+
+```text
+bash scripts/build-pages.sh
+```
+
+The script builds the core, Fourier, pitch, and rhythm WASM adapters and assembles the static artifact under `_site/`.
+
 ## Development surface
 
 The repository still retains the reviewed historical package inventory for compatibility, but ordinary development is intentionally smaller. The capability library crates are the Cargo workspace `default-members`; per-capability CLI, server, WASM, and app packages are compatibility shells and are not the default feature-development surface.

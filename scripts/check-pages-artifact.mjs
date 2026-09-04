@@ -61,6 +61,16 @@ for (const entry of manifest.browserPackages) {
     packageFiles.includes(importMatch[1]),
     `${entry.package}/index.js imports missing generated entry ${importMatch[1]}`,
   );
+  assert.match(
+    wrapperSource,
+    /const result = surfaceValue\?\.result;/,
+    `${entry.package}/index.js must normalize the structured surface result`,
+  );
+  assert.match(
+    wrapperSource,
+    /return \{ \.\.\.response, value: result, surfaceValue \};/,
+    `${entry.package}/index.js must preserve the structured surface envelope`,
+  );
 
   for (const operation of entry.operations) {
     assert.ok(appSource.includes(`"${operation}"`), `app.js does not invoke declared operation ${operation}`);

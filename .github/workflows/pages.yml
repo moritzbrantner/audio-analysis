@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "site/**"
+      - "tests/pages/**"
       - "crates/audio/audio-analysis-core/**"
       - "crates/audio/audio-analysis-fourier/**"
       - "crates/audio/audio-analysis-pitch/**"
@@ -17,11 +18,16 @@ on:
       - "packages/audio-analysis-pitch-wasm/**"
       - "packages/audio-analysis-rhythm-wasm/**"
       - "scripts/build-pages.sh"
+      - "scripts/check-pages.sh"
+      - "scripts/check-pages-e2e.sh"
+      - "scripts/check-pages-artifact.mjs"
+      - "package.json"
       - ".github/workflows/pages.yml"
   push:
     branches: [main]
     paths:
       - "site/**"
+      - "tests/pages/**"
       - "crates/audio/audio-analysis-core/**"
       - "crates/audio/audio-analysis-fourier/**"
       - "crates/audio/audio-analysis-pitch/**"
@@ -35,6 +41,10 @@ on:
       - "packages/audio-analysis-pitch-wasm/**"
       - "packages/audio-analysis-rhythm-wasm/**"
       - "scripts/build-pages.sh"
+      - "scripts/check-pages.sh"
+      - "scripts/check-pages-e2e.sh"
+      - "scripts/check-pages-artifact.mjs"
+      - "package.json"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -72,8 +82,11 @@ jobs:
       - name: Install wasm-pack
         run: cargo install wasm-pack --version 0.13.1 --locked
 
-      - name: Build Audio Inspector Pages artifact
-        run: bash scripts/build-pages.sh
+      - name: Verify Audio Inspector Pages artifact
+        run: bun run check:pages
+
+      - name: Run Audio Inspector real-browser smoke test
+        run: bun run test:pages:e2e
 
       - name: Upload Pages artifact
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'

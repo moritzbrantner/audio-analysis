@@ -23,3 +23,29 @@ bash scripts/build-pages.sh
 ```
 
 The script validates the site, builds the four WASM adapters, and assembles `_site/` with relative asset paths suitable for the repository Pages URL.
+
+## Verification
+
+Run the fast deterministic browser-contract tests without compiling WASM:
+
+```text
+bun run test:pages
+```
+
+Run the Pages artifact gate, including the WASM build and deployable-artifact checks:
+
+```text
+bun run check:pages
+```
+
+Run the real-browser integration smoke test after `_site/` exists:
+
+```text
+bun run test:pages:e2e
+```
+
+The E2E runner serves the built artifact locally, installs the pinned Playwright 1.62.1 toolchain in an isolated temporary directory, and launches headless Chromium. It verifies the generated 440 Hz example through WebAudio decoding, real core/Fourier/pitch WASM execution, rendered report output, and JSON export. It then runs the generated 120 BPM click track through the real rhythm WASM path and verifies the resulting beat/tempo report.
+
+`test:pages:e2e` is also exposed as the repository `test:e2e:smoke` capability. It stays separate from the cheaper `check:pages` gate so local and agent validation can progress from deterministic unit/contract checks to the heavier browser integration tier.
+
+The GitHub Pages workflow runs both gates before it uploads or deploys `_site/`.

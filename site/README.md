@@ -23,3 +23,19 @@ bash scripts/build-pages.sh
 ```
 
 The script validates the site, builds the four WASM adapters, and assembles `_site/` with relative asset paths suitable for the repository Pages URL.
+
+## Verification
+
+Run the fast deterministic browser-contract tests without compiling WASM:
+
+```text
+bun run test:pages
+```
+
+Run the complete Pages gate, including the WASM build and deployable-artifact checks:
+
+```text
+bun run check:pages
+```
+
+The complete gate verifies the production `site/app.js` signal helpers and runtime boundary, the public capability manifest, deterministic example WAV generation, and the presence of all four compiled WASM adapters in `_site/`.

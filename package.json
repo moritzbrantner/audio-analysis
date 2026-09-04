@@ -6,6 +6,8 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "check:structure": "python3 scripts/check_extraction.py",
+    "test:pages": "bun test tests/pages",
+    "check:pages": "bash scripts/check-pages.sh",
     "check": "bun run check:structure"
   }
 }

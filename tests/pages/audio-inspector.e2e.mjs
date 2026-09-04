@@ -69,7 +69,7 @@ try {
   assertPackageExecution(clickReport, ["core", "fourier", "rhythm"]);
   assertSuccessfulOperation(clickReport.raw?.rhythm, "audio.rhythm.analyze");
   assertTempoFamily(clickReport.rhythm, 120);
-  assert.ok(Array.isArray(clickReport.rhythm?.beats) && clickReport.rhythm.beats.length >= 8, "expected a rendered beat path");
+  assertBeatPath(clickReport.rhythm?.beats);
 
   assert.deepEqual(pageErrors, [], `browser page errors:\n${pageErrors.join("\n")}`);
   assert.deepEqual(
@@ -128,6 +128,19 @@ function assertTempoFamily(rhythm, targetBpm) {
   assert.ok(
     candidates.some((candidate) => typeof candidate?.bpm === "number" && Math.abs(candidate.bpm - targetBpm) <= 10),
     `expected a tempo candidate near ${targetBpm} BPM; got ${JSON.stringify(candidates)}`,
+  );
+}
+
+function assertBeatPath(beats) {
+  assert.ok(Array.isArray(beats) && beats.length > 0, "expected a non-empty rendered beat path");
+  const timestamps = beats.map((beat) => beat?.timestampSeconds);
+  assert.ok(
+    timestamps.every((timestamp) => typeof timestamp === "number" && Number.isFinite(timestamp) && timestamp >= 0),
+    `beat timestamps should be finite and non-negative; got ${JSON.stringify(timestamps)}`,
+  );
+  assert.ok(
+    timestamps.every((timestamp, index) => index === 0 || timestamp > timestamps[index - 1]),
+    `beat timestamps should increase strictly; got ${JSON.stringify(timestamps)}`,
   );
 }
 

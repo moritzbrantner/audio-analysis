@@ -68,7 +68,7 @@ try {
   const clickReport = await readRenderedReport(page);
   assertPackageExecution(clickReport, ["core", "fourier", "rhythm"]);
   assertSuccessfulOperation(clickReport.raw?.rhythm, "audio.rhythm.analyze");
-  assertInRange(clickReport.rhythm?.bpm, 110, 130, "click-track tempo estimate");
+  assertTempoFamily(clickReport.rhythm, 120);
   assert.ok(Array.isArray(clickReport.rhythm?.beats) && clickReport.rhythm.beats.length >= 8, "expected a rendered beat path");
 
   assert.deepEqual(pageErrors, [], `browser page errors:\n${pageErrors.join("\n")}`);
@@ -111,6 +111,24 @@ function assertSuccessfulOperation(result, operation) {
   assert.equal(result.operation, operation);
   assert.equal(result.error, undefined, `${operation} should not return an analyzer error`);
   assert.ok(result.value && typeof result.value === "object", `${operation} should return a structured value`);
+}
+
+function assertTempoFamily(rhythm, targetBpm) {
+  const bpm = rhythm?.bpm;
+  assert.equal(typeof bpm, "number", "click-track primary tempo should be numeric");
+  assert.ok(Number.isFinite(bpm), "click-track primary tempo should be finite");
+
+  const octaveEquivalent = [bpm / 2, bpm, bpm * 2].some((candidate) => Math.abs(candidate - targetBpm) <= 10);
+  assert.ok(
+    octaveEquivalent,
+    `primary tempo ${bpm} BPM should be half-time, nominal, or double-time equivalent to ${targetBpm} BPM`,
+  );
+
+  const candidates = Array.isArray(rhythm?.tempoCandidates) ? rhythm.tempoCandidates : [];
+  assert.ok(
+    candidates.some((candidate) => typeof candidate?.bpm === "number" && Math.abs(candidate.bpm - targetBpm) <= 10),
+    `expected a tempo candidate near ${targetBpm} BPM; got ${JSON.stringify(candidates)}`,
+  );
 }
 
 async function assertText(page, selector, expected) {

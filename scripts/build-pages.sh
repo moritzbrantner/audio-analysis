@@ -26,10 +26,55 @@ rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR/wasm"
 cp -R "$ROOT_DIR/site/." "$OUTPUT_DIR/"
 
+write_pages_wasm_adapter() {
+  local package="$1"
+  local source_root="$ROOT_DIR/packages/${package}-wasm"
+  local target_root="$OUTPUT_DIR/wasm/$package"
+  local candidate
+  local wasm_entries=()
+
+  mkdir -p "$target_root"
+  cp -R "$source_root/pkg" "$target_root/pkg"
+
+  for candidate in "$source_root"/pkg/*_wasm.js; do
+    [[ -f "$candidate" ]] || continue
+    wasm_entries+=("$(basename "$candidate")")
+  done
+
+  if [[ ${#wasm_entries[@]} -ne 1 ]]; then
+    printf 'expected exactly one generated *_wasm.js entry for %s, found %s\n' \
+      "$package" "${#wasm_entries[@]}" >&2
+    exit 1
+  fi
+
+  cat > "$target_root/index.js" <<EOF
+let wasmModulePromise;
+
+export async function init() {
+  const wasmEntry = "./pkg/${wasm_entries[0]}";
+  wasmModulePromise ??= import(wasmEntry).then(async (module) => {
+    if (typeof module.default === "function") {
+      await module.default();
+    }
+    return module;
+  });
+  return wasmModulePromise;
+}
+
+export async function packageSurface() {
+  const module = await init();
+  return module.packageSurface();
+}
+
+export async function runOperation(request) {
+  const module = await init();
+  return module.runOperation(request);
+}
+EOF
+}
+
 for package in audio-analysis-core audio-analysis-fourier audio-analysis-pitch audio-analysis-rhythm; do
-  mkdir -p "$OUTPUT_DIR/wasm/$package"
-  cp "$ROOT_DIR/packages/${package}-wasm/index.js" "$OUTPUT_DIR/wasm/$package/index.js"
-  cp -R "$ROOT_DIR/packages/${package}-wasm/pkg" "$OUTPUT_DIR/wasm/$package/pkg"
+  write_pages_wasm_adapter "$package"
 done
 
 touch "$OUTPUT_DIR/.nojekyll"

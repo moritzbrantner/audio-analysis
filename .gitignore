@@ -28,6 +28,7 @@ prototypes/web/*/.vite/
 prototypes/web/*/coverage/
 prototypes/web/*/playwright-report/
 prototypes/web/*/test-results/
+_site/
 use-case-output/**/*.mp4
 use-case-output/**/*.mov
 use-case-output/**/*.mkv

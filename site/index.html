@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Inspect an audio file locally in your browser with the Rust/WASM audio-analysis packages."
+    />
+    <title>Audio Inspector · audio-analysis</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div class="eyebrow">audio-analysis · browser lab</div>
+        <h1>Audio Inspector</h1>
+        <p class="hero-copy">
+          Drop an audio file to inspect its levels, dynamics, waveform, spectral shape, pitch, musical key, and rhythm.
+          The public GitHub Pages version runs locally in your browser with Rust/WASM; your audio is not uploaded.
+        </p>
+        <div class="runtime-strip" aria-label="runtime summary">
+          <span class="status-dot status-dot-local"></span>
+          <strong>Default: browser-local analysis</strong>
+          <span id="backend-summary">Backend enrichment is off on GitHub Pages.</span>
+        </div>
+      </header>
+
+      <section id="input-panel" class="panel input-panel">
+        <label id="drop-zone" class="drop-zone" for="file-input">
+          <input id="file-input" type="file" accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg,.opus,.webm" />
+          <span class="drop-kicker">Drop an audio file here</span>
+          <span class="drop-copy">or choose a file from your device</span>
+          <span class="drop-note">Decoded by your browser. Analysis defaults to local Rust/WASM.</span>
+        </label>
+
+        <div class="example-row">
+          <span>Try a generated example:</span>
+          <button class="button button-secondary" data-example="tone" data-example-name="440 Hz reference tone">
+            440 Hz tone
+          </button>
+          <button class="button button-secondary" data-example="clicks" data-example-name="120 BPM click track">
+            120 BPM clicks
+          </button>
+        </div>
+
+        <p id="input-error" class="error-message" hidden></p>
+      </section>
+
+      <section id="loading-panel" class="panel loading-panel" hidden aria-live="polite">
+        <div class="spinner" aria-hidden="true"></div>
+        <div>
+          <strong id="loading-title">Analyzing audio…</strong>
+          <p id="loading-detail">Decoding the file and loading browser analyzers.</p>
+        </div>
+      </section>
+
+      <section id="report" hidden>
+        <div class="report-toolbar">
+          <div>
+            <div class="eyebrow">analysis report</div>
+            <h2 id="report-title">Audio file</h2>
+          </div>
+          <div class="toolbar-actions">
+            <button id="export-json" class="button button-primary">Download JSON report</button>
+            <button id="choose-another" class="button button-secondary">Analyze another file</button>
+          </div>
+        </div>
+
+        <section class="summary-grid" aria-label="file summary">
+          <article class="summary-card"><span>Duration</span><strong id="summary-duration">—</strong></article>
+          <article class="summary-card"><span>Sample rate</span><strong id="summary-rate">—</strong></article>
+          <article class="summary-card"><span>Channels</span><strong id="summary-channels">—</strong></article>
+          <article class="summary-card"><span>Peak</span><strong id="summary-peak">—</strong></article>
+          <article class="summary-card"><span>RMS level</span><strong id="summary-rms">—</strong></article>
+          <article class="summary-card"><span>Size</span><strong id="summary-size">—</strong></article>
+        </section>
+
+        <section class="panel media-panel">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">source</div>
+              <h2>Playback & waveform</h2>
+            </div>
+            <span id="statistics-coverage" class="badge">whole-file scan</span>
+          </div>
+          <audio id="audio-player" controls preload="metadata"></audio>
+          <canvas id="waveform" class="visualization" aria-label="Waveform overview"></canvas>
+          <p class="figure-note">The waveform is a visual overview of the full decoded file.</p>
+        </section>
+
+        <section class="panel">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">what stands out</div>
+              <h2>Interesting findings</h2>
+            </div>
+          </div>
+          <div id="findings" class="findings"></div>
+        </section>
+
+        <div class="two-column">
+          <section class="panel">
+            <div class="section-heading">
+              <div>
+                <div class="eyebrow">signal</div>
+                <h2>Levels & dynamics</h2>
+              </div>
+            </div>
+            <dl id="levels-metrics" class="metric-list"></dl>
+          </section>
+
+          <section class="panel">
+            <div class="section-heading">
+              <div>
+                <div class="eyebrow">integrity</div>
+                <h2>Quality & channels</h2>
+              </div>
+            </div>
+            <dl id="quality-metrics" class="metric-list"></dl>
+          </section>
+        </div>
+
+        <section class="panel">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">frequency domain</div>
+              <h2>Spectrum & spectral timeline</h2>
+            </div>
+            <span id="spectral-coverage" class="badge">representative window</span>
+          </div>
+          <div id="spectrum-metrics" class="mini-metrics"></div>
+          <canvas id="spectral-timeline" class="visualization" aria-label="Spectral timeline"></canvas>
+          <p class="figure-note">
+            This timeline summarizes STFT frames from the displayed analysis window. It is intentionally not presented as a full-file spectrogram.
+          </p>
+        </section>
+
+        <div class="two-column">
+          <section class="panel">
+            <div class="section-heading">
+              <div>
+                <div class="eyebrow">tonality</div>
+                <h2>Pitch & musical key</h2>
+              </div>
+            </div>
+            <div id="pitch-content" class="result-copy"></div>
+          </section>
+
+          <section class="panel">
+            <div class="section-heading">
+              <div>
+                <div class="eyebrow">time domain</div>
+                <h2>Rhythm</h2>
+              </div>
+              <span id="rhythm-coverage" class="badge">representative window</span>
+            </div>
+            <div id="rhythm-content" class="result-copy"></div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">runtime boundary</div>
+              <h2>Local analysis & backend enrichment</h2>
+            </div>
+            <span id="backend-badge" class="badge badge-muted">browser only</span>
+          </div>
+          <div id="backend-content" class="backend-content"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">reproducibility</div>
+              <h2>Algorithms & provenance</h2>
+            </div>
+          </div>
+          <div id="provenance" class="provenance-grid"></div>
+          <details class="raw-details">
+            <summary>Inspect raw report JSON</summary>
+            <pre id="raw-json"></pre>
+          </details>
+        </section>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <a href="https://github.com/moritzbrantner/audio-analysis">Source on GitHub</a>
+      <span>Rust-first audio analysis</span>
+    </footer>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

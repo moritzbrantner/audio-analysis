@@ -1,0 +1,67 @@
+name: Materialize Boring Foundation Candidate
+
+on:
+  push:
+    branches:
+      - chore/boring-foundation-v1
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout candidate branch
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          ref: chore/boring-foundation-v1
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.0
+
+      - name: Prepare pinned foundation sources
+        shell: bash
+        run: |
+          git init "$RUNNER_TEMP/coding-tooling"
+          git -C "$RUNNER_TEMP/coding-tooling" remote add origin https://github.com/moritzbrantner/coding-tooling.git
+          git -C "$RUNNER_TEMP/coding-tooling" fetch --depth=1 origin 28307c66f40e6f02012ed06cc6a632b8b4b15434
+          git -C "$RUNNER_TEMP/coding-tooling" checkout --detach FETCH_HEAD
+          (cd "$RUNNER_TEMP/coding-tooling" && bun install --frozen-lockfile)
+
+          git init "$RUNNER_TEMP/coding-agent-conventions"
+          git -C "$RUNNER_TEMP/coding-agent-conventions" remote add origin https://github.com/moritzbrantner/coding-agent-conventions.git
+          git -C "$RUNNER_TEMP/coding-agent-conventions" fetch --depth=1 origin 8a6bd286b108a0be889073cc22698dd8add8c50b
+          git -C "$RUNNER_TEMP/coding-agent-conventions" checkout --detach FETCH_HEAD
+
+      - name: Materialize recommended foundation
+        shell: bash
+        run: |
+          bun "$RUNNER_TEMP/coding-tooling/src/entry.ts" bootstrap apply \
+            --root "$GITHUB_WORKSPACE" \
+            --conventions-root "$RUNNER_TEMP/coding-agent-conventions" \
+            --json
+          git add -A
+          before="$(git diff --cached --binary | sha256sum | cut -d' ' -f1)"
+          bun "$RUNNER_TEMP/coding-tooling/src/entry.ts" bootstrap apply \
+            --root "$GITHUB_WORKSPACE" \
+            --conventions-root "$RUNNER_TEMP/coding-agent-conventions" \
+            --json
+          git add -A
+          after="$(git diff --cached --binary | sha256sum | cut -d' ' -f1)"
+          test "$before" = "$after"
+
+      - name: Commit generated candidate
+        shell: bash
+        run: |
+          git rm .github/workflows/materialize-boring-foundation.yml
+          git add -A
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "chore: adopt boring foundation v1"
+          git push origin HEAD:chore/boring-foundation-v1

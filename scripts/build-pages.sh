@@ -50,6 +50,26 @@ write_pages_wasm_adapter() {
   cat > "$target_root/index.js" <<EOF
 let wasmModulePromise;
 
+function toPlainValue(value) {
+  if (value instanceof Map) {
+    return Object.fromEntries(
+      Array.from(value, ([key, nested]) => [String(key), toPlainValue(nested)]),
+    );
+  }
+  if (Array.isArray(value)) {
+    return value.map((nested) => toPlainValue(nested));
+  }
+  if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
+    return Array.from(value);
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nested]) => [key, toPlainValue(nested)]),
+    );
+  }
+  return value;
+}
+
 export async function init() {
   const wasmEntry = "./pkg/${wasm_entries[0]}";
   wasmModulePromise ??= import(wasmEntry).then(async (module) => {
@@ -63,18 +83,18 @@ export async function init() {
 
 export async function packageSurface() {
   const module = await init();
-  return module.packageSurface();
+  return toPlainValue(await module.packageSurface());
 }
 
 export async function runOperation(request) {
   const module = await init();
-  const response = await module.runOperation(request);
+  const response = toPlainValue(await module.runOperation(request));
   const surfaceValue = response?.value;
   const result = surfaceValue?.result;
   if (result && typeof result === "object") {
     return { ...response, value: result, surfaceValue };
   }
-  return response;
+  return { ...response, value: surfaceValue, surfaceValue };
 }
 EOF
 }

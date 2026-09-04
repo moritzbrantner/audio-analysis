@@ -68,7 +68,13 @@ export async function packageSurface() {
 
 export async function runOperation(request) {
   const module = await init();
-  return module.runOperation(request);
+  const response = await module.runOperation(request);
+  const surfaceValue = response?.value;
+  const result = surfaceValue?.result;
+  if (result && typeof result === "object") {
+    return { ...response, value: result, surfaceValue };
+  }
+  return response;
 }
 EOF
 }

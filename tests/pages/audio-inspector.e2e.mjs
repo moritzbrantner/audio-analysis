@@ -40,6 +40,9 @@ try {
   assert.equal(toneReport.source.channels, 1);
   assert.ok(toneReport.source.durationSeconds > 2.9 && toneReport.source.durationSeconds < 3.1);
   assertPackageExecution(toneReport, ["core", "fourier", "pitch"]);
+  assertSuccessfulOperation(toneReport.raw?.core, "audio.levels");
+  assertSuccessfulOperation(toneReport.raw?.fourier?.spectrum, "audio.fourier.spectrum");
+  assertSuccessfulOperation(toneReport.raw?.pitch?.estimate, "audio.pitch.estimate");
   assertInRange(toneReport.spectrum?.dominantFrequencyHz, 430, 450, "tone dominant frequency");
   assertInRange(toneReport.pitch?.frequencyHz, 430, 450, "tone pitch estimate");
 
@@ -61,8 +64,7 @@ try {
 
   const clickReport = await readRenderedReport(page);
   assertPackageExecution(clickReport, ["core", "fourier", "rhythm"]);
-  assert.equal(clickReport.raw?.rhythm?.operation, "audio.rhythm.analyze");
-  assert.equal(clickReport.raw?.rhythm?.error, undefined);
+  assertSuccessfulOperation(clickReport.raw?.rhythm, "audio.rhythm.analyze");
   assertInRange(clickReport.rhythm?.bpm, 110, 130, "click-track tempo estimate");
   assert.ok(Array.isArray(clickReport.rhythm?.beats) && clickReport.rhythm.beats.length >= 8, "expected a rendered beat path");
 
@@ -95,6 +97,13 @@ function assertPackageExecution(report, packageIds) {
     assert.equal(entry.available, true, `${packageId} WASM package should be available`);
     assert.equal(entry.runtime, "client-wasm");
   }
+}
+
+function assertSuccessfulOperation(result, operation) {
+  assert.ok(result, `expected ${operation} result`);
+  assert.equal(result.operation, operation);
+  assert.equal(result.error, undefined, `${operation} should not return an analyzer error`);
+  assert.ok(result.value && typeof result.value === "object", `${operation} should return a structured value`);
 }
 
 async function assertText(page, selector, expected) {

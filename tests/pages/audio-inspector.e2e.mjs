@@ -28,11 +28,23 @@ try {
   });
 
   await page.goto(baseUrl, { waitUntil: "networkidle" });
-  await assertText(page, "h1", "Audio Inspector");
+  await assertText(page, "h1", "Understand an audio file in seconds.");
+  await page.locator("#choose-file").waitFor({ state: "visible" });
+  assert.match(await page.locator('[data-example="tone"]').innerText(), /Expect A4/);
+  assert.match(await page.locator('[data-example="clicks"]').innerText(), /half\/double-time ambiguity/);
+  assert.equal(await page.locator("#technical").evaluate((element) => element.open), false);
 
   await page.locator('[data-example="tone"]').click();
   await page.locator("#report").waitFor({ state: "visible", timeout: 30_000 });
   await assertText(page, "#report-title", "440-hz-reference-tone.wav");
+  await page.locator(".report-nav").waitFor({ state: "visible" });
+
+  const overviewComesFirst = await page.evaluate(() => {
+    const overview = document.querySelector("#overview");
+    const waveform = document.querySelector("#waveform-section");
+    return Boolean(overview && waveform && (overview.compareDocumentPosition(waveform) & Node.DOCUMENT_POSITION_FOLLOWING));
+  });
+  assert.equal(overviewComesFirst, true, "overview and findings should precede waveform instrumentation");
 
   const toneReport = await readRenderedReport(page);
   assert.equal(toneReport.schemaVersion, "audio-analysis-inspector/v1");
@@ -48,6 +60,42 @@ try {
   assertSuccessfulOperation(toneReport.raw?.pitch?.estimate, "audio.pitch.estimate");
   assertInRange(toneReport.spectrum?.dominantFrequencyHz, 430, 450, "tone dominant frequency");
   assertInRange(toneReport.pitch?.frequencyHz, 430, 450, "tone pitch estimate");
+  assert.match(await page.locator("#findings").innerText(), /440/);
+
+  await page.waitForFunction(() => {
+    const player = document.querySelector("#audio-player");
+    return player && Number.isFinite(player.duration) && player.duration > 0;
+  });
+
+  const waveformBox = await page.locator("#waveform").boundingBox();
+  assert.ok(waveformBox, "expected a rendered waveform canvas");
+  await page.locator("#waveform").click({
+    position: { x: waveformBox.width / 2, y: waveformBox.height / 2 },
+  });
+  const midpoint = await page.locator("#audio-player").evaluate((element) => element.currentTime);
+  assertInRange(midpoint, 1.2, 1.8, "waveform click seek position");
+  assert.match(await page.locator("#waveform-readout").innerText(), /sample amplitude/);
+
+  await page.locator("#waveform").focus();
+  await page.keyboard.press("Home");
+  assertInRange(await page.locator("#audio-player").evaluate((element) => element.currentTime), 0, 0.05, "waveform Home key");
+  await page.keyboard.press("End");
+  assertInRange(await page.locator("#audio-player").evaluate((element) => element.currentTime), 2.9, 3.1, "waveform End key");
+
+  const spectralBox = await page.locator("#spectral-timeline").boundingBox();
+  assert.ok(spectralBox, "expected a rendered spectral timeline");
+  await page.locator("#spectral-timeline").hover({
+    position: { x: spectralBox.width / 2, y: spectralBox.height / 2 },
+  });
+  assert.match(await page.locator("#spectral-readout").innerText(), /Frame \d+\/\d+/);
+  await page.locator("#spectral-timeline").focus();
+  await page.keyboard.press("End");
+  assert.match(await page.locator("#spectral-readout").innerText(), /Frame \d+\/\d+/);
+
+  await page.locator('.report-nav a[href="#technical"]').click();
+  assert.equal(await page.locator("#technical").evaluate((element) => element.open), true);
+  assert.match(await page.locator("#coverage-file").innerText(), /Full file/);
+  assert.match(await page.locator("#glossary-title").innerText(), /What these terms mean/);
 
   const downloadPromise = page.waitForEvent("download");
   await page.locator("#export-json").click();
@@ -70,6 +118,7 @@ try {
   assertSuccessfulOperation(clickReport.raw?.rhythm, "audio.rhythm.analyze");
   assertTempoFamily(clickReport.rhythm, 120);
   assertBeatPath(clickReport.rhythm?.beats);
+  assert.match(await page.locator("#rhythm-content").innerText(), /BPM/);
 
   assert.deepEqual(pageErrors, [], `browser page errors:\n${pageErrors.join("\n")}`);
   assert.deepEqual(
@@ -78,7 +127,7 @@ try {
     `unexpected browser request failures:\n${unexpectedRequestFailures.join("\n")}`,
   );
 
-  console.log("Audio Inspector real-browser smoke test passed");
+  console.log("Audio Inspector real-browser usability smoke test passed");
 } finally {
   await browser.close();
 }

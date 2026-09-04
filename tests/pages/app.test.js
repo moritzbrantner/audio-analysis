@@ -21,6 +21,7 @@ function makeCanvasContext() {
 }
 
 function makeElement() {
+  const attributes = new Map();
   return {
     hidden: false,
     textContent: "",
@@ -28,6 +29,10 @@ function makeElement() {
     files: [],
     className: "",
     src: "",
+    disabled: false,
+    open: false,
+    currentTime: 0,
+    paused: true,
     classList: {
       add() {},
       remove() {},
@@ -35,11 +40,12 @@ function makeElement() {
     addEventListener() {},
     append() {},
     click() {},
-    getAttribute() {
-      return null;
+    focus() {},
+    getAttribute(name) {
+      return attributes.get(name) ?? null;
     },
     getBoundingClientRect() {
-      return { width: 640, height: 240 };
+      return { left: 0, width: 640, height: 240 };
     },
     getContext() {
       return makeCanvasContext();
@@ -47,9 +53,14 @@ function makeElement() {
     load() {},
     pause() {},
     remove() {},
-    removeAttribute() {},
+    removeAttribute(name) {
+      attributes.delete(name);
+    },
     replaceChildren() {},
-    setAttribute() {},
+    scrollIntoView() {},
+    setAttribute(name, value) {
+      attributes.set(name, String(value));
+    },
   };
 }
 
@@ -110,13 +121,37 @@ function loadApp({ hostname = "example.github.io", search = "", fetchImpl } = {}
     fetch,
     requestAnimationFrame(callback) {
       callback();
+      return 1;
     },
     setTimeout,
     window,
   });
 
   vm.runInContext(
-    `${appSource}\n;globalThis.__audioInspectorTestApi = { analyzerDefinitions, backendInitialization, buildFindings, chooseFftSize, createExampleFile, encodeMonoPcm16Wav, initializeBackendBoundary, isGitHubPages, monoCenterWindow, resampleLinear, scanAudioBuffer, state, synthesizeClicks, synthesizeTone };`,
+    `${appSource}
+;globalThis.__audioInspectorTestApi = {
+  analyzerDefinitions,
+  backendInitialization,
+  buildFindings,
+  chooseFftSize,
+  clamp,
+  createExampleFile,
+  encodeMonoPcm16Wav,
+  initializeBackendBoundary,
+  isCurrentAnalysis,
+  isGitHubPages,
+  monoCenterWindow,
+  resampleLinear,
+  scanAudioBuffer,
+  setAnalyzing,
+  setProgressStage,
+  spectralFrameIndexFromPosition,
+  state,
+  synthesizeClicks,
+  synthesizeTone,
+  tempoFamilyCandidate,
+  waveformSampleAtTime
+};`,
     context,
     { filename: "site/app.js" },
   );
@@ -124,6 +159,7 @@ function loadApp({ hostname = "example.github.io", search = "", fetchImpl } = {}
   return {
     api: context.__audioInspectorTestApi,
     fetchCalls,
+    nodes,
     window,
   };
 }
@@ -212,6 +248,80 @@ describe("Audio Inspector signal analysis", () => {
       "Estimated tempo: 120.0 BPM",
       "Large near-silent sample share",
     ]);
+  });
+
+  test("explains half-time and double-time tempo ambiguity instead of hiding it", () => {
+    const { api } = loadApp();
+    const rhythm = {
+      bpm: 60,
+      confidence: 0.7,
+      tempoCandidates: [{ bpm: 60 }, { bpm: 120 }],
+    };
+
+    expect(api.tempoFamilyCandidate(rhythm, 60)).toBe(120);
+    const findings = api.buildFindings(
+      {
+        clippedSampleCount: 0,
+        clippedSamplePercent: 0,
+        nearSilentSamplePercent: 0,
+        stereoCorrelation: null,
+      },
+      null,
+      null,
+      null,
+      rhythm,
+    );
+
+    expect(findings.some((finding) => finding.title === "Tempo family: 60.0 / 120.0 BPM")).toBe(true);
+    expect(findings.some((finding) => finding.detail.includes("Half-time and double-time ambiguity"))).toBe(true);
+  });
+});
+
+describe("Audio Inspector interaction helpers", () => {
+  test("maps waveform time to a mixed sample value", () => {
+    const { api } = loadApp();
+    const buffer = fakeAudioBuffer([
+      [0, 0.5, -0.5, 0],
+      [0, 0.25, -0.25, 0],
+    ]);
+
+    expect(api.waveformSampleAtTime(buffer, 0.25)).toBeCloseTo(0.375, 6);
+    expect(api.waveformSampleAtTime(buffer, 0.5)).toBeCloseTo(-0.375, 6);
+  });
+
+  test("maps pointer positions to bounded spectral frame indices", () => {
+    const { api } = loadApp();
+
+    expect(api.spectralFrameIndexFromPosition(0, { left: 0, width: 100 }, 5)).toBe(0);
+    expect(api.spectralFrameIndexFromPosition(50, { left: 0, width: 100 }, 5)).toBe(2);
+    expect(api.spectralFrameIndexFromPosition(100, { left: 0, width: 100 }, 5)).toBe(4);
+    expect(api.spectralFrameIndexFromPosition(999, { left: 0, width: 100 }, 5)).toBe(4);
+  });
+
+  test("locks primary input while analysis is active and marks progress deterministically", () => {
+    const { api, nodes } = loadApp();
+
+    api.setAnalyzing(true);
+    expect(nodes.get("#choose-file").disabled).toBe(true);
+    expect(nodes.get("#file-input").disabled).toBe(true);
+    expect(nodes.get("#drop-zone").getAttribute("aria-disabled")).toBe("true");
+
+    api.setProgressStage("analyze");
+    expect(nodes.get("#progress-decode").getAttribute("data-state")).toBe("complete");
+    expect(nodes.get("#progress-analyze").getAttribute("data-state")).toBe("active");
+    expect(nodes.get("#progress-report").getAttribute("data-state")).toBe("pending");
+
+    api.setAnalyzing(false);
+    expect(nodes.get("#choose-file").disabled).toBe(false);
+  });
+
+  test("invalidates stale analysis generations", () => {
+    const { api } = loadApp();
+    const generation = api.state.analysisGeneration;
+
+    expect(api.isCurrentAnalysis(generation)).toBe(true);
+    api.state.analysisGeneration += 1;
+    expect(api.isCurrentAnalysis(generation)).toBe(false);
   });
 });
 

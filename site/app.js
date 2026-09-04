@@ -31,32 +31,47 @@ const state = {
   report: null,
   analyzers: null,
   backend: null,
+  analyzing: false,
+  analysisGeneration: 0,
+  waveformHoverTime: null,
+  spectralFrameIndex: null,
+  playbackAnimationFrame: null,
 };
 
 const elements = {
   inputPanel: document.querySelector("#input-panel"),
   dropZone: document.querySelector("#drop-zone"),
   fileInput: document.querySelector("#file-input"),
+  chooseFile: document.querySelector("#choose-file"),
   inputError: document.querySelector("#input-error"),
   loadingPanel: document.querySelector("#loading-panel"),
   loadingTitle: document.querySelector("#loading-title"),
   loadingDetail: document.querySelector("#loading-detail"),
+  progressDecode: document.querySelector("#progress-decode"),
+  progressAnalyze: document.querySelector("#progress-analyze"),
+  progressReport: document.querySelector("#progress-report"),
   report: document.querySelector("#report"),
   reportTitle: document.querySelector("#report-title"),
   exportJson: document.querySelector("#export-json"),
   chooseAnother: document.querySelector("#choose-another"),
   audioPlayer: document.querySelector("#audio-player"),
   waveform: document.querySelector("#waveform"),
+  waveformReadout: document.querySelector("#waveform-readout"),
   spectralTimeline: document.querySelector("#spectral-timeline"),
+  spectralReadout: document.querySelector("#spectral-readout"),
   statisticsCoverage: document.querySelector("#statistics-coverage"),
   spectralCoverage: document.querySelector("#spectral-coverage"),
   rhythmCoverage: document.querySelector("#rhythm-coverage"),
+  coverageFile: document.querySelector("#coverage-file"),
+  coverageSpectral: document.querySelector("#coverage-spectral"),
+  coverageRhythm: document.querySelector("#coverage-rhythm"),
   findings: document.querySelector("#findings"),
   levelsMetrics: document.querySelector("#levels-metrics"),
   qualityMetrics: document.querySelector("#quality-metrics"),
   spectrumMetrics: document.querySelector("#spectrum-metrics"),
   pitchContent: document.querySelector("#pitch-content"),
   rhythmContent: document.querySelector("#rhythm-content"),
+  technical: document.querySelector("#technical"),
   backendSummary: document.querySelector("#backend-summary"),
   backendBadge: document.querySelector("#backend-badge"),
   backendContent: document.querySelector("#backend-content"),
@@ -70,36 +85,27 @@ const elements = {
   summarySize: document.querySelector("#summary-size"),
 };
 
+const exampleButtons = Array.from(document.querySelectorAll("[data-example]"));
+const reportNavLinks = Array.from(document.querySelectorAll(".report-nav a"));
+
 wireUi();
 const backendInitialization = initializeBackendBoundary();
 
 function wireUi() {
+  elements.chooseFile.addEventListener("click", () => {
+    if (!state.analyzing) elements.fileInput.click();
+  });
+
   elements.fileInput.addEventListener("change", () => {
     const file = elements.fileInput.files?.[0];
-    if (file) void analyzeFile(file);
+    if (file && !state.analyzing) void analyzeFile(file);
   });
 
-  for (const eventName of ["dragenter", "dragover"]) {
-    elements.dropZone.addEventListener(eventName, (event) => {
-      event.preventDefault();
-      elements.dropZone.classList.add("is-dragging");
-    });
-  }
+  wireDropZone();
 
-  for (const eventName of ["dragleave", "drop"]) {
-    elements.dropZone.addEventListener(eventName, (event) => {
-      event.preventDefault();
-      elements.dropZone.classList.remove("is-dragging");
-    });
-  }
-
-  elements.dropZone.addEventListener("drop", (event) => {
-    const file = event.dataTransfer?.files?.[0];
-    if (file) void analyzeFile(file);
-  });
-
-  document.querySelectorAll("[data-example]").forEach((button) => {
+  for (const button of exampleButtons) {
     button.addEventListener("click", async () => {
+      if (state.analyzing) return;
       clearError();
       const kind = button.getAttribute("data-example");
       const name = button.getAttribute("data-example-name") ?? "Example audio";
@@ -111,25 +117,156 @@ function wireUi() {
         showError(`Could not create the example: ${errorMessage(error)}`);
       }
     });
-  });
+  }
 
   elements.exportJson.addEventListener("click", exportReport);
   elements.chooseAnother.addEventListener("click", resetInspector);
 
+  wireWaveformInteraction();
+  wireSpectralInteraction();
+  wireReportNavigation();
+
   window.addEventListener("resize", () => {
     if (!state.audioBuffer || !state.report) return;
     drawWaveform(elements.waveform, state.audioBuffer);
-    drawSpectralTimeline(elements.spectralTimeline, responseValue(state.report.raw?.fourier?.spectrogram));
+    drawSpectralTimeline(elements.spectralTimeline, state.report.spectrogram);
+  });
+}
+
+function wireDropZone() {
+  for (const eventName of ["dragenter", "dragover"]) {
+    elements.dropZone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      if (!state.analyzing) elements.dropZone.classList.add("is-dragging");
+    });
+  }
+
+  for (const eventName of ["dragleave", "drop"]) {
+    elements.dropZone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      elements.dropZone.classList.remove("is-dragging");
+    });
+  }
+
+  elements.dropZone.addEventListener("drop", (event) => {
+    if (state.analyzing) return;
+    const file = event.dataTransfer?.files?.[0];
+    if (file) void analyzeFile(file);
+  });
+}
+
+function wireReportNavigation() {
+  for (const link of reportNavLinks) {
+    link.addEventListener("click", () => {
+      if (link.getAttribute("href") === "#technical") {
+        elements.technical.open = true;
+      }
+    });
+  }
+}
+
+function wireWaveformInteraction() {
+  elements.waveform.addEventListener("pointermove", (event) => {
+    if (!state.audioBuffer) return;
+    state.waveformHoverTime = canvasTimeFromEvent(event, elements.waveform, state.audioBuffer.duration);
+    updateWaveformReadout(state.waveformHoverTime);
+    drawWaveform(elements.waveform, state.audioBuffer);
+  });
+
+  elements.waveform.addEventListener("pointerleave", () => {
+    state.waveformHoverTime = null;
+    updateWaveformReadout(elements.audioPlayer.currentTime || 0, true);
+    if (state.audioBuffer) drawWaveform(elements.waveform, state.audioBuffer);
+  });
+
+  elements.waveform.addEventListener("click", (event) => {
+    if (!state.audioBuffer) return;
+    const time = canvasTimeFromEvent(event, elements.waveform, state.audioBuffer.duration);
+    seekAudioToTime(time);
+  });
+
+  elements.waveform.addEventListener("keydown", (event) => {
+    if (!state.audioBuffer) return;
+    const current = Number(elements.audioPlayer.currentTime) || 0;
+    const step = event.shiftKey ? 5 : 1;
+    let next = null;
+    if (event.key === "ArrowLeft") next = current - step;
+    if (event.key === "ArrowRight") next = current + step;
+    if (event.key === "Home") next = 0;
+    if (event.key === "End") next = state.audioBuffer.duration;
+    if (next === null) return;
+    event.preventDefault();
+    seekAudioToTime(next);
+  });
+
+  elements.waveform.addEventListener("focus", () => {
+    updateWaveformReadout(elements.audioPlayer.currentTime || 0);
+  });
+
+  elements.audioPlayer.addEventListener("timeupdate", () => {
+    updateWaveformAria();
+    updateWaveformReadout(elements.audioPlayer.currentTime || 0, state.waveformHoverTime === null);
+    if (state.audioBuffer) drawWaveform(elements.waveform, state.audioBuffer);
+  });
+
+  elements.audioPlayer.addEventListener("play", startPlaybackAnimation);
+  elements.audioPlayer.addEventListener("pause", stopPlaybackAnimation);
+  elements.audioPlayer.addEventListener("ended", stopPlaybackAnimation);
+}
+
+function wireSpectralInteraction() {
+  elements.spectralTimeline.addEventListener("pointermove", (event) => {
+    const frames = spectralFrames();
+    if (!frames.length) return;
+    const index = spectralFrameIndexFromPosition(
+      event.clientX,
+      elements.spectralTimeline.getBoundingClientRect(),
+      frames.length,
+    );
+    selectSpectralFrame(index);
+  });
+
+  elements.spectralTimeline.addEventListener("pointerleave", () => {
+    if (!spectralFrames().length) return;
+    state.spectralFrameIndex = null;
+    elements.spectralReadout.textContent = "Hover or focus the chart to inspect spectral frames.";
+    drawSpectralTimeline(elements.spectralTimeline, state.report?.spectrogram);
+  });
+
+  elements.spectralTimeline.addEventListener("focus", () => {
+    const frames = spectralFrames();
+    if (!frames.length) return;
+    if (state.spectralFrameIndex === null) {
+      selectSpectralFrame(Math.floor((frames.length - 1) / 2));
+    }
+  });
+
+  elements.spectralTimeline.addEventListener("keydown", (event) => {
+    const frames = spectralFrames();
+    if (!frames.length) return;
+    let index = state.spectralFrameIndex ?? Math.floor((frames.length - 1) / 2);
+    if (event.key === "ArrowLeft") index -= 1;
+    else if (event.key === "ArrowRight") index += 1;
+    else if (event.key === "Home") index = 0;
+    else if (event.key === "End") index = frames.length - 1;
+    else return;
+    event.preventDefault();
+    selectSpectralFrame(index);
   });
 }
 
 async function analyzeFile(file) {
+  const generation = ++state.analysisGeneration;
+  setAnalyzing(true);
   clearError();
-  setLoading(true, "Decoding audio…", "The browser is decoding the selected file locally.");
+  setProgressStage("decode");
+  setLoading(true, "Decoding audio…", "Your browser is decoding the selected file locally.");
   elements.report.hidden = true;
 
   try {
     const arrayBuffer = await file.arrayBuffer();
+    if (!isCurrentAnalysis(generation)) return;
+
     const context = new AudioContext();
     let decoded;
     try {
@@ -138,24 +275,28 @@ async function analyzeFile(file) {
       await context.close();
     }
 
+    if (!isCurrentAnalysis(generation)) return;
     if (!decoded.length || !decoded.numberOfChannels) {
       throw new Error("The decoded audio buffer is empty.");
     }
 
     state.audioBuffer = decoded;
+    state.waveformHoverTime = null;
+    state.spectralFrameIndex = null;
     replacePlayerSource(file);
 
-    setLoading(true, "Scanning the signal…", "Computing file-level levels, dynamics, channel, and clipping statistics.");
+    setProgressStage("analyze");
+    setLoading(true, "Analyzing the signal…", "Computing levels, spectrum, pitch, key, and rhythm with Rust/WASM.");
     const statistics = scanAudioBuffer(decoded);
 
-    setLoading(true, "Running Rust/WASM analyzers…", "Loading core, Fourier, pitch, and rhythm package surfaces.");
-    const analyzers = await loadAnalyzers();
+    const analyzers = state.analyzers ?? (await loadAnalyzers());
+    if (!isCurrentAnalysis(generation)) return;
     state.analyzers = analyzers;
 
     const representative = monoCenterWindow(decoded, REPRESENTATIVE_SAMPLES);
     const rhythmWindow = monoCenterWindowBySeconds(decoded, RHYTHM_SECONDS);
-    const rhythmSamples = resampleLinear(rhythmWindow.samples, decoded.sampleRate, Math.min(decoded.sampleRate, RHYTHM_RATE));
     const rhythmRate = Math.min(decoded.sampleRate, RHYTHM_RATE);
+    const rhythmSamples = resampleLinear(rhythmWindow.samples, decoded.sampleRate, rhythmRate);
     const fftSize = chooseFftSize(representative.samples.length);
 
     const [coreResult, spectrumResult, spectrogramResult, featuresResult, pitchResult, keyResult, rhythmResult] =
@@ -203,7 +344,12 @@ async function analyzeFile(file) {
         }),
       ]);
 
+    if (!isCurrentAnalysis(generation)) return;
+
+    setProgressStage("report");
+    setLoading(true, "Preparing your report…", "Turning the analyzer output into readable findings and visualizations.");
     await backendInitialization;
+    if (!isCurrentAnalysis(generation)) return;
 
     const packageProvenance = Object.entries(analyzers).map(([id, analyzer]) => ({
       id,
@@ -237,13 +383,42 @@ async function analyzeFile(file) {
       },
     });
 
+    if (!isCurrentAnalysis(generation)) return;
     state.report = report;
     renderReport(report, decoded);
   } catch (error) {
-    showError(errorMessage(error));
+    if (isCurrentAnalysis(generation)) showError(errorMessage(error));
   } finally {
-    setLoading(false);
+    if (isCurrentAnalysis(generation)) {
+      setAnalyzing(false);
+      setLoading(false);
+    }
   }
+}
+
+function isCurrentAnalysis(generation) {
+  return generation === state.analysisGeneration;
+}
+
+function setAnalyzing(analyzing) {
+  state.analyzing = analyzing;
+  elements.fileInput.disabled = analyzing;
+  elements.chooseFile.disabled = analyzing;
+  elements.dropZone.setAttribute("aria-disabled", String(analyzing));
+  elements.inputPanel.setAttribute("aria-busy", String(analyzing));
+  for (const button of exampleButtons) button.disabled = analyzing;
+}
+
+function setProgressStage(stage) {
+  const order = ["decode", "analyze", "report"];
+  const activeIndex = order.indexOf(stage);
+  const nodes = [elements.progressDecode, elements.progressAnalyze, elements.progressReport];
+  nodes.forEach((node, index) => {
+    const value = index < activeIndex ? "complete" : index === activeIndex ? "active" : "pending";
+    node.setAttribute("data-state", value);
+    if (index === activeIndex) node.setAttribute("aria-current", "step");
+    else node.removeAttribute("aria-current");
+  });
 }
 
 async function loadAnalyzers() {
@@ -414,9 +589,10 @@ function scanAudioBuffer(buffer) {
   const rms = visitedSamples ? Math.sqrt(sumSq / visitedSamples) : 0;
   const channelRms = channelSumsSq.map((value) => (visitedFrames ? Math.sqrt(value / visitedFrames) : 0));
   const stereoCorrelation = stereo ? correlation(stereo, visitedFrames) : null;
-  const stereoBalanceDb = channelRms.length === 2 && channelRms[0] > 0 && channelRms[1] > 0
-    ? 20 * Math.log10(channelRms[0] / channelRms[1])
-    : null;
+  const stereoBalanceDb =
+    channelRms.length === 2 && channelRms[0] > 0 && channelRms[1] > 0
+      ? 20 * Math.log10(channelRms[0] / channelRms[1])
+      : null;
 
   return {
     peak,
@@ -517,9 +693,10 @@ function buildFindings(stats, spectral, pitch, key, rhythm) {
     findings.push({
       tone: "neutral",
       title: dominant !== null ? `Dominant frequency near ${formatHz(dominant)}` : "Spectral shape measured",
-      detail: centroid !== null
-        ? `The representative window has a spectral centroid near ${formatHz(centroid)}.`
-        : "Frequency-domain analysis completed on the representative window.",
+      detail:
+        centroid !== null
+          ? `The representative window has a spectral centroid near ${formatHz(centroid)}.`
+          : "Frequency-domain analysis completed on the representative window.",
     });
   }
 
@@ -538,21 +715,26 @@ function buildFindings(stats, spectral, pitch, key, rhythm) {
     findings.push({
       tone: "neutral",
       title: `Estimated musical key: ${key.key}`,
-      detail: keyConfidence === null
-        ? "Key analysis completed on the representative window."
-        : `Key confidence: ${formatPercent(keyConfidence * 100)}.`,
+      detail:
+        keyConfidence === null
+          ? "Key analysis completed on the representative window."
+          : `Key confidence: ${formatPercent(keyConfidence * 100)}.`,
     });
   }
 
   const bpm = finiteNumber(rhythm?.bpm);
   if (bpm !== null) {
     const confidence = finiteNumber(rhythm?.confidence);
+    const alternative = tempoFamilyCandidate(rhythm, bpm);
     findings.push({
       tone: "neutral",
-      title: `Estimated tempo: ${bpm.toFixed(1)} BPM`,
-      detail: confidence === null
-        ? "Rhythm analysis completed on a bounded representative window."
-        : `Tempo confidence: ${formatPercent(confidence * 100)}; analysis uses a bounded, resampled window.`,
+      title: alternative === null ? `Estimated tempo: ${bpm.toFixed(1)} BPM` : `Tempo family: ${bpm.toFixed(1)} / ${alternative.toFixed(1)} BPM`,
+      detail:
+        alternative === null
+          ? confidence === null
+            ? "Rhythm analysis completed on a bounded representative window."
+            : `Tempo confidence: ${formatPercent(confidence * 100)}; analysis uses a bounded, resampled window.`
+          : `The analyzer selected ${bpm.toFixed(1)} BPM and also found ${alternative.toFixed(1)} BPM as a plausible candidate. Half-time and double-time ambiguity is common in tempo estimation.`,
     });
   }
 
@@ -575,6 +757,19 @@ function buildFindings(stats, spectral, pitch, key, rhythm) {
   return findings.slice(0, 6);
 }
 
+function tempoFamilyCandidate(rhythm, primaryBpm) {
+  const candidates = Array.isArray(rhythm?.tempoCandidates) ? rhythm.tempoCandidates : [];
+  const relatedTargets = [primaryBpm * 2, primaryBpm / 2];
+  for (const target of relatedTargets) {
+    const match = candidates
+      .map((candidate) => finiteNumber(candidate?.bpm))
+      .filter((value) => value !== null)
+      .find((value) => Math.abs(value - target) <= Math.max(2, target * 0.08));
+    if (match !== undefined) return match;
+  }
+  return null;
+}
+
 function renderReport(report, buffer) {
   elements.inputPanel.hidden = true;
   elements.report.hidden = false;
@@ -588,28 +783,39 @@ function renderReport(report, buffer) {
   elements.summarySize.textContent = formatBytes(report.source.byteLength);
 
   const statsCoverage = report.coverage.fileStatistics;
-  elements.statisticsCoverage.textContent = statsCoverage.kind === "exact-whole-file"
-    ? "exact whole-file scan"
-    : `sampled every ${statsCoverage.frameStride} frames`;
-  elements.spectralCoverage.textContent = `${report.coverage.spectralPitchKey.durationSeconds.toFixed(1)} s center window`;
-  elements.rhythmCoverage.textContent = `${report.coverage.rhythm.sourceDurationSeconds.toFixed(1)} s @ ${Math.round(report.coverage.rhythm.analysisSampleRate / 1000)} kHz`;
+  const fileCoverageText =
+    statsCoverage.kind === "exact-whole-file"
+      ? "Full file · exact scan"
+      : `Full file · sampled every ${statsCoverage.frameStride} frames`;
+  const spectralCoverageText = `Center ${report.coverage.spectralPitchKey.durationSeconds.toFixed(1)} s · spectrum, pitch & key`;
+  const rhythmCoverageText = `Center ${report.coverage.rhythm.sourceDurationSeconds.toFixed(1)} s · ${Math.round(report.coverage.rhythm.analysisSampleRate / 1000)} kHz rhythm analysis`;
+  elements.statisticsCoverage.textContent = fileCoverageText;
+  elements.spectralCoverage.textContent = spectralCoverageText;
+  elements.rhythmCoverage.textContent = `Center ${report.coverage.rhythm.sourceDurationSeconds.toFixed(1)} s`;
+  elements.coverageFile.textContent = fileCoverageText;
+  elements.coverageSpectral.textContent = spectralCoverageText;
+  elements.coverageRhythm.textContent = rhythmCoverageText;
 
   renderFindings(report.findings);
   renderMetricList(elements.levelsMetrics, [
-    ["Peak", `${formatNumber(report.overview.peak, 4)} (${formatDb(report.overview.peakDbfs)})`],
-    ["RMS", `${formatNumber(report.overview.rms, 4)} (${formatDb(report.overview.rmsDbfs)})`],
-    ["Mean absolute", formatNumber(report.overview.meanAbsolute, 4)],
-    ["Crest factor", report.overview.crestFactorDb === null ? "—" : `${report.overview.crestFactorDb.toFixed(2)} dB`],
-    ["DC offset", formatNumber(report.overview.dcOffset, 5)],
+    ["Peak", `${formatNumber(report.overview.peak, 4)} (${formatDb(report.overview.peakDbfs)})`, "Highest absolute sample value observed in the scan."],
+    ["RMS", `${formatNumber(report.overview.rms, 4)} (${formatDb(report.overview.rmsDbfs)})`, "Root mean square: a measure of average signal energy."],
+    ["Mean absolute", formatNumber(report.overview.meanAbsolute, 4), "Average absolute sample magnitude."],
+    ["Crest factor", report.overview.crestFactorDb === null ? "—" : `${report.overview.crestFactorDb.toFixed(2)} dB`, "Difference between peak and RMS level; higher values indicate more transient headroom."],
+    ["DC offset", formatNumber(report.overview.dcOffset, 5), "Average signed sample value. Values near zero are usually expected."],
   ]);
 
   const qualityRows = [
-    ["Clipped samples", `${report.quality.clippedSampleCount.toLocaleString()} (${formatPercent(report.quality.clippedSamplePercent)})`],
-    ["Near-silent samples", formatPercent(report.quality.nearSilentSamplePercent)],
-    ["Channel RMS", report.quality.channelRms.map((value, index) => `Ch ${index + 1}: ${formatDb(amplitudeToDb(value))}`).join(" · ")],
+    ["Clipped samples", `${report.quality.clippedSampleCount.toLocaleString()} (${formatPercent(report.quality.clippedSamplePercent)})`, "Samples at or above the configured clipping threshold."],
+    ["Near-silent samples", formatPercent(report.quality.nearSilentSamplePercent), "Share of scanned sample values close to zero; this is not a silence-duration detector."],
+    ["Channel RMS", report.quality.channelRms.map((value, index) => `Ch ${index + 1}: ${formatDb(amplitudeToDb(value))}`).join(" · "), "Average energy measured independently for each channel."],
   ];
-  if (report.quality.stereoCorrelation !== null) qualityRows.push(["Stereo correlation", report.quality.stereoCorrelation.toFixed(3)]);
-  if (report.quality.stereoBalanceDb !== null) qualityRows.push(["L/R RMS balance", `${report.quality.stereoBalanceDb.toFixed(2)} dB`]);
+  if (report.quality.stereoCorrelation !== null) {
+    qualityRows.push(["Stereo correlation", report.quality.stereoCorrelation.toFixed(3), "Similarity between left and right channels, from −1 to +1."]);
+  }
+  if (report.quality.stereoBalanceDb !== null) {
+    qualityRows.push(["L/R RMS balance", `${report.quality.stereoBalanceDb.toFixed(2)} dB`, "Relative RMS level of the left channel compared with the right channel."]);
+  }
   renderMetricList(elements.qualityMetrics, qualityRows);
 
   renderSpectrum(report);
@@ -619,9 +825,15 @@ function renderReport(report, buffer) {
   renderProvenance(report.runtime.packages);
 
   elements.rawJson.textContent = JSON.stringify(report, null, 2);
+  updateWaveformAria();
+  updateWaveformReadout(0, true);
+  elements.spectralReadout.textContent = "Hover or focus the chart to inspect spectral frames.";
+
   requestAnimationFrame(() => {
     drawWaveform(elements.waveform, buffer);
     drawSpectralTimeline(elements.spectralTimeline, report.spectrogram);
+    elements.reportTitle.focus?.({ preventScroll: true });
+    elements.report.scrollIntoView?.({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
   });
 }
 
@@ -648,11 +860,14 @@ function renderFindings(findings) {
 
 function renderMetricList(target, rows) {
   target.replaceChildren();
-  for (const [label, value] of rows) {
+  for (const [label, value, help] of rows) {
     const wrapper = document.createElement("div");
     wrapper.className = "metric-row";
     const term = document.createElement("dt");
-    term.textContent = label;
+    const labelText = document.createElement("span");
+    labelText.textContent = label;
+    term.append(labelText);
+    if (help) term.append(createInfoButton(label, help));
     const definition = document.createElement("dd");
     definition.textContent = value;
     wrapper.append(term, definition);
@@ -664,23 +879,36 @@ function renderSpectrum(report) {
   const spectral = report.spectralFeatures;
   const spectrum = report.spectrum;
   const metrics = [
-    ["Dominant", finiteNumber(spectrum?.dominantFrequencyHz) === null ? "—" : formatHz(spectrum.dominantFrequencyHz)],
-    ["Centroid", finiteNumber(spectral?.centroidHz) === null ? "—" : formatHz(spectral.centroidHz)],
-    ["Bandwidth", finiteNumber(spectral?.bandwidthHz) === null ? "—" : formatHz(spectral.bandwidthHz)],
-    ["Rolloff", finiteNumber(spectral?.rolloffHz) === null ? "—" : formatHz(spectral.rolloffHz)],
+    ["Dominant", finiteNumber(spectrum?.dominantFrequencyHz) === null ? "—" : formatHz(spectrum.dominantFrequencyHz), "Strongest frequency bin in the analyzed spectrum."],
+    ["Centroid", finiteNumber(spectral?.centroidHz) === null ? "—" : formatHz(spectral.centroidHz), "Frequency-weighted center of the spectrum; often associated with brightness."],
+    ["Bandwidth", finiteNumber(spectral?.bandwidthHz) === null ? "—" : formatHz(spectral.bandwidthHz), "Spread of spectral energy around the centroid."],
+    ["Rolloff", finiteNumber(spectral?.rolloffHz) === null ? "—" : formatHz(spectral.rolloffHz), "Frequency below which most spectral energy is concentrated."],
   ];
 
   elements.spectrumMetrics.replaceChildren();
-  for (const [label, value] of metrics) {
+  for (const [label, value, help] of metrics) {
     const card = document.createElement("div");
     card.className = "mini-metric";
+    const header = document.createElement("div");
+    header.className = "mini-metric-header";
     const name = document.createElement("span");
     name.textContent = label;
+    header.append(name, createInfoButton(label, help));
     const strong = document.createElement("strong");
     strong.textContent = value;
-    card.append(name, strong);
+    card.append(header, strong);
     elements.spectrumMetrics.append(card);
   }
+}
+
+function createInfoButton(label, help) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "info-button";
+  button.textContent = "i";
+  button.setAttribute("data-tooltip", help);
+  button.setAttribute("aria-label", `${label}: ${help}`);
+  return button;
 }
 
 function renderPitch(report) {
@@ -696,22 +924,35 @@ function renderPitch(report) {
     lead.textContent = "No stable monophonic pitch estimate was returned.";
   }
 
+  const note = document.createElement("p");
+  note.className = "result-note";
+  note.textContent = "Pitch and key use the bounded center analysis window, not necessarily the whole file.";
+
   const details = document.createElement("div");
   details.className = "result-meta";
   addResultRow(details, "Pitch confidence", finiteNumber(pitch?.confidence) === null ? "—" : formatPercent(pitch.confidence * 100));
   addResultRow(details, "Estimated key", typeof key?.key === "string" ? key.key : "—");
   addResultRow(details, "Key confidence", finiteNumber(key?.confidence) === null ? "—" : formatPercent(key.confidence * 100));
   addResultRow(details, "Tuning offset", finiteNumber(key?.tuningCents) === null ? "—" : `${key.tuningCents.toFixed(1)} cents`);
-  elements.pitchContent.append(lead, details);
+  elements.pitchContent.append(lead, note, details);
 }
 
 function renderRhythm(report) {
   const rhythm = report.rhythm;
   elements.rhythmContent.replaceChildren();
   const bpm = finiteNumber(rhythm?.bpm);
+  const alternative = bpm === null ? null : tempoFamilyCandidate(rhythm, bpm);
+
   const lead = document.createElement("p");
   lead.className = "result-lead";
   lead.textContent = bpm === null ? "No stable tempo estimate was returned." : `${bpm.toFixed(1)} BPM`;
+
+  const note = document.createElement("p");
+  note.className = "result-note";
+  note.textContent =
+    alternative === null
+      ? "Tempo is estimated from a bounded, resampled center window."
+      : `${alternative.toFixed(1)} BPM is also a plausible candidate. Half-time and double-time interpretations can both be musically valid.`;
 
   const details = document.createElement("div");
   details.className = "result-meta";
@@ -719,7 +960,7 @@ function renderRhythm(report) {
   addResultRow(details, "Detected beats", Array.isArray(rhythm?.beats) ? rhythm.beats.length.toLocaleString() : "—");
   addResultRow(details, "Detected downbeats", Array.isArray(rhythm?.downbeats) ? rhythm.downbeats.length.toLocaleString() : "—");
   addResultRow(details, "Downbeat confidence", finiteNumber(rhythm?.downbeatConfidence) === null ? "—" : formatPercent(rhythm.downbeatConfidence * 100));
-  elements.rhythmContent.append(lead, details);
+  elements.rhythmContent.append(lead, note, details);
 }
 
 function addResultRow(container, label, value) {
@@ -741,7 +982,8 @@ function renderBackend(backend) {
     elements.backendBadge.textContent = "local backend available";
     elements.backendBadge.className = "badge";
     paragraph.textContent = `A local backend was discovered at ${backend.baseUrl}. Browser/WASM remains the default analysis path.`;
-    second.textContent = "The backend reports the transcription package surface as available for heavier model-backed enrichment. This inspector does not send the selected audio automatically; backend model execution remains an explicit opt-in boundary.";
+    second.textContent =
+      "The backend reports the transcription package surface as available for heavier model-backed enrichment. This inspector does not send the selected audio automatically; backend model execution remains an explicit opt-in boundary.";
   } else if (backend?.baseUrl) {
     elements.backendBadge.textContent = "backend unavailable";
     elements.backendBadge.className = "badge badge-muted";
@@ -751,7 +993,8 @@ function renderBackend(backend) {
     elements.backendBadge.textContent = "browser only";
     elements.backendBadge.className = "badge badge-muted";
     paragraph.textContent = "This deployment is using the browser-local Rust/WASM path only. No audio was uploaded for analysis.";
-    second.textContent = "When serving this site locally, a backend can be discovered at http://127.0.0.1:3000, or configured with ?backend=<base-url>. Heavy model capabilities stay separate from the public Pages boundary.";
+    second.textContent =
+      "When serving this site locally, a backend can be discovered at http://127.0.0.1:3000, or configured with ?backend=<base-url>. Heavy model capabilities stay separate from the public Pages boundary.";
   }
 
   elements.backendContent.append(paragraph, second);
@@ -821,6 +1064,91 @@ function drawWaveform(canvas, buffer) {
   context.moveTo(0, mid + 0.5);
   context.lineTo(width, mid + 0.5);
   context.stroke();
+
+  drawWaveformCursor(context, width, height, buffer.duration, Number(elements.audioPlayer.currentTime) || 0, "rgba(255,255,255,0.9)");
+  if (state.waveformHoverTime !== null) {
+    drawWaveformCursor(context, width, height, buffer.duration, state.waveformHoverTime, "rgba(251,191,36,0.9)");
+  }
+}
+
+function drawWaveformCursor(context, width, height, duration, time, color) {
+  if (!Number.isFinite(duration) || duration <= 0) return;
+  const normalized = clamp(time / duration, 0, 1);
+  const x = Math.round(normalized * width) + 0.5;
+  context.strokeStyle = color;
+  context.lineWidth = Math.max(1, window.devicePixelRatio || 1);
+  context.beginPath();
+  context.moveTo(x, 0);
+  context.lineTo(x, height);
+  context.stroke();
+}
+
+function canvasTimeFromEvent(event, canvas, duration) {
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(1, rect.width);
+  const x = clamp((Number(event.clientX) || 0) - (rect.left || 0), 0, width);
+  return clamp((x / width) * duration, 0, duration);
+}
+
+function waveformSampleAtTime(buffer, time) {
+  if (!buffer?.length || !buffer.numberOfChannels) return null;
+  const frame = clamp(Math.round(time * buffer.sampleRate), 0, buffer.length - 1);
+  let sum = 0;
+  for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+    sum += buffer.getChannelData(channel)[frame] ?? 0;
+  }
+  return sum / buffer.numberOfChannels;
+}
+
+function seekAudioToTime(time) {
+  if (!state.audioBuffer) return;
+  const next = clamp(time, 0, state.audioBuffer.duration);
+  elements.audioPlayer.currentTime = next;
+  updateWaveformAria();
+  updateWaveformReadout(next);
+  drawWaveform(elements.waveform, state.audioBuffer);
+}
+
+function updateWaveformAria() {
+  const duration = state.audioBuffer?.duration ?? 0;
+  const current = clamp(Number(elements.audioPlayer.currentTime) || 0, 0, duration || 0);
+  elements.waveform.setAttribute("aria-valuemax", String(duration));
+  elements.waveform.setAttribute("aria-valuenow", String(current));
+  elements.waveform.setAttribute("aria-valuetext", `${formatDuration(current)} of ${formatDuration(duration)}`);
+}
+
+function updateWaveformReadout(time, playbackOnly = false) {
+  if (!state.audioBuffer) {
+    elements.waveformReadout.textContent = "Click the waveform or use arrow keys to seek.";
+    return;
+  }
+  const sample = waveformSampleAtTime(state.audioBuffer, time);
+  const prefix = playbackOnly ? "Playback" : state.waveformHoverTime !== null ? "Pointer" : "Position";
+  const amplitude = sample === null ? "—" : `${sample >= 0 ? "+" : ""}${sample.toFixed(3)}`;
+  elements.waveformReadout.textContent = `${prefix}: ${formatDuration(time)} · sample amplitude ${amplitude}`;
+}
+
+function startPlaybackAnimation() {
+  stopPlaybackAnimation();
+  const tick = () => {
+    if (!state.audioBuffer || elements.audioPlayer.paused) {
+      state.playbackAnimationFrame = null;
+      return;
+    }
+    updateWaveformAria();
+    if (state.waveformHoverTime === null) updateWaveformReadout(elements.audioPlayer.currentTime || 0, true);
+    drawWaveform(elements.waveform, state.audioBuffer);
+    state.playbackAnimationFrame = requestAnimationFrame(tick);
+  };
+  state.playbackAnimationFrame = requestAnimationFrame(tick);
+}
+
+function stopPlaybackAnimation() {
+  if (state.playbackAnimationFrame !== null && typeof cancelAnimationFrame === "function") {
+    cancelAnimationFrame(state.playbackAnimationFrame);
+  }
+  state.playbackAnimationFrame = null;
+  if (state.audioBuffer) drawWaveform(elements.waveform, state.audioBuffer);
 }
 
 function drawSpectralTimeline(canvas, spectrogram) {
@@ -858,6 +1186,17 @@ function drawSpectralTimeline(canvas, spectrogram) {
   drawFrameSeries(context, frames, "dominantFrequencyHz", nyquist, padding, plotWidth, plotHeight, "#2dd4bf", dpr);
   drawFrameSeries(context, frames, "centroidHz", nyquist, padding, plotWidth, plotHeight, "#fbbf24", dpr);
 
+  if (state.spectralFrameIndex !== null) {
+    const index = clamp(state.spectralFrameIndex, 0, frames.length - 1);
+    const x = padding + (frames.length === 1 ? plotWidth / 2 : (plotWidth * index) / (frames.length - 1));
+    context.strokeStyle = "rgba(255,255,255,0.88)";
+    context.lineWidth = dpr;
+    context.beginPath();
+    context.moveTo(x, padding);
+    context.lineTo(x, padding + plotHeight);
+    context.stroke();
+  }
+
   context.fillStyle = "#2dd4bf";
   context.font = `${11 * dpr}px system-ui`;
   context.fillText("dominant", padding, 13 * dpr);
@@ -884,6 +1223,41 @@ function drawFrameSeries(context, frames, key, nyquist, padding, plotWidth, plot
     }
   });
   if (started) context.stroke();
+}
+
+function spectralFrames() {
+  return Array.isArray(state.report?.spectrogram?.frames) ? state.report.spectrogram.frames : [];
+}
+
+function spectralFrameIndexFromPosition(clientX, rect, frameCount) {
+  if (frameCount <= 1) return 0;
+  const width = Math.max(1, rect?.width ?? 1);
+  const x = clamp((Number(clientX) || 0) - (rect?.left || 0), 0, width);
+  return clamp(Math.round((x / width) * (frameCount - 1)), 0, frameCount - 1);
+}
+
+function selectSpectralFrame(index) {
+  const frames = spectralFrames();
+  if (!frames.length) return;
+  state.spectralFrameIndex = clamp(index, 0, frames.length - 1);
+  const frame = frames[state.spectralFrameIndex];
+  elements.spectralReadout.textContent = spectralFrameReadout(frame, state.spectralFrameIndex, frames.length);
+  elements.spectralTimeline.setAttribute(
+    "aria-label",
+    `Spectral frame ${state.spectralFrameIndex + 1} of ${frames.length}. ${elements.spectralReadout.textContent}`,
+  );
+  drawSpectralTimeline(elements.spectralTimeline, state.report?.spectrogram);
+}
+
+function spectralFrameReadout(frame, index, total) {
+  const time = finiteNumber(frame?.timestampSeconds ?? frame?.timeSeconds ?? frame?.startSeconds);
+  const dominant = finiteNumber(frame?.dominantFrequencyHz);
+  const centroid = finiteNumber(frame?.centroidHz);
+  const pieces = [`Frame ${index + 1}/${total}`];
+  if (time !== null) pieces.push(formatDuration(time));
+  if (dominant !== null) pieces.push(`dominant ${formatHz(dominant)}`);
+  if (centroid !== null) pieces.push(`centroid ${formatHz(centroid)}`);
+  return pieces.join(" · ");
 }
 
 function prepareCanvas(canvas) {
@@ -1042,19 +1416,28 @@ function exportReport() {
 }
 
 function resetInspector() {
+  state.analysisGeneration += 1;
+  setAnalyzing(false);
+  stopPlaybackAnimation();
   elements.report.hidden = true;
   elements.inputPanel.hidden = false;
   elements.fileInput.value = "";
   state.audioBuffer = null;
   state.report = null;
+  state.waveformHoverTime = null;
+  state.spectralFrameIndex = null;
   elements.audioPlayer.pause();
   elements.audioPlayer.removeAttribute("src");
   elements.audioPlayer.load();
+  elements.technical.open = false;
   if (state.currentObjectUrl) {
     URL.revokeObjectURL(state.currentObjectUrl);
     state.currentObjectUrl = null;
   }
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  elements.waveformReadout.textContent = "Click the waveform or use arrow keys to seek.";
+  elements.spectralReadout.textContent = "Hover or focus the chart to inspect spectral frames.";
+  elements.inputPanel.scrollIntoView?.({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
+  elements.chooseFile.focus?.({ preventScroll: true });
 }
 
 function responseValue(response) {
@@ -1070,6 +1453,7 @@ function setLoading(visible, title = "Analyzing audio…", detail = "") {
 
 function showError(message) {
   setLoading(false);
+  setAnalyzing(false);
   elements.inputPanel.hidden = false;
   elements.inputError.hidden = false;
   elements.inputError.textContent = message;
@@ -1086,6 +1470,10 @@ function isGitHubPages() {
 
 function finiteNumber(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function amplitudeToDb(value) {
@@ -1135,6 +1523,10 @@ function formatNumber(value, digits) {
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function reducedMotion() {
+  return Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
 }
 
 function slugify(value) {

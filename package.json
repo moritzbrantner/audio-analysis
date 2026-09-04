@@ -8,6 +8,8 @@
     "check:structure": "python3 scripts/check_extraction.py",
     "test:pages": "bun test tests/pages",
     "check:pages": "bash scripts/check-pages.sh",
+    "test:pages:e2e": "bash scripts/check-pages-e2e.sh",
+    "test:e2e:smoke": "bun run test:pages:e2e",
     "check": "bun run check:structure"
   }
 }

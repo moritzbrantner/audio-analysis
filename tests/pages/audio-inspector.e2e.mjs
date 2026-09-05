@@ -139,6 +139,37 @@ try {
   await assertText(page, "#song-result-title", "120-bpm-song.wav");
   assert.match(await page.locator("#song-rhythm-summary").innerText(), /BPM/);
 
+  await page.waitForFunction(() => {
+    const player = document.querySelector("#song-audio-player");
+    return player && Number.isFinite(player.duration) && player.duration > 0;
+  });
+  const songDuration = await page.locator("#song-audio-player").evaluate((element) => element.duration);
+  const songTimelineBox = await page.locator("#song-timeline").boundingBox();
+  assert.ok(songTimelineBox, "expected a rendered annotated song timeline");
+  await page.locator("#song-timeline").click({
+    position: { x: songTimelineBox.width / 2, y: songTimelineBox.height / 2 },
+  });
+  const songMidpoint = await page.locator("#song-audio-player").evaluate((element) => element.currentTime);
+  assertInRange(songMidpoint, songDuration * 0.4, songDuration * 0.6, "song timeline click seek position");
+  assert.match(await page.locator("#song-timeline-readout").innerText(), /beat \d+/);
+  assert.match(await page.locator("#song-timeline-readout").innerText(), /section-/);
+
+  await page.locator("#song-timeline").focus();
+  await page.keyboard.press("Home");
+  assertInRange(
+    await page.locator("#song-audio-player").evaluate((element) => element.currentTime),
+    0,
+    0.05,
+    "song timeline Home key",
+  );
+  await page.keyboard.press("ArrowRight");
+  const nextBeatTime = await page.locator("#song-audio-player").evaluate((element) => element.currentTime);
+  assert.ok(nextBeatTime > 0 && nextBeatTime < songDuration, `next beat should seek inside track; got ${nextBeatTime}`);
+  assert.match(await page.locator("#song-timeline-readout").innerText(), /beat \d+/);
+  await page.keyboard.press("Shift+ArrowRight");
+  const nextSectionTime = await page.locator("#song-audio-player").evaluate((element) => element.currentTime);
+  assert.ok(nextSectionTime > nextBeatTime, "section navigation should advance beyond the current beat");
+
   const songDownloadPromise = page.waitForEvent("download");
   await page.locator("#song-download-json").click();
   const songDownload = await songDownloadPromise;

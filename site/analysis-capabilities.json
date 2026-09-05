@@ -27,7 +27,14 @@
   "coverage": {
     "fileStatistics": "whole decoded file when practical; deterministic stride sampling for very large inputs",
     "spectralPitchKey": "bounded representative center windows: a short preview for spectrum and monophonic pitch, plus a longer 20 s window resampled to 16 kHz for musical key",
-    "rhythm": "bounded representative center window resampled to 16 kHz with anti-alias averaging and a 1024/128 STFT"
+    "rhythm": "fast inspector uses a bounded representative center window resampled to 16 kHz with anti-alias averaging and a 1024/128 STFT",
+    "wholeSongRhythm": "explicit song-analysis page analyzes the complete decoded track up to 15 minutes, mixed to mono and resampled to at most 16 kHz before the same Rust/WASM rhythm operation runs"
+  },
+  "outputs": {
+    "inspectorReportSchema": "audio-analysis-inspector/v1",
+    "songAnalysisSchema": "audio-analysis-song/v1",
+    "songAnalysisDownload": "<source-stem>.song-analysis.json",
+    "songAnalysisEvents": ["beats", "downbeatEvents", "sections"]
   },
   "backend": {
     "defaultLocalBaseUrl": "http://127.0.0.1:3000",

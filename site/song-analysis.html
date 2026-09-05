@@ -78,6 +78,35 @@
           <div id="song-rhythm-summary" class="result-copy"></div>
         </section>
 
+        <section class="panel media-panel report-section" aria-labelledby="song-timeline-title">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">listen and inspect</div>
+              <h2 id="song-timeline-title">Annotated beat timeline</h2>
+            </div>
+          </div>
+          <audio id="song-audio-player" controls preload="metadata"></audio>
+          <canvas
+            id="song-timeline"
+            class="visualization interactive-visualization"
+            tabindex="0"
+            role="slider"
+            aria-label="Song beat timeline seek control"
+            aria-valuemin="0"
+            aria-valuemax="0"
+            aria-valuenow="0"
+            aria-describedby="song-timeline-readout song-timeline-note"
+          ></canvas>
+          <div id="song-timeline-readout" class="interactive-readout" aria-live="polite">
+            Click the timeline or use arrow keys to inspect detected beats.
+          </div>
+          <p id="song-timeline-note" class="figure-note">
+            The waveform is contextual only. Thin markers are detected beats, taller markers are inferred downbeats, and
+            section boundaries come from the downloaded analysis. Click to seek; Left/Right moves between beats,
+            Shift+Left/Right moves between section boundaries, and Home/End jumps to the track edges.
+          </p>
+        </section>
+
         <section class="panel report-section" aria-labelledby="song-sections-title">
           <div class="section-heading">
             <div>

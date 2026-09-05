@@ -20,6 +20,7 @@ bash "$ROOT_DIR/packages/audio-analysis-pitch-wasm/scripts/build-wasm.sh"
 bash "$ROOT_DIR/packages/audio-analysis-rhythm-wasm/scripts/build-wasm.sh"
 
 node --check "$ROOT_DIR/site/app.js"
+node --check "$ROOT_DIR/site/song-analysis.js"
 python3 -m json.tool "$ROOT_DIR/site/analysis-capabilities.json" >/dev/null
 
 rm -rf "$OUTPUT_DIR"
@@ -97,6 +98,19 @@ export async function runOperation(request) {
   return { ...response, value: surfaceValue, surfaceValue };
 }
 EOF
+
+  if [[ "$package" == "audio-analysis-rhythm" ]]; then
+    cat >> "$target_root/index.js" <<'EOF'
+
+export async function analyzeTrack(samples, sampleRate, options = {}) {
+  const module = await init();
+  if (typeof module.analyzeTrack !== "function") {
+    throw new Error("audio-analysis-rhythm typed track entry point is unavailable");
+  }
+  return toPlainValue(await module.analyzeTrack(samples, sampleRate, options));
+}
+EOF
+  fi
 }
 
 for package in audio-analysis-core audio-analysis-fourier audio-analysis-pitch audio-analysis-rhythm; do

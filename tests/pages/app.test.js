@@ -5,13 +5,26 @@ import vm from "node:vm";
 const appSource = readFileSync(new URL("../../site/app.js", import.meta.url), "utf8");
 
 function makeCanvasContext() {
+  const moveToCalls = [];
+  const transforms = [];
   return {
+    moveToCalls,
+    transforms,
+    reset() {
+      moveToCalls.length = 0;
+      transforms.length = 0;
+    },
     beginPath() {},
     clearRect() {},
     fillRect() {},
     fillText() {},
     lineTo() {},
-    moveTo() {},
+    moveTo(x, y) {
+      moveToCalls.push([x, y]);
+    },
+    setTransform(...args) {
+      transforms.push(args);
+    },
     stroke() {},
     set fillStyle(_value) {},
     set font(_value) {},
@@ -136,11 +149,13 @@ function loadApp({ hostname = "example.github.io", search = "", fetchImpl } = {}
   chooseFftSize,
   clamp,
   createExampleFile,
+  drawWaveform,
   encodeMonoPcm16Wav,
   initializeBackendBoundary,
   isCurrentAnalysis,
   isGitHubPages,
   monoCenterWindow,
+  prepareWaveformCanvas,
   resampleLinear,
   scanAudioBuffer,
   setAnalyzing,
@@ -292,6 +307,35 @@ describe("Audio Inspector interaction helpers", () => {
 
     expect(api.waveformSampleAtTime(buffer, 0.25)).toBeCloseTo(0.375, 6);
     expect(api.waveformSampleAtTime(buffer, 0.5)).toBeCloseTo(-0.375, 6);
+  });
+
+  test("keeps waveform sampling stable across backing-store scale changes", () => {
+    const { api, window } = loadApp();
+    const context = makeCanvasContext();
+    const canvas = makeElement();
+    canvas.width = 300;
+    canvas.height = 150;
+    canvas.getContext = () => context;
+    const buffer = fakeAudioBuffer(
+      [Array.from({ length: 6_400 }, (_, index) => 0.75 * Math.sin((2 * Math.PI * 440 * index) / 6_400))],
+      6_400,
+    );
+
+    api.drawWaveform(canvas, buffer);
+    const logicalMoveCount = context.moveToCalls.length;
+
+    expect(canvas.width).toBe(640);
+    expect(canvas.height).toBe(240);
+    expect(logicalMoveCount).toBe(642);
+
+    context.reset();
+    window.devicePixelRatio = 2;
+    api.drawWaveform(canvas, buffer);
+
+    expect(canvas.width).toBe(1_280);
+    expect(canvas.height).toBe(480);
+    expect(context.moveToCalls.length).toBe(logicalMoveCount);
+    expect(context.transforms.at(-1)).toEqual([2, 0, 0, 2, 0, 0]);
   });
 
   test("maps pointer positions to bounded spectral frame indices", () => {

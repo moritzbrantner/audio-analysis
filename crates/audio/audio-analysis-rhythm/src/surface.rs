@@ -24,6 +24,12 @@ struct StructuralSection {
     start_boundary_confidence: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BeatContext {
+    bar_index: usize,
+    section_index: usize,
+}
+
 /// Returns the package surface exposed by every transport wrapper.
 pub fn package_surface() -> PackageSurface {
     PackageSurface {
@@ -144,6 +150,7 @@ fn response(operation: OperationId, value: serde_json::Value) -> SurfaceResponse
                 "bpm": value.get("bpm").cloned().unwrap_or(serde_json::Value::Null),
                 "confidence": value.get("confidence").cloned().unwrap_or(serde_json::Value::Null),
                 "beatCount": value.get("beats").and_then(serde_json::Value::as_array).map_or(0, Vec::len),
+                "barCount": value.get("barCount").cloned().unwrap_or(serde_json::Value::Null),
                 "downbeatCount": value.get("downbeats").and_then(serde_json::Value::as_array).map_or(0, Vec::len),
                 "sectionCount": value.get("sections").and_then(serde_json::Value::as_array).map_or(0, Vec::len)
             }),
@@ -227,6 +234,8 @@ fn track_analysis_value(input: serde_json::Value) -> Result<serde_json::Value, S
     let analysis_duration_seconds = samples.len() as f64 / sample_rate as f64;
     let analysis_end_seconds = time_offset_seconds + analysis_duration_seconds;
     let sections = structural_sections(&analysis.beats, analysis_duration_seconds);
+    let beat_contexts = contextualize_beats(&analysis.beats, &sections);
+    let bar_count = beat_contexts.last().map_or(0, |context| context.bar_index);
 
     Ok(serde_json::json!({
         "schemaVersion": "audio-analysis-song/v1",
@@ -240,11 +249,14 @@ fn track_analysis_value(input: serde_json::Value) -> Result<serde_json::Value, S
         "bpm": analysis.bpm,
         "confidence": analysis.confidence,
         "hopSeconds": analysis.hop_seconds,
+        "beatsPerBar": config.beats_per_bar,
+        "barCount": bar_count,
         "tempoCandidates": analysis.tempo_candidates.iter().map(|candidate| serde_json::json!({
             "bpm": candidate.bpm,
             "score": candidate.score
         })).collect::<Vec<_>>(),
         "beats": analysis.beats.iter().enumerate().map(|(index, beat)| {
+            let context = beat_contexts[index];
             let timestamp_seconds = time_offset_seconds + beat.timestamp_seconds;
             let timestamp_ms = timestamp_millis(timestamp_seconds);
             serde_json::json!({
@@ -254,18 +266,26 @@ fn track_analysis_value(input: serde_json::Value) -> Result<serde_json::Value, S
                 "timestamp": format_timestamp_millis(timestamp_ms),
                 "strength": beat.strength,
                 "beatInBar": beat.beat_in_bar,
+                "barIndex": context.bar_index,
+                "sectionIndex": context.section_index,
+                "sectionLabel": format!("section-{}", context.section_index),
                 "downbeat": beat.downbeat
             })
         }).collect::<Vec<_>>(),
         "downbeats": analysis.downbeats.iter().map(|timestamp| time_offset_seconds + timestamp).collect::<Vec<_>>(),
-        "downbeatEvents": analysis.downbeats.iter().enumerate().map(|(index, timestamp)| {
-            let timestamp_seconds = time_offset_seconds + timestamp;
+        "downbeatEvents": analysis.beats.iter().enumerate().filter(|(_, beat)| beat.downbeat).enumerate().map(|(downbeat_index, (beat_index, beat))| {
+            let context = beat_contexts[beat_index];
+            let timestamp_seconds = time_offset_seconds + beat.timestamp_seconds;
             let timestamp_ms = timestamp_millis(timestamp_seconds);
             serde_json::json!({
-                "index": index + 1,
+                "index": downbeat_index + 1,
+                "beatIndex": beat_index + 1,
                 "timestampSeconds": timestamp_seconds,
                 "timestampMs": timestamp_ms,
-                "timestamp": format_timestamp_millis(timestamp_ms)
+                "timestamp": format_timestamp_millis(timestamp_ms),
+                "barIndex": context.bar_index,
+                "sectionIndex": context.section_index,
+                "sectionLabel": format!("section-{}", context.section_index)
             })
         }).collect::<Vec<_>>(),
         "downbeatConfidence": analysis.downbeat_confidence,
@@ -346,6 +366,37 @@ fn structural_sections(beats: &[TrackedBeat], duration_seconds: f64) -> Vec<Stru
             start_seconds: pair[0].0,
             end_seconds: pair[1].0,
             start_boundary_confidence: pair[0].1,
+        })
+        .collect()
+}
+
+fn contextualize_beats(beats: &[TrackedBeat], sections: &[StructuralSection]) -> Vec<BeatContext> {
+    let mut bar_index = 1;
+    beats
+        .iter()
+        .enumerate()
+        .map(|(index, beat)| {
+            if index > 0 && beat.downbeat {
+                bar_index += 1;
+            }
+            let section_index = sections
+                .iter()
+                .position(|section| {
+                    beat.timestamp_seconds >= section.start_seconds
+                        && beat.timestamp_seconds < section.end_seconds
+                })
+                .map(|index| index + 1)
+                .unwrap_or_else(|| {
+                    if sections.is_empty() {
+                        0
+                    } else {
+                        sections.len()
+                    }
+                });
+            BeatContext {
+                bar_index,
+                section_index,
+            }
         })
         .collect()
 }
@@ -554,6 +605,8 @@ mod tests {
 
         assert_eq!(response.value["sampleCount"], MAX_SAMPLES + 1);
         assert_eq!(response.value["schemaVersion"], "audio-analysis-song/v1");
+        assert_eq!(response.value["beatsPerBar"], 4);
+        assert_eq!(response.value["barCount"], 0);
     }
 
     #[test]
@@ -578,6 +631,39 @@ mod tests {
         assert!(sections
             .iter()
             .any(|section| (section.start_seconds - 16.0).abs() <= 2.0));
+    }
+
+    #[test]
+    fn beat_contexts_assign_tracked_bars_and_sections() {
+        let beats = (0..12)
+            .map(|index| TrackedBeat {
+                timestamp_seconds: index as f64,
+                strength: 0.5,
+                beat_in_bar: index % 4 + 1,
+                downbeat: index % 4 == 0,
+            })
+            .collect::<Vec<_>>();
+        let sections = vec![
+            StructuralSection {
+                start_seconds: 0.0,
+                end_seconds: 6.0,
+                start_boundary_confidence: 1.0,
+            },
+            StructuralSection {
+                start_seconds: 6.0,
+                end_seconds: 12.0,
+                start_boundary_confidence: 0.8,
+            },
+        ];
+
+        let contexts = contextualize_beats(&beats, &sections);
+        assert_eq!(contexts[0].bar_index, 1);
+        assert_eq!(contexts[3].bar_index, 1);
+        assert_eq!(contexts[4].bar_index, 2);
+        assert_eq!(contexts[8].bar_index, 3);
+        assert_eq!(contexts[5].section_index, 1);
+        assert_eq!(contexts[6].section_index, 2);
+        assert_eq!(contexts[11].section_index, 2);
     }
 
     #[test]

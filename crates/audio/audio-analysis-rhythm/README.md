@@ -39,7 +39,7 @@ Primary music workflow: `audio.rhythm.analyze`.
 
 Workflow operations:
 
-- `audio.rhythm.analyze`: Estimates ranked BPM candidates, beats, and 4/4 downbeats from a spectral-flux novelty curve. The runtime result uses the versioned `audio-analysis-song/v1` contract, keeps every tracked beat, adds integer-millisecond and `HH:MM:SS.mmm` timestamps, and derives conservative rhythmic structural sections from downbeat-aligned intensity changes.
+- `audio.rhythm.analyze`: Estimates ranked BPM candidates, beats, and 4/4 downbeats from a spectral-flux novelty curve. The runtime result uses the versioned `audio-analysis-song/v1` contract, keeps every tracked beat, adds integer-millisecond and `HH:MM:SS.mmm` timestamps, derives conservative rhythmic structural sections from downbeat-aligned intensity changes, and annotates each beat with `barIndex`, `sectionIndex`, and `sectionLabel` so event consumers do not need to reconstruct those joins themselves.
 - `audio.rhythm.onsets`: Computes the legacy deterministic onset envelope and onset list.
 - `audio.rhythm.tempo`: Estimates BPM from detected onset intervals for compatibility and small deterministic inputs.
 - `audio.rhythm.beatGrid`: Creates an exact beat grid from an already-known start time, BPM, and beat count.
@@ -51,6 +51,8 @@ Debug operations:
 Runtime support: library, CLI, server, and WASM wrappers expose these operations. Preview-oriented operations keep the smaller sample limit. `audio.rhythm.analyze` accepts up to 15 minutes of PCM at the supplied sample rate so the browser whole-song workflow can explicitly opt into heavier local analysis without making the fast Audio Inspector pay that cost by default.
 
 Structural `sections` are intentionally rhythmic change points named `section-1`, `section-2`, and so on. They are not claims that a segment is a verse, chorus, bridge, or another semantic song form; that would require a separate classifier and evaluation contract.
+
+`barIndex` is a one-based ordinal over the tracked beat path. If the tracker begins before its first inferred downbeat, the initial partial bar is still `barIndex: 1`; each later inferred downbeat advances the ordinal. `sectionIndex` is one-based and corresponds directly to the entry in the top-level `sections` array.
 
 Run the music workflow through the CLI with an in-memory preview:
 

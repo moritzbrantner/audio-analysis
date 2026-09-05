@@ -183,10 +183,20 @@ try {
   assert.equal(songReport.runtime.privacy, "browser-local");
   assertTempoFamily(songReport, 120);
   assertBeatPath(songReport.beats);
+  assert.ok(Number.isInteger(songReport.beatsPerBar) && songReport.beatsPerBar > 0, "expected beats-per-bar context");
+  assert.ok(Number.isInteger(songReport.barCount) && songReport.barCount > 0, "expected tracked bar count");
   assert.ok(Array.isArray(songReport.sections) && songReport.sections.length > 0, "expected rhythmic sections");
   const firstBeat = songReport.beats[0];
   assert.ok(Number.isInteger(firstBeat.timestampMs) && firstBeat.timestampMs >= 0, "beat should have integer milliseconds");
   assert.match(firstBeat.timestamp, /^\d{2}:\d{2}:\d{2}\.\d{3}$/, "beat should have HH:MM:SS.mmm timestamp");
+  assert.ok(Number.isInteger(firstBeat.barIndex) && firstBeat.barIndex >= 1, "beat should identify its inferred bar");
+  assert.ok(Number.isInteger(firstBeat.sectionIndex) && firstBeat.sectionIndex >= 1, "beat should identify its section");
+  assert.equal(firstBeat.sectionLabel, `section-${firstBeat.sectionIndex}`);
+  const firstDownbeat = songReport.downbeatEvents?.[0];
+  assert.ok(firstDownbeat, "expected at least one contextual downbeat event");
+  assert.ok(Number.isInteger(firstDownbeat.beatIndex) && firstDownbeat.beatIndex >= 1, "downbeat should reference its source beat");
+  assert.ok(Number.isInteger(firstDownbeat.barIndex) && firstDownbeat.barIndex >= 1, "downbeat should identify its inferred bar");
+  assert.equal(firstDownbeat.sectionLabel, `section-${firstDownbeat.sectionIndex}`);
 
   assert.deepEqual(pageErrors, [], `browser page errors:\n${pageErrors.join("\n")}`);
   assert.deepEqual(

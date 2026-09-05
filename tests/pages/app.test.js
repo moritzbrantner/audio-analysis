@@ -222,6 +222,11 @@ describe("Audio Inspector signal analysis", () => {
     expect(upsampled[0]).toBeCloseTo(0, 6);
     expect(upsampled[1]).toBeCloseTo(0.5, 6);
     expect(upsampled[2]).toBeCloseTo(1, 6);
+
+    const downsampled = api.resampleLinear(samples, 4, 2);
+    expect(downsampled).toHaveLength(2);
+    expect(downsampled[0]).toBeCloseTo(0.5, 6);
+    expect(downsampled[1]).toBeCloseTo(-0.5, 6);
   });
 
   test("turns analyzer evidence into bounded headline findings", () => {

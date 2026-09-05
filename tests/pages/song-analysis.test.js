@@ -39,6 +39,22 @@ describe("whole-song analysis page", () => {
     expect(buildPages).toContain("export async function analyzeTrack(samples, sampleRate, options = {})");
   });
 
+  test("renders Rust-owned beats and sections on an interactive playback timeline", () => {
+    expect(html).toContain('id="song-audio-player"');
+    expect(html).toContain('id="song-timeline"');
+    expect(html).toContain('role="slider"');
+    expect(html).toContain('id="song-timeline-readout"');
+    expect(html).toContain("Left/Right moves between beats");
+
+    expect(source).toContain("drawBeatMarkers(context, width, height, duration, state.analysis.beats)");
+    expect(source).toContain("drawSectionBoundaries(context, width, height, duration, state.analysis.sections)");
+    expect(source).toContain("adjacentAnalysisTime(current, -1, event.shiftKey)");
+    expect(source).toContain("adjacentAnalysisTime(current, 1, event.shiftKey)");
+    expect(source).toContain("replacePlayerSource(file)");
+    expect(source).toContain("nearestBeat(time)");
+    expect(source).toContain("sectionAtTime(time)");
+  });
+
   test("exposes a downloadable machine-readable song contract", () => {
     expect(html).toContain('id="song-download-json"');
     expect(source).toContain('schemaVersion = "audio-analysis-song/v1"');

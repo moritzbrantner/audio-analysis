@@ -2,6 +2,8 @@ const MAX_SURFACE_SAMPLES = 192_000;
 const REPRESENTATIVE_SAMPLES = 131_072;
 const RHYTHM_SECONDS = 20;
 const RHYTHM_RATE = 16_000;
+const RHYTHM_FFT_SIZE = 1024;
+const RHYTHM_HOP_SIZE = 128;
 const MAX_STAT_FRAMES = 5_000_000;
 const CLIP_THRESHOLD = 0.999;
 const NEAR_SILENCE_THRESHOLD = 0.001;
@@ -332,8 +334,8 @@ async function analyzeFile(file) {
           sampleRate: decoded.sampleRate,
         }),
         safeRun(analyzers.pitch, "audio.pitch.key", {
-          samples: representative.samples,
-          sampleRate: decoded.sampleRate,
+          samples: rhythmSamples,
+          sampleRate: rhythmRate,
           profile: "ensemble",
         }),
         safeRun(analyzers.rhythm, "audio.rhythm.analyze", {
@@ -341,6 +343,8 @@ async function analyzeFile(file) {
           sampleRate: rhythmRate,
           minBpm: 45,
           maxBpm: 220,
+          fftSize: RHYTHM_FFT_SIZE,
+          hopSize: RHYTHM_HOP_SIZE,
         }),
       ]);
 
@@ -484,6 +488,13 @@ function buildReport({ file, buffer, statistics, representative, rhythmWindow, p
         sampleRate: buffer.sampleRate,
         sampleCount: representative.samples.length,
         packageSurfaceLimit: MAX_SURFACE_SAMPLES,
+        key: {
+          kind: "representative-center-window-resampled",
+          startSeconds: rhythmWindow.startSample / buffer.sampleRate,
+          sourceDurationSeconds: rhythmWindow.sourceSampleCount / buffer.sampleRate,
+          analysisSampleRate: rhythmWindow.analysisSampleRate,
+          analysisSampleCount: rhythmWindow.analysisSampleCount,
+        },
       },
       rhythm: {
         kind: "representative-center-window-resampled",
@@ -654,6 +665,26 @@ function resampleLinear(samples, sourceRate, targetRate) {
   const outputLength = Math.max(1, Math.floor((samples.length * targetRate) / sourceRate));
   const output = new Array(outputLength);
   const scale = sourceRate / targetRate;
+
+  if (targetRate < sourceRate) {
+    for (let index = 0; index < outputLength; index += 1) {
+      const start = index * scale;
+      const end = Math.min(samples.length, (index + 1) * scale);
+      const first = Math.floor(start);
+      const last = Math.min(samples.length, Math.ceil(end));
+      let weightedSum = 0;
+      let weight = 0;
+      for (let sourceIndex = first; sourceIndex < last; sourceIndex += 1) {
+        const overlap = Math.min(end, sourceIndex + 1) - Math.max(start, sourceIndex);
+        if (overlap <= 0) continue;
+        weightedSum += samples[sourceIndex] * overlap;
+        weight += overlap;
+      }
+      output[index] = weight > 0 ? weightedSum / weight : samples[Math.min(samples.length - 1, first)];
+    }
+    return output;
+  }
+
   for (let index = 0; index < outputLength; index += 1) {
     const source = index * scale;
     const left = Math.min(samples.length - 1, Math.floor(source));
@@ -717,7 +748,7 @@ function buildFindings(stats, spectral, pitch, key, rhythm) {
       title: `Estimated musical key: ${key.key}`,
       detail:
         keyConfidence === null
-          ? "Key analysis completed on the representative window."
+          ? "Key analysis completed on the longer music-analysis window."
           : `Key confidence: ${formatPercent(keyConfidence * 100)}.`,
     });
   }
@@ -783,11 +814,12 @@ function renderReport(report, buffer) {
   elements.summarySize.textContent = formatBytes(report.source.byteLength);
 
   const statsCoverage = report.coverage.fileStatistics;
+  const keyCoverage = report.coverage.spectralPitchKey.key;
   const fileCoverageText =
     statsCoverage.kind === "exact-whole-file"
       ? "Full file · exact scan"
       : `Full file · sampled every ${statsCoverage.frameStride} frames`;
-  const spectralCoverageText = `Center ${report.coverage.spectralPitchKey.durationSeconds.toFixed(1)} s · spectrum, pitch & key`;
+  const spectralCoverageText = `Center ${report.coverage.spectralPitchKey.durationSeconds.toFixed(1)} s · spectrum & pitch; key ${keyCoverage.sourceDurationSeconds.toFixed(1)} s`;
   const rhythmCoverageText = `Center ${report.coverage.rhythm.sourceDurationSeconds.toFixed(1)} s · ${Math.round(report.coverage.rhythm.analysisSampleRate / 1000)} kHz rhythm analysis`;
   elements.statisticsCoverage.textContent = fileCoverageText;
   elements.spectralCoverage.textContent = spectralCoverageText;
@@ -926,7 +958,7 @@ function renderPitch(report) {
 
   const note = document.createElement("p");
   note.className = "result-note";
-  note.textContent = "Pitch and key use the bounded center analysis window, not necessarily the whole file.";
+  note.textContent = "Pitch uses the short center preview; musical key uses the longer resampled music-analysis window.";
 
   const details = document.createElement("div");
   details.className = "result-meta";

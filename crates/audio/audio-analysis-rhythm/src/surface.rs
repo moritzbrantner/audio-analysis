@@ -6,7 +6,7 @@ use runtime_core::{
     SurfaceOperation, SurfaceRequest, SurfaceResponse,
 };
 
-use crate::track::{analyze_rhythm_track, TrackRhythmConfig};
+use crate::track::{analyze_rhythm_track, TrackRhythmConfig, TrackedBeat};
 use crate::{
     beat_grid, detect_onsets, estimate_tempo, onset_envelope, OnsetDetectorConfig,
     TempoEstimatorConfig,
@@ -14,6 +14,15 @@ use crate::{
 
 const MAX_SAMPLES: usize = 192_000;
 const MAX_TRACK_SECONDS: usize = 15 * 60;
+const MIN_SECTION_SECONDS: f64 = 8.0;
+const SECTION_CHANGE_THRESHOLD: f32 = 0.18;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct StructuralSection {
+    start_seconds: f64,
+    end_seconds: f64,
+    start_boundary_confidence: f32,
+}
 
 /// Returns the package surface exposed by every transport wrapper.
 pub fn package_surface() -> PackageSurface {
@@ -49,7 +58,7 @@ pub fn package_surface() -> PackageSurface {
             operation(
                 "audio.rhythm.analyze",
                 "Analyze track rhythm",
-                "Uses spectral flux, tempo autocorrelation, dynamic-programming beat tracking, and bar-phase accents to estimate BPM, beats, and downbeats.",
+                "Uses spectral flux, tempo autocorrelation, dynamic-programming beat tracking, bar-phase accents, and rhythmic change points to estimate BPM, beats, downbeats, and structural sections.",
                 serde_json::json!({"samples": [1.0, 0.0, 0.0, 1.0], "sampleRate": 48000}),
             ),
         ],
@@ -130,12 +139,13 @@ fn response(operation: OperationId, value: serde_json::Value) -> SurfaceResponse
         ),
         "audio.rhythm.analyze" => (
             "Track rhythm analysis",
-            "Estimated whole-track tempo candidates, a globally consistent beat path, and 4/4 downbeats.",
+            "Estimated whole-track tempo candidates, a globally consistent beat path, 4/4 downbeats, and rhythmic structural sections.",
             serde_json::json!({
                 "bpm": value.get("bpm").cloned().unwrap_or(serde_json::Value::Null),
                 "confidence": value.get("confidence").cloned().unwrap_or(serde_json::Value::Null),
                 "beatCount": value.get("beats").and_then(serde_json::Value::as_array).map_or(0, Vec::len),
-                "downbeatCount": value.get("downbeats").and_then(serde_json::Value::as_array).map_or(0, Vec::len)
+                "downbeatCount": value.get("downbeats").and_then(serde_json::Value::as_array).map_or(0, Vec::len),
+                "sectionCount": value.get("sections").and_then(serde_json::Value::as_array).map_or(0, Vec::len)
             }),
         ),
         _ => (
@@ -203,6 +213,7 @@ fn beat_grid_value(input: serde_json::Value) -> Result<serde_json::Value, String
 fn track_analysis_value(input: serde_json::Value) -> Result<serde_json::Value, String> {
     let sample_rate = sample_rate(&input)?;
     let samples = track_sample_array(&input, "samples", sample_rate)?;
+    let time_offset_seconds = nonnegative_f64(&input, "timeOffsetSeconds", 0.0)?;
     let mut config = TrackRhythmConfig::default();
     config.min_bpm = finite_f64(&input, "minBpm", config.min_bpm as f64)? as f32;
     config.max_bpm = finite_f64(&input, "maxBpm", config.max_bpm as f64)? as f32;
@@ -213,9 +224,19 @@ fn track_analysis_value(input: serde_json::Value) -> Result<serde_json::Value, S
         positive_usize(&input, "tempoCandidateCount", config.tempo_candidate_count)?.min(16);
     let analysis =
         analyze_rhythm_track(&samples, sample_rate, config).map_err(|error| error.to_string())?;
+    let analysis_duration_seconds = samples.len() as f64 / sample_rate as f64;
+    let analysis_end_seconds = time_offset_seconds + analysis_duration_seconds;
+    let sections = structural_sections(&analysis.beats, analysis_duration_seconds);
+
     Ok(serde_json::json!({
+        "schemaVersion": "audio-analysis-song/v1",
         "sampleRate": sample_rate,
         "sampleCount": samples.len(),
+        "analysisStartSeconds": time_offset_seconds,
+        "analysisStartMs": timestamp_millis(time_offset_seconds),
+        "analysisDurationSeconds": analysis_duration_seconds,
+        "analysisEndSeconds": analysis_end_seconds,
+        "analysisEndMs": timestamp_millis(analysis_end_seconds),
         "bpm": analysis.bpm,
         "confidence": analysis.confidence,
         "hopSeconds": analysis.hop_seconds,
@@ -223,15 +244,137 @@ fn track_analysis_value(input: serde_json::Value) -> Result<serde_json::Value, S
             "bpm": candidate.bpm,
             "score": candidate.score
         })).collect::<Vec<_>>(),
-        "beats": analysis.beats.iter().take(512).map(|beat| serde_json::json!({
-            "timestampSeconds": beat.timestamp_seconds,
-            "strength": beat.strength,
-            "beatInBar": beat.beat_in_bar,
-            "downbeat": beat.downbeat
-        })).collect::<Vec<_>>(),
-        "downbeats": analysis.downbeats.iter().take(128).copied().collect::<Vec<_>>(),
-        "downbeatConfidence": analysis.downbeat_confidence
+        "beats": analysis.beats.iter().enumerate().map(|(index, beat)| {
+            let timestamp_seconds = time_offset_seconds + beat.timestamp_seconds;
+            let timestamp_ms = timestamp_millis(timestamp_seconds);
+            serde_json::json!({
+                "index": index + 1,
+                "timestampSeconds": timestamp_seconds,
+                "timestampMs": timestamp_ms,
+                "timestamp": format_timestamp_millis(timestamp_ms),
+                "strength": beat.strength,
+                "beatInBar": beat.beat_in_bar,
+                "downbeat": beat.downbeat
+            })
+        }).collect::<Vec<_>>(),
+        "downbeats": analysis.downbeats.iter().map(|timestamp| time_offset_seconds + timestamp).collect::<Vec<_>>(),
+        "downbeatEvents": analysis.downbeats.iter().enumerate().map(|(index, timestamp)| {
+            let timestamp_seconds = time_offset_seconds + timestamp;
+            let timestamp_ms = timestamp_millis(timestamp_seconds);
+            serde_json::json!({
+                "index": index + 1,
+                "timestampSeconds": timestamp_seconds,
+                "timestampMs": timestamp_ms,
+                "timestamp": format_timestamp_millis(timestamp_ms)
+            })
+        }).collect::<Vec<_>>(),
+        "downbeatConfidence": analysis.downbeat_confidence,
+        "sectionsMethod": "rhythmic-change-points-v1",
+        "sections": sections.iter().enumerate().map(|(index, section)| {
+            let start_seconds = time_offset_seconds + section.start_seconds;
+            let end_seconds = time_offset_seconds + section.end_seconds;
+            let start_ms = timestamp_millis(start_seconds);
+            let end_ms = timestamp_millis(end_seconds);
+            serde_json::json!({
+                "index": index + 1,
+                "label": format!("section-{}", index + 1),
+                "startSeconds": start_seconds,
+                "startMs": start_ms,
+                "start": format_timestamp_millis(start_ms),
+                "endSeconds": end_seconds,
+                "endMs": end_ms,
+                "end": format_timestamp_millis(end_ms),
+                "durationSeconds": section.end_seconds - section.start_seconds,
+                "startBoundaryConfidence": section.start_boundary_confidence
+            })
+        }).collect::<Vec<_>>()
     }))
+}
+
+fn structural_sections(beats: &[TrackedBeat], duration_seconds: f64) -> Vec<StructuralSection> {
+    if beats.is_empty() || !duration_seconds.is_finite() || duration_seconds <= 0.0 {
+        return Vec::new();
+    }
+
+    let downbeat_indices = beats
+        .iter()
+        .enumerate()
+        .filter_map(|(index, beat)| beat.downbeat.then_some(index))
+        .collect::<Vec<_>>();
+    if downbeat_indices.len() < 5 {
+        return vec![StructuralSection {
+            start_seconds: 0.0,
+            end_seconds: duration_seconds,
+            start_boundary_confidence: 1.0,
+        }];
+    }
+
+    let mut selected = Vec::<(f64, f32)>::new();
+    for position in 2..downbeat_indices.len().saturating_sub(2) {
+        let boundary = downbeat_indices[position];
+        let left_start = downbeat_indices[position - 2];
+        let right_end = downbeat_indices[position + 2];
+        let left_strength = mean_beat_strength(beats, left_start, boundary);
+        let right_strength = mean_beat_strength(beats, boundary, right_end);
+        let confidence = (right_strength - left_strength).abs().clamp(0.0, 1.0);
+        let timestamp = beats[boundary].timestamp_seconds;
+        if confidence < SECTION_CHANGE_THRESHOLD
+            || timestamp < MIN_SECTION_SECONDS
+            || duration_seconds - timestamp < MIN_SECTION_SECONDS
+        {
+            continue;
+        }
+
+        if let Some(last) = selected.last_mut() {
+            if timestamp - last.0 < MIN_SECTION_SECONDS {
+                if confidence > last.1 {
+                    *last = (timestamp, confidence);
+                }
+                continue;
+            }
+        }
+        selected.push((timestamp, confidence));
+    }
+
+    let mut boundaries = Vec::with_capacity(selected.len() + 2);
+    boundaries.push((0.0, 1.0));
+    boundaries.extend(selected);
+    boundaries.push((duration_seconds, 1.0));
+    boundaries
+        .windows(2)
+        .map(|pair| StructuralSection {
+            start_seconds: pair[0].0,
+            end_seconds: pair[1].0,
+            start_boundary_confidence: pair[0].1,
+        })
+        .collect()
+}
+
+fn mean_beat_strength(beats: &[TrackedBeat], start: usize, end: usize) -> f32 {
+    if start >= end || start >= beats.len() {
+        return 0.0;
+    }
+    let end = end.min(beats.len());
+    beats[start..end]
+        .iter()
+        .map(|beat| beat.strength)
+        .sum::<f32>()
+        / (end - start) as f32
+}
+
+fn timestamp_millis(seconds: f64) -> u64 {
+    if !seconds.is_finite() || seconds <= 0.0 {
+        return 0;
+    }
+    (seconds * 1000.0).round() as u64
+}
+
+fn format_timestamp_millis(total_millis: u64) -> String {
+    let hours = total_millis / 3_600_000;
+    let minutes = (total_millis / 60_000) % 60;
+    let seconds = (total_millis / 1_000) % 60;
+    let millis = total_millis % 1_000;
+    format!("{hours:02}:{minutes:02}:{seconds:02}.{millis:03}")
 }
 
 fn detected_onsets(
@@ -336,6 +479,19 @@ fn finite_f64(input: &serde_json::Value, field: &str, default_value: f64) -> Res
     }
 }
 
+fn nonnegative_f64(
+    input: &serde_json::Value,
+    field: &str,
+    default_value: f64,
+) -> Result<f64, String> {
+    let value = finite_f64(input, field, default_value)?;
+    if value >= 0.0 {
+        Ok(value)
+    } else {
+        Err(format!("{field} must be non-negative"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,6 +553,31 @@ mod tests {
         .expect("whole-track rhythm analysis");
 
         assert_eq!(response.value["sampleCount"], MAX_SAMPLES + 1);
+        assert_eq!(response.value["schemaVersion"], "audio-analysis-song/v1");
+    }
+
+    #[test]
+    fn song_timestamps_include_milliseconds() {
+        assert_eq!(timestamp_millis(195.022), 195_022);
+        assert_eq!(format_timestamp_millis(195_022), "00:03:15.022");
+    }
+
+    #[test]
+    fn structural_sections_detect_rhythmic_intensity_change() {
+        let beats = (0..64)
+            .map(|index| TrackedBeat {
+                timestamp_seconds: index as f64 * 0.5,
+                strength: if index < 32 { 0.2 } else { 0.9 },
+                beat_in_bar: index % 4 + 1,
+                downbeat: index % 4 == 0,
+            })
+            .collect::<Vec<_>>();
+
+        let sections = structural_sections(&beats, 32.0);
+        assert!(sections.len() >= 2);
+        assert!(sections
+            .iter()
+            .any(|section| (section.start_seconds - 16.0).abs() <= 2.0));
     }
 
     #[test]

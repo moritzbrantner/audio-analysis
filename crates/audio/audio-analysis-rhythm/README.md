@@ -1,6 +1,6 @@
 # audio-analysis-rhythm
 
-Onset, tempo, beat, and downbeat analysis for music and media audio pipelines.
+Onset, tempo, beat, downbeat, and rhythmic-section analysis for music and media audio pipelines.
 
 ## Feature flags
 
@@ -39,7 +39,7 @@ Primary music workflow: `audio.rhythm.analyze`.
 
 Workflow operations:
 
-- `audio.rhythm.analyze`: Estimates ranked BPM candidates, beats, and 4/4 downbeats from a spectral-flux novelty curve.
+- `audio.rhythm.analyze`: Estimates ranked BPM candidates, beats, and 4/4 downbeats from a spectral-flux novelty curve. The runtime result uses the versioned `audio-analysis-song/v1` contract, keeps every tracked beat, adds integer-millisecond and `HH:MM:SS.mmm` timestamps, and derives conservative rhythmic structural sections from downbeat-aligned intensity changes.
 - `audio.rhythm.onsets`: Computes the legacy deterministic onset envelope and onset list.
 - `audio.rhythm.tempo`: Estimates BPM from detected onset intervals for compatibility and small deterministic inputs.
 - `audio.rhythm.beatGrid`: Creates an exact beat grid from an already-known start time, BPM, and beat count.
@@ -48,7 +48,9 @@ Debug operations:
 
 - `describe`: inspect package metadata and runtime support.
 
-Runtime support: library, CLI, server, and WASM wrappers expose these operations. The JSON runtime surface remains deliberately sample-count bounded; full songs should use the library or file-backed example rather than embedding millions of PCM samples in JSON.
+Runtime support: library, CLI, server, and WASM wrappers expose these operations. Preview-oriented operations keep the smaller sample limit. `audio.rhythm.analyze` accepts up to 15 minutes of PCM at the supplied sample rate so the browser whole-song workflow can explicitly opt into heavier local analysis without making the fast Audio Inspector pay that cost by default.
+
+Structural `sections` are intentionally rhythmic change points named `section-1`, `section-2`, and so on. They are not claims that a segment is a verse, chorus, bridge, or another semantic song form; that would require a separate classifier and evaluation contract.
 
 Run the music workflow through the CLI with an in-memory preview:
 

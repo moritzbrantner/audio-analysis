@@ -120,6 +120,43 @@ try {
   assertBeatPath(clickReport.rhythm?.beats);
   assert.match(await page.locator("#rhythm-content").innerText(), /BPM/);
 
+  const clickAudioBytes = await page.evaluate(async () => {
+    const source = document.querySelector("#audio-player")?.src;
+    if (!source) throw new Error("click-track player source unavailable");
+    const response = await fetch(source);
+    if (!response.ok) throw new Error(`click-track fetch failed: ${response.status}`);
+    return Array.from(new Uint8Array(await response.arrayBuffer()));
+  });
+
+  await page.goto(`${baseUrl}/song-analysis.html`, { waitUntil: "networkidle" });
+  await assertText(page, "h1", "Get beat-by-beat song analysis as JSON.");
+  await page.locator("#song-file-input").setInputFiles({
+    name: "120-bpm-song.wav",
+    mimeType: "audio/wav",
+    buffer: Buffer.from(clickAudioBytes),
+  });
+  await page.locator("#song-result").waitFor({ state: "visible", timeout: 30_000 });
+  await assertText(page, "#song-result-title", "120-bpm-song.wav");
+  assert.match(await page.locator("#song-rhythm-summary").innerText(), /BPM/);
+
+  const songDownloadPromise = page.waitForEvent("download");
+  await page.locator("#song-download-json").click();
+  const songDownload = await songDownloadPromise;
+  assert.equal(songDownload.suggestedFilename(), "120-bpm-song.song-analysis.json");
+  const songDownloadPath = await songDownload.path();
+  assert.ok(songDownloadPath, "expected Playwright to expose the downloaded song analysis path");
+  const songReport = JSON.parse(await readFile(songDownloadPath, "utf8"));
+  assert.equal(songReport.schemaVersion, "audio-analysis-song/v1");
+  assert.equal(songReport.source.name, "120-bpm-song.wav");
+  assert.equal(songReport.runtime.mode, "client-wasm");
+  assert.equal(songReport.runtime.privacy, "browser-local");
+  assertTempoFamily(songReport, 120);
+  assertBeatPath(songReport.beats);
+  assert.ok(Array.isArray(songReport.sections) && songReport.sections.length > 0, "expected rhythmic sections");
+  const firstBeat = songReport.beats[0];
+  assert.ok(Number.isInteger(firstBeat.timestampMs) && firstBeat.timestampMs >= 0, "beat should have integer milliseconds");
+  assert.match(firstBeat.timestamp, /^\d{2}:\d{2}:\d{2}\.\d{3}$/, "beat should have HH:MM:SS.mmm timestamp");
+
   assert.deepEqual(pageErrors, [], `browser page errors:\n${pageErrors.join("\n")}`);
   assert.deepEqual(
     unexpectedRequestFailures,

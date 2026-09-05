@@ -1024,14 +1024,12 @@ function renderProvenance(packages) {
 }
 
 function drawWaveform(canvas, buffer) {
-  const context = prepareCanvas(canvas);
-  const width = canvas.width;
-  const height = canvas.height;
+  const { context, width, height } = prepareWaveformCanvas(canvas);
   context.clearRect(0, 0, width, height);
   context.fillStyle = "#111a1f";
   context.fillRect(0, 0, width, height);
   context.strokeStyle = "#2dd4bf";
-  context.lineWidth = Math.max(1, window.devicePixelRatio || 1);
+  context.lineWidth = 1;
 
   const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index));
   const framesPerPixel = Math.max(1, Math.floor(buffer.length / width));
@@ -1076,11 +1074,27 @@ function drawWaveformCursor(context, width, height, duration, time, color) {
   const normalized = clamp(time / duration, 0, 1);
   const x = Math.round(normalized * width) + 0.5;
   context.strokeStyle = color;
-  context.lineWidth = Math.max(1, window.devicePixelRatio || 1);
+  context.lineWidth = 1;
   context.beginPath();
   context.moveTo(x, 0);
   context.lineTo(x, height);
   context.stroke();
+}
+
+function prepareWaveformCanvas(canvas) {
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(320, Math.floor(rect.width));
+  const height = Math.max(140, Math.floor(rect.height));
+  const backingWidth = Math.max(1, Math.round(width * dpr));
+  const backingHeight = Math.max(1, Math.round(height * dpr));
+  if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
+    canvas.width = backingWidth;
+    canvas.height = backingHeight;
+  }
+  const context = canvas.getContext("2d");
+  context.setTransform(backingWidth / width, 0, 0, backingHeight / height, 0, 0);
+  return { context, width, height };
 }
 
 function canvasTimeFromEvent(event, canvas, duration) {

@@ -45,9 +45,20 @@ describe("Audio Inspector public capability contract", () => {
   test("documents bounded analysis coverage instead of claiming full-file model analysis", () => {
     expect(manifest.coverage.fileStatistics).toContain("whole decoded file");
     expect(manifest.coverage.spectralPitchKey).toContain("bounded representative center window");
+    expect(manifest.coverage.spectralPitchKey).toContain("longer 20 s window");
     expect(manifest.coverage.rhythm).toContain("bounded representative center window");
+    expect(manifest.coverage.rhythm).toContain("1024/128 STFT");
     expect(appSource).toContain('kind: "representative-center-window"');
     expect(appSource).toContain('kind: "representative-center-window-resampled"');
+  });
+
+  test("keeps musical key and rhythm on the longer high-resolution music window", () => {
+    expect(appSource).toContain(
+      'safeRun(analyzers.pitch, "audio.pitch.key", {\n          samples: rhythmSamples,\n          sampleRate: rhythmRate,',
+    );
+    expect(appSource).toContain("fftSize: RHYTHM_FFT_SIZE");
+    expect(appSource).toContain("hopSize: RHYTHM_HOP_SIZE");
+    expect(appSource).toContain("if (targetRate < sourceRate)");
   });
 
   test("ships the intended input, examples, export, provenance, and usability surfaces", () => {

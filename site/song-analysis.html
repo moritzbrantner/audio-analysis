@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Analyze a complete song locally in the browser for BPM, beats, downbeats, and rhythmic structural sections, then download timestamped JSON."
+    />
+    <title>Song Analysis · audio-analysis</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div class="eyebrow">audio-analysis · whole-song rhythm</div>
+        <h1>Get beat-by-beat song analysis as JSON.</h1>
+        <p class="hero-copy">
+          Analyze a complete song for tempo, beats, downbeats, and rhythmic structural sections. Every detected event
+          includes seconds, integer milliseconds, and a readable timestamp such as <code>00:03:15.022</code>.
+        </p>
+        <div class="runtime-strip" aria-label="privacy and runtime summary">
+          <span class="status-dot status-dot-local" aria-hidden="true"></span>
+          <strong>Browser-local</strong>
+          <span>Your audio is decoded and analyzed locally with Rust/WASM.</span>
+          <span>Current whole-song limit: 15 minutes.</span>
+        </div>
+        <p><a href="./index.html">Back to the fast Audio Inspector</a></p>
+      </header>
+
+      <section class="panel input-panel" aria-labelledby="song-input-title">
+        <div class="drop-zone">
+          <input
+            id="song-file-input"
+            class="visually-hidden"
+            type="file"
+            accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg,.opus,.webm"
+          />
+          <div class="drop-icon" aria-hidden="true">♪</div>
+          <h2 id="song-input-title" class="drop-kicker">Analyze a song</h2>
+          <p class="drop-copy">Choose a song up to 15 minutes long.</p>
+          <button id="song-choose-file" class="button button-primary choose-file" type="button">Choose song</button>
+          <p class="drop-note">
+            The song is mixed to mono and resampled to at most 16 kHz before the rhythm analyzer runs. No upload is
+            performed.
+          </p>
+        </div>
+        <p id="song-error" class="error-message" hidden role="alert"></p>
+      </section>
+
+      <section id="song-status" class="panel loading-panel" hidden aria-live="polite" aria-atomic="true">
+        <div class="spinner" aria-hidden="true"></div>
+        <div class="loading-copy">
+          <strong id="song-status-title">Analyzing song…</strong>
+          <p id="song-status-detail">Preparing browser-local rhythm analysis.</p>
+        </div>
+      </section>
+
+      <section id="song-result" hidden aria-labelledby="song-result-title">
+        <div class="report-toolbar">
+          <div>
+            <div class="eyebrow">whole-song analysis</div>
+            <h2 id="song-result-title" tabindex="-1">Song</h2>
+          </div>
+          <div class="toolbar-actions">
+            <button id="song-download-json" class="button button-primary" type="button">Download song analysis JSON</button>
+            <button id="song-analyze-another" class="button button-secondary" type="button">Analyze another song</button>
+          </div>
+        </div>
+
+        <section class="panel report-section" aria-labelledby="song-tempo-title">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">tempo and beat path</div>
+              <h2 id="song-tempo-title">Rhythm result</h2>
+            </div>
+          </div>
+          <div id="song-rhythm-summary" class="result-copy"></div>
+        </section>
+
+        <section class="panel report-section" aria-labelledby="song-sections-title">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">structural change points</div>
+              <h2 id="song-sections-title">Rhythmic sections</h2>
+            </div>
+          </div>
+          <p class="figure-note">
+            These are deterministic rhythmic-change sections, not asserted verse/chorus labels. Boundaries are aligned
+            to inferred downbeats when rhythmic intensity changes enough to support a split.
+          </p>
+          <div id="song-sections" class="result-copy"></div>
+        </section>
+
+        <section class="panel report-section" aria-labelledby="song-json-title">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">machine-readable contract</div>
+              <h2 id="song-json-title">JSON preview</h2>
+            </div>
+          </div>
+          <p class="figure-note">The preview shows only the first beat events. The download contains every detected beat.</p>
+          <pre id="song-json-preview"></pre>
+        </section>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <a href="https://github.com/moritzbrantner/audio-analysis">Source on GitHub</a>
+      <span>Rust-first audio analysis · browser-local by default</span>
+    </footer>
+
+    <script type="module" src="./song-analysis.js"></script>
+  </body>
+</html>

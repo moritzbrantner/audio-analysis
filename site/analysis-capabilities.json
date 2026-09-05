@@ -26,8 +26,8 @@
   ],
   "coverage": {
     "fileStatistics": "whole decoded file when practical; deterministic stride sampling for very large inputs",
-    "spectralPitchKey": "bounded representative center window required by package surface limits",
-    "rhythm": "bounded representative center window resampled to 16 kHz"
+    "spectralPitchKey": "bounded representative center windows: a short preview for spectrum and monophonic pitch, plus a longer 20 s window resampled to 16 kHz for musical key",
+    "rhythm": "bounded representative center window resampled to 16 kHz with anti-alias averaging and a 1024/128 STFT"
   },
   "backend": {
     "defaultLocalBaseUrl": "http://127.0.0.1:3000",

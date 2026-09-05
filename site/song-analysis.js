@@ -80,21 +80,15 @@ async function analyzeSongFile(file) {
     const analyzer = await loadRhythmAnalyzer();
     if (!isCurrent(generation)) return;
 
-    const response = await analyzer.runOperation({
-      operation: "audio.rhythm.analyze",
-      input: {
-        samples,
-        sampleRate: analysisRate,
-        minBpm: 45,
-        maxBpm: 220,
-        fftSize: RHYTHM_FFT_SIZE,
-        hopSize: RHYTHM_HOP_SIZE,
-        timeOffsetSeconds: 0,
-      },
+    const value = await analyzer.analyzeTrack(samples, analysisRate, {
+      minBpm: 45,
+      maxBpm: 220,
+      fftSize: RHYTHM_FFT_SIZE,
+      hopSize: RHYTHM_HOP_SIZE,
+      timeOffsetSeconds: 0,
     });
     if (!isCurrent(generation)) return;
 
-    const value = response?.value;
     if (!value || typeof value !== "object") {
       throw new Error("The rhythm analyzer returned no structured result.");
     }
@@ -116,6 +110,7 @@ async function analyzeSongFile(file) {
         mode: "client-wasm",
         privacy: "browser-local",
         analysisSampleRate: analysisRate,
+        pcmTransport: "float32array",
       },
       ...rhythm,
     };
@@ -146,7 +141,7 @@ function mixAndResample(buffer, targetRate) {
   const scale = sourceRate / targetRate;
   const outputLength = Math.max(1, Math.floor(buffer.length / scale));
   const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index));
-  const output = new Array(outputLength);
+  const output = new Float32Array(outputLength);
 
   for (let outputIndex = 0; outputIndex < outputLength; outputIndex += 1) {
     const start = outputIndex * scale;

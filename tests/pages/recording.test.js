@@ -44,6 +44,10 @@ function loadRecordingSurface({ mediaRecorder = true } = {}) {
   const stream = { getTracks: () => [track] };
   let recorder;
   let requestedConstraints;
+  let resolveRecorderReady;
+  const recorderReady = new Promise((resolve) => {
+    resolveRecorderReady = resolve;
+  });
 
   class FakeMediaRecorder {
     static isTypeSupported(type) {
@@ -55,6 +59,7 @@ function loadRecordingSurface({ mediaRecorder = true } = {}) {
       this.mimeType = options.mimeType ?? "audio/webm";
       this.state = "inactive";
       recorder = this;
+      resolveRecorderReady();
     }
 
     addEventListener(type, listener) {
@@ -132,6 +137,7 @@ function loadRecordingSurface({ mediaRecorder = true } = {}) {
   return {
     exampleButton,
     recorder: () => recorder,
+    recorderReady,
     requestedConstraints: () => requestedConstraints,
     selectors,
     track,
@@ -148,8 +154,7 @@ test("recorded microphone audio is forwarded through the existing file change pa
   });
 
   recordButton.dispatchEvent({ type: "click" });
-  await Promise.resolve();
-  await Promise.resolve();
+  await surface.recorderReady;
 
   expect(surface.requestedConstraints()?.audio).toBe(true);
   expect(surface.recorder().state).toBe("recording");

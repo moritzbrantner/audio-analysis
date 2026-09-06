@@ -371,6 +371,9 @@ export async function createBrowserMediaStreamTranscriptionSession(stream, optio
   const AudioWorkletNodeConstructor = globalThis.AudioWorkletNode;
   const MediaStreamConstructor = globalThis.MediaStream;
 
+  if (!(await supportsBrowserTranscription())) {
+    throw new Error("WebGPU is required for browser transcription. No CPU or server fallback is used.");
+  }
   if (typeof AudioContextConstructor !== "function" || typeof AudioWorkletNodeConstructor !== "function") {
     throw new Error(
       "Browser MediaStream transcription requires AudioContext and AudioWorklet support.",
@@ -429,6 +432,13 @@ export async function createBrowserMediaStreamTranscriptionSession(stream, optio
   let finishPromise = null;
   let flushResolver = null;
 
+  function releaseFlushWaiter() {
+    if (!flushResolver) return;
+    const resolve = flushResolver;
+    flushResolver = null;
+    resolve();
+  }
+
   function disconnectGraph() {
     if (!graphConnected) return;
     graphConnected = false;
@@ -443,6 +453,7 @@ export async function createBrowserMediaStreamTranscriptionSession(stream, optio
 
   function failCapture(error) {
     if (!terminalError) terminalError = toError(error);
+    releaseFlushWaiter();
     disconnectGraph();
     void audioContext.suspend().catch(() => {});
   }
@@ -476,10 +487,8 @@ export async function createBrowserMediaStreamTranscriptionSession(stream, optio
     if (!data || typeof data !== "object") return;
     if (data.type === "pcm") {
       enqueuePcm(data.samples);
-    } else if (data.type === "flushed" && flushResolver) {
-      const resolve = flushResolver;
-      flushResolver = null;
-      resolve();
+    } else if (data.type === "flushed") {
+      releaseFlushWaiter();
     }
   };
   workletNode.addEventListener("processorerror", () => {
@@ -533,11 +542,13 @@ export async function createBrowserMediaStreamTranscriptionSession(stream, optio
           await flushed;
         }
         disconnectGraph();
+        await closeAudioContext(audioContext);
         await Promise.all([...pendingPushes]);
         if (terminalError) throw terminalError;
         return await session.flush();
       } finally {
         closed = true;
+        releaseFlushWaiter();
         disconnectGraph();
         await closeAudioContext(audioContext);
       }
@@ -549,6 +560,7 @@ export async function createBrowserMediaStreamTranscriptionSession(stream, optio
     if (closed) return;
     terminalError ??= toError(reason ?? new Error("Browser MediaStream transcription aborted."));
     closed = true;
+    releaseFlushWaiter();
     disconnectGraph();
     await closeAudioContext(audioContext);
   }

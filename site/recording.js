@@ -20,7 +20,7 @@ let recordedChunks = [];
 let finalizing = false;
 
 if (recordButton && recordingStatus && fileInput && chooseFile && inputPanel) {
-  const supported = Boolean(navigator.mediaDevices?.getUserMedia && globalThis.MediaRecorder);
+  const supported = Boolean(navigator.mediaDevices?.getUserMedia && typeof MediaRecorder === "function");
 
   if (!supported) {
     recordButton.disabled = true;

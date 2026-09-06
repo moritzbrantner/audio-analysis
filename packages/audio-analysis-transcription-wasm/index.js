@@ -452,7 +452,16 @@ export async function createBrowserMediaStreamTranscriptionSession(stream, optio
   }
 
   function failCapture(error) {
-    if (!terminalError) terminalError = toError(error);
+    if (!terminalError) {
+      terminalError = toError(error);
+      if (typeof options.onError === "function") {
+        try {
+          options.onError(terminalError);
+        } catch {
+          // Consumer error reporting must not replace the capture failure.
+        }
+      }
+    }
     releaseFlushWaiter();
     disconnectGraph();
     void audioContext.suspend().catch(() => {});
@@ -573,6 +582,9 @@ export async function createBrowserMediaStreamTranscriptionSession(stream, optio
     },
     get closed() {
       return closed;
+    },
+    get error() {
+      return terminalError;
     },
     plan: session.plan,
     sampleRateHz: BROWSER_SAMPLE_RATE_HZ,

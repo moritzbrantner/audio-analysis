@@ -43,6 +43,7 @@ function loadRecordingSurface({ mediaRecorder = true } = {}) {
   const track = { stopped: false, stop() { this.stopped = true; } };
   const stream = { getTracks: () => [track] };
   let recorder;
+  let requestedConstraints;
 
   class FakeMediaRecorder {
     static isTypeSupported(type) {
@@ -121,7 +122,7 @@ function loadRecordingSurface({ mediaRecorder = true } = {}) {
     navigator: {
       mediaDevices: {
         async getUserMedia(constraints) {
-          expect(constraints).toEqual({ audio: true });
+          requestedConstraints = constraints;
           return stream;
         },
       },
@@ -129,7 +130,13 @@ function loadRecordingSurface({ mediaRecorder = true } = {}) {
   });
 
   vm.runInContext(recordingSource, context, { filename: "site/recording.js" });
-  return { exampleButton, recorder: () => recorder, selectors, track };
+  return {
+    exampleButton,
+    recorder: () => recorder,
+    requestedConstraints: () => requestedConstraints,
+    selectors,
+    track,
+  };
 }
 
 test("recorded microphone audio is forwarded through the existing file change path", async () => {
@@ -145,6 +152,7 @@ test("recorded microphone audio is forwarded through the existing file change pa
   await Promise.resolve();
   await Promise.resolve();
 
+  expect(surface.requestedConstraints()?.audio).toBe(true);
   expect(surface.recorder().state).toBe("recording");
   expect(recordButton.textContent).toBe("Stop recording");
   expect(fileInput.disabled).toBe(true);

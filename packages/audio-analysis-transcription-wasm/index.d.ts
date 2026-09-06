@@ -95,6 +95,7 @@ export interface BrowserTranscriptionSession {
 export interface BrowserMediaStreamTranscriptionOptions
   extends BrowserTranscriptionSessionOptions {
   onSegments?: (segments: BrowserTranscriptionSegment[]) => void;
+  onError?: (error: Error) => void;
 }
 
 export interface BrowserMediaStreamTranscriptionSession {
@@ -102,6 +103,7 @@ export interface BrowserMediaStreamTranscriptionSession {
   abort(reason?: unknown): Promise<void>;
   readonly bufferedSeconds: number;
   readonly closed: boolean;
+  readonly error: Error | null;
   readonly plan: BrowserTranscriptionWindowPlan;
   readonly sampleRateHz: number;
 }

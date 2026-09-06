@@ -62,10 +62,59 @@ export interface BrowserTranscriptionResult {
   attributes: Record<string, string>;
 }
 
+export interface BrowserTranscriptionWindowOptions {
+  windowSeconds?: number;
+  strideSeconds?: number;
+  maxBufferedSeconds?: number;
+}
+
+export interface BrowserTranscriptionWindowPlan {
+  sampleRateHz: number;
+  windowSeconds: number;
+  strideSeconds: number;
+  stepSeconds: number;
+  maxBufferedSeconds: number;
+  windowSamples: number;
+  strideSamples: number;
+  stepSamples: number;
+  maxBufferedSamples: number;
+}
+
+export interface BrowserTranscriptionSessionOptions
+  extends BrowserTranscriptionOptions,
+    BrowserTranscriptionWindowOptions {}
+
+export interface BrowserTranscriptionSession {
+  push(samples: Float32Array): Promise<BrowserTranscriptionSegment[]>;
+  flush(): Promise<BrowserTranscriptionResult>;
+  readonly bufferedSeconds: number;
+  readonly closed: boolean;
+  readonly plan: BrowserTranscriptionWindowPlan;
+}
+
+export interface BrowserTranscriptionStitchOptions {
+  committedThroughSeconds?: number;
+  commitUntilSeconds?: number;
+  final?: boolean;
+  startIndex?: number;
+}
+
+export interface BrowserTranscriptionStitchResult {
+  segments: BrowserTranscriptionSegment[];
+  committedThroughSeconds: number;
+}
+
 export function init(): Promise<unknown>;
 export function packageSurface(): Promise<PackageSurface>;
 export function runOperation(request: SurfaceRequest): Promise<SurfaceResponse>;
 export function browserTranscriptionCapabilities(): Record<string, unknown>;
+export function browserTranscriptionWindowPlan(
+  options?: BrowserTranscriptionWindowOptions,
+): BrowserTranscriptionWindowPlan;
+export function stitchBrowserTranscriptionWindow(
+  segments: BrowserTranscriptionSegment[],
+  options?: BrowserTranscriptionStitchOptions,
+): BrowserTranscriptionStitchResult;
 export function supportsBrowserTranscription(): Promise<boolean>;
 export function transcribeAudioBlob(
   source: Blob,
@@ -75,7 +124,10 @@ export function transcribeAudioSamples(
   samples: Float32Array,
   options?: BrowserTranscriptionOptions,
 ): Promise<BrowserTranscriptionResult>;
+export function createBrowserTranscriptionSession(
+  options?: BrowserTranscriptionSessionOptions,
+): BrowserTranscriptionSession;
 export function normalizeBrowserTranscriptionOutput(
   output: unknown,
-  context?: { durationSeconds?: number; source?: string },
+  context?: { durationSeconds?: number; offsetSeconds?: number; source?: string },
 ): BrowserTranscriptionResult;

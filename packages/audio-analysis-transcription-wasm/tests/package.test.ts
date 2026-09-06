@@ -55,6 +55,20 @@ test("bounded transcription plan uses deterministic 29 second windows", async ()
   expect(() => entry.browserTranscriptionWindowPlan({ maxBufferedSeconds: 10 })).toThrow();
 });
 
+test("bounded transcription plan preserves an explicit zero stride", async () => {
+  const entry = await import("../index.js");
+  const plan = entry.browserTranscriptionWindowPlan({
+    windowSeconds: 10,
+    strideSeconds: 0,
+    maxBufferedSeconds: 10,
+  });
+
+  expect(plan.windowSamples).toBe(160_000);
+  expect(plan.strideSamples).toBe(0);
+  expect(plan.stepSamples).toBe(160_000);
+  expect(plan.stepSeconds).toBe(10);
+});
+
 test("browser output normalization preserves timed transcription segments", async () => {
   const entry = await import("../index.js");
   const result = entry.normalizeBrowserTranscriptionOutput(
@@ -121,4 +135,34 @@ test("bounded window stitching defers overlap and rejects already committed segm
   expect(second.committedThroughSeconds).toBe(48);
   expect(second.segments.map((segment) => segment.text)).toEqual(["deferred", "new"]);
   expect(second.segments.map((segment) => segment.index)).toEqual([1, 2]);
+});
+
+test("bounded session rejects acquisition that exceeds its PCM backlog before inference", async () => {
+  const entry = await import("../index.js");
+  const session = entry.createBrowserTranscriptionSession({
+    windowSeconds: 1,
+    strideSeconds: 0,
+    maxBufferedSeconds: 1,
+  });
+
+  const tooMuchPcm = new Float32Array(16_001);
+  try {
+    await session.push(tooMuchPcm);
+    throw new Error("Expected bounded backpressure rejection.");
+  } catch (error) {
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe("BrowserTranscriptionBackpressureError");
+  }
+});
+
+test("empty bounded session flushes deterministically without loading a model", async () => {
+  const entry = await import("../index.js");
+  const session = entry.createBrowserTranscriptionSession({ source: "empty-fixture" });
+  const result = await session.flush();
+
+  expect(session.closed).toBe(true);
+  expect(session.bufferedSeconds).toBe(0);
+  expect(result.source).toBe("empty-fixture");
+  expect(result.text).toBe("");
+  expect(result.segments).toEqual([]);
 });

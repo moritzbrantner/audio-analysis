@@ -83,10 +83,16 @@ export function browserTranscriptionWindowPlan(options = {}) {
     throw new RangeError("Browser transcription maxBufferedSeconds must cover at least one window.");
   }
 
-  const windowSamples = secondsToSamples(windowSeconds);
-  const strideSamples = secondsToSamples(strideSeconds);
+  const windowSamples = secondsToSamples(windowSeconds, 1);
+  const strideSamples = secondsToSamples(strideSeconds, 0);
   const stepSamples = windowSamples - strideSamples;
-  const maxBufferedSamples = secondsToSamples(maxBufferedSeconds);
+  const maxBufferedSamples = secondsToSamples(maxBufferedSeconds, 1);
+  if (stepSamples <= 0) {
+    throw new RangeError("Browser transcription window rounding must leave a positive step.");
+  }
+  if (maxBufferedSamples < windowSamples) {
+    throw new RangeError("Browser transcription buffer rounding must cover at least one window.");
+  }
 
   return {
     sampleRateHz: BROWSER_SAMPLE_RATE_HZ,
@@ -110,7 +116,7 @@ export function stitchBrowserTranscriptionWindow(segments, options = {}) {
     options.committedThroughSeconds,
     0,
   );
-  const commitUntilSeconds = finiteOrInfinity(options.commitUntilSeconds, Infinity);
+  const commitUntilSeconds = nonNegativeFiniteOrInfinity(options.commitUntilSeconds, Infinity);
   const final = options.final === true;
   const startIndex = nonNegativeIntegerOrDefault(options.startIndex, 0);
   const accepted = [];
@@ -236,7 +242,7 @@ export function createBrowserTranscriptionSession(options = {}) {
     });
 
     const output = await transcriber(samples, {
-      chunk_length_s: DEFAULT_WINDOW_SECONDS,
+      chunk_length_s: plan.windowSeconds,
       stride_length_s: 0,
       return_timestamps: true,
       task: "transcribe",
@@ -246,9 +252,7 @@ export function createBrowserTranscriptionSession(options = {}) {
       offsetSeconds: windowStartSeconds,
       source,
     });
-    const commitUntilSeconds = final
-      ? Infinity
-      : windowStartSeconds + plan.stepSeconds;
+    const commitUntilSeconds = final ? Infinity : windowStartSeconds + plan.stepSeconds;
     const stitched = stitchBrowserTranscriptionWindow(normalized.segments, {
       committedThroughSeconds,
       commitUntilSeconds,
@@ -567,8 +571,8 @@ function addOffset(value, offsetSeconds) {
   return value === null ? null : value + offsetSeconds;
 }
 
-function secondsToSamples(seconds) {
-  return Math.max(1, Math.round(seconds * BROWSER_SAMPLE_RATE_HZ));
+function secondsToSamples(seconds, minimum) {
+  return Math.max(minimum, Math.round(seconds * BROWSER_SAMPLE_RATE_HZ));
 }
 
 function positiveFiniteOrDefault(value, fallback) {
@@ -595,11 +599,11 @@ function nonNegativeIntegerOrDefault(value, fallback) {
   return value;
 }
 
-function finiteOrInfinity(value, fallback) {
+function nonNegativeFiniteOrInfinity(value, fallback) {
   if (value === undefined) return fallback;
   if (value === Infinity) return Infinity;
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new RangeError("Expected a finite number or Infinity.");
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new RangeError("Expected a non-negative finite number or Infinity.");
   }
   return value;
 }

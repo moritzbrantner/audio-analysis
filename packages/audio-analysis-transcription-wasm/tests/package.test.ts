@@ -12,6 +12,7 @@ test("audio-analysis-transcription-wasm package exports stable entrypoints", asy
   expect(typeof entry.transcribeAudioBlob).toBe("function");
   expect(typeof entry.transcribeAudioSamples).toBe("function");
   expect(typeof entry.createBrowserTranscriptionSession).toBe("function");
+  expect(typeof entry.createBrowserMediaStreamTranscriptionSession).toBe("function");
 });
 
 test("browser transcription capabilities stay WebGPU-only and bounded", async () => {
@@ -21,9 +22,11 @@ test("browser transcription capabilities stay WebGPU-only and bounded", async ()
   expect(capabilities.requiredAcceleration).toBe("webgpu");
   expect(capabilities.input.sampleRateHz).toBe(16_000);
   expect(capabilities.input.channels).toBe(1);
+  expect(capabilities.input.acceptedSources).toContain("caller-acquired MediaStream");
   expect(capabilities.features.transcription).toBe(true);
   expect(capabilities.features.timedSegments).toBe(true);
   expect(capabilities.features.boundedPcmStreaming).toBe(true);
+  expect(capabilities.features.mediaStreamAdapter).toBe(true);
   expect(capabilities.features.alignment).toBe(false);
   expect(capabilities.features.diarization).toBe(false);
   expect(capabilities.features.translation).toBe(false);
@@ -165,4 +168,15 @@ test("empty bounded session flushes deterministically without loading a model", 
   expect(result.source).toBe("empty-fixture");
   expect(result.text).toBe("");
   expect(result.segments).toEqual([]);
+});
+
+test("MediaStream adapter rejects invalid caller acquisition before browser runtime setup", async () => {
+  const entry = await import("../index.js");
+
+  await expect(entry.createBrowserMediaStreamTranscriptionSession(null)).rejects.toThrow(
+    "caller-acquired MediaStream",
+  );
+  await expect(
+    entry.createBrowserMediaStreamTranscriptionSession({ getAudioTracks: () => [] }),
+  ).rejects.toThrow("contains no audio track");
 });

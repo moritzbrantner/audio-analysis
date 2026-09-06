@@ -7,6 +7,8 @@ const DEFAULT_WINDOW_SECONDS = 29;
 const DEFAULT_STRIDE_SECONDS = 5;
 const DEFAULT_MAX_BUFFERED_SECONDS = 58;
 const TIME_EPSILON_SECONDS = 1e-6;
+const PCM_CAPTURE_PROCESSOR_NAME = "moenarch-audio-analysis-pcm-capture-v1";
+const PCM_CAPTURE_CHUNK_FRAMES = BROWSER_SAMPLE_RATE_HZ;
 
 let wasmModulePromise;
 let transformersModulePromise;
@@ -44,12 +46,18 @@ export function browserTranscriptionCapabilities() {
       sampleRateHz: BROWSER_SAMPLE_RATE_HZ,
       channels: 1,
       sampleFormat: "f32",
-      acceptedSources: ["Blob", "Float32Array", "bounded Float32Array stream"],
+      acceptedSources: [
+        "Blob",
+        "Float32Array",
+        "bounded Float32Array stream",
+        "caller-acquired MediaStream",
+      ],
     },
     features: {
       transcription: true,
       timedSegments: true,
       boundedPcmStreaming: true,
+      mediaStreamAdapter: true,
       alignment: false,
       diarization: false,
       translation: false,
@@ -357,6 +365,232 @@ export function createBrowserTranscriptionSession(options = {}) {
   };
 }
 
+export async function createBrowserMediaStreamTranscriptionSession(stream, options = {}) {
+  const audioTrack = requireBrowserAudioTrack(stream);
+  const AudioContextConstructor = globalThis.AudioContext;
+  const AudioWorkletNodeConstructor = globalThis.AudioWorkletNode;
+  const MediaStreamConstructor = globalThis.MediaStream;
+
+  if (!(await supportsBrowserTranscription())) {
+    throw new Error("WebGPU is required for browser transcription. No CPU or server fallback is used.");
+  }
+  if (typeof AudioContextConstructor !== "function" || typeof AudioWorkletNodeConstructor !== "function") {
+    throw new Error(
+      "Browser MediaStream transcription requires AudioContext and AudioWorklet support.",
+    );
+  }
+  if (typeof MediaStreamConstructor !== "function") {
+    throw new Error("Browser MediaStream transcription requires the MediaStream API.");
+  }
+
+  const session = createBrowserTranscriptionSession(options);
+  let audioContext;
+  try {
+    audioContext = new AudioContextConstructor({ sampleRate: BROWSER_SAMPLE_RATE_HZ });
+  } catch (error) {
+    throw new Error(
+      `Unable to create the required ${BROWSER_SAMPLE_RATE_HZ} Hz browser audio context: ${formatError(error)}`,
+    );
+  }
+
+  if (audioContext.sampleRate !== BROWSER_SAMPLE_RATE_HZ) {
+    await closeAudioContext(audioContext);
+    throw new Error(
+      `Browser MediaStream transcription requires an exact ${BROWSER_SAMPLE_RATE_HZ} Hz audio context; got ${audioContext.sampleRate} Hz.`,
+    );
+  }
+  if (!audioContext.audioWorklet || typeof audioContext.audioWorklet.addModule !== "function") {
+    await closeAudioContext(audioContext);
+    throw new Error("Browser MediaStream transcription requires AudioWorklet module support.");
+  }
+
+  const workletUrl = createPcmCaptureWorkletUrl();
+  try {
+    await audioContext.audioWorklet.addModule(workletUrl);
+  } catch (error) {
+    await closeAudioContext(audioContext);
+    throw new Error(`Unable to initialize the browser PCM capture worklet: ${formatError(error)}`);
+  } finally {
+    URL.revokeObjectURL(workletUrl);
+  }
+
+  const captureStream = new MediaStreamConstructor([audioTrack]);
+  const sourceNode = audioContext.createMediaStreamSource(captureStream);
+  const workletNode = new AudioWorkletNodeConstructor(audioContext, PCM_CAPTURE_PROCESSOR_NAME, {
+    numberOfInputs: 1,
+    numberOfOutputs: 1,
+    outputChannelCount: [1],
+    processorOptions: { chunkFrames: PCM_CAPTURE_CHUNK_FRAMES },
+  });
+  const silentGain = audioContext.createGain();
+  silentGain.gain.value = 0;
+
+  const pendingPushes = new Set();
+  let graphConnected = false;
+  let closed = false;
+  let terminalError = null;
+  let finishPromise = null;
+  let flushResolver = null;
+
+  function releaseFlushWaiter() {
+    if (!flushResolver) return;
+    const resolve = flushResolver;
+    flushResolver = null;
+    resolve();
+  }
+
+  function disconnectGraph() {
+    if (!graphConnected) return;
+    graphConnected = false;
+    for (const node of [sourceNode, workletNode, silentGain]) {
+      try {
+        node.disconnect();
+      } catch {
+        // The graph is already detached.
+      }
+    }
+  }
+
+  function failCapture(error) {
+    if (!terminalError) {
+      terminalError = toError(error);
+      if (typeof options.onError === "function") {
+        try {
+          options.onError(terminalError);
+        } catch {
+          // Consumer error reporting must not replace the capture failure.
+        }
+      }
+    }
+    releaseFlushWaiter();
+    disconnectGraph();
+    void audioContext.suspend().catch(() => {});
+  }
+
+  function enqueuePcm(samples) {
+    if (closed || terminalError) return;
+    if (!(samples instanceof Float32Array)) {
+      failCapture(new TypeError("Browser PCM capture worklet returned a non-Float32Array payload."));
+      return;
+    }
+
+    let pending;
+    pending = session
+      .push(samples)
+      .then((segments) => {
+        if (segments.length > 0 && typeof options.onSegments === "function") {
+          options.onSegments(segments);
+        }
+      })
+      .catch((error) => {
+        failCapture(error);
+      })
+      .finally(() => {
+        pendingPushes.delete(pending);
+      });
+    pendingPushes.add(pending);
+  }
+
+  workletNode.port.onmessage = (event) => {
+    const data = event.data;
+    if (!data || typeof data !== "object") return;
+    if (data.type === "pcm") {
+      enqueuePcm(data.samples);
+    } else if (data.type === "flushed") {
+      releaseFlushWaiter();
+    }
+  };
+  workletNode.addEventListener("processorerror", () => {
+    failCapture(new Error("Browser PCM capture worklet stopped unexpectedly."));
+  });
+
+  sourceNode.connect(workletNode);
+  workletNode.connect(silentGain);
+  silentGain.connect(audioContext.destination);
+  graphConnected = true;
+
+  try {
+    await audioContext.resume();
+  } catch (error) {
+    failCapture(
+      new Error(
+        `Unable to start browser audio capture. Start it from a user interaction: ${formatError(error)}`,
+      ),
+    );
+  }
+  if (audioContext.state !== "running" && !terminalError) {
+    failCapture(
+      new Error(
+        "Browser audio capture remained suspended. Start transcription from a user interaction.",
+      ),
+    );
+  }
+  if (terminalError) {
+    await closeAudioContext(audioContext);
+    throw terminalError;
+  }
+
+  emitProgress(options, {
+    stage: "capture",
+    message: "Capturing caller-approved audio as bounded 16 kHz mono PCM…",
+    detail: {
+      sampleRateHz: BROWSER_SAMPLE_RATE_HZ,
+      chunkFrames: PCM_CAPTURE_CHUNK_FRAMES,
+      maxBufferedSeconds: session.plan.maxBufferedSeconds,
+    },
+  });
+
+  async function finish() {
+    finishPromise ??= (async () => {
+      try {
+        if (!terminalError && graphConnected) {
+          const flushed = new Promise((resolve) => {
+            flushResolver = resolve;
+          });
+          workletNode.port.postMessage({ type: "flush" });
+          await flushed;
+        }
+        disconnectGraph();
+        await closeAudioContext(audioContext);
+        await Promise.all([...pendingPushes]);
+        if (terminalError) throw terminalError;
+        return await session.flush();
+      } finally {
+        closed = true;
+        releaseFlushWaiter();
+        disconnectGraph();
+        await closeAudioContext(audioContext);
+      }
+    })();
+    return finishPromise;
+  }
+
+  async function abort(reason) {
+    if (closed) return;
+    terminalError ??= toError(reason ?? new Error("Browser MediaStream transcription aborted."));
+    closed = true;
+    releaseFlushWaiter();
+    disconnectGraph();
+    await closeAudioContext(audioContext);
+  }
+
+  return {
+    finish,
+    abort,
+    get bufferedSeconds() {
+      return session.bufferedSeconds;
+    },
+    get closed() {
+      return closed;
+    },
+    get error() {
+      return terminalError;
+    },
+    plan: session.plan,
+    sampleRateHz: BROWSER_SAMPLE_RATE_HZ,
+  };
+}
+
 export function normalizeBrowserTranscriptionOutput(output, context = {}) {
   const text = String(output?.text ?? "").trim();
   const durationSeconds = finiteOrNull(context.durationSeconds);
@@ -536,6 +770,91 @@ function createPcmQueue() {
   };
 }
 
+function createPcmCaptureWorkletUrl() {
+  if (typeof Blob !== "function" || typeof URL?.createObjectURL !== "function") {
+    throw new Error("Browser MediaStream transcription requires Blob URL support.");
+  }
+
+  const source = `
+class MoenarchAudioAnalysisPcmCapture extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    const configured = options?.processorOptions?.chunkFrames;
+    this.chunkFrames = Number.isInteger(configured) && configured > 0 ? configured : ${PCM_CAPTURE_CHUNK_FRAMES};
+    this.buffer = new Float32Array(this.chunkFrames);
+    this.offset = 0;
+    this.port.onmessage = (event) => {
+      if (event.data?.type === "flush") {
+        this.flush();
+      }
+    };
+  }
+
+  emitBuffer(buffer) {
+    this.port.postMessage({ type: "pcm", samples: buffer }, [buffer.buffer]);
+  }
+
+  flush() {
+    if (this.offset > 0) {
+      this.emitBuffer(this.buffer.slice(0, this.offset));
+      this.buffer = new Float32Array(this.chunkFrames);
+      this.offset = 0;
+    }
+    this.port.postMessage({ type: "flushed" });
+  }
+
+  process(inputs) {
+    const channels = inputs[0];
+    if (!channels || channels.length === 0 || channels[0].length === 0) {
+      return true;
+    }
+
+    const frames = channels[0].length;
+    for (let frame = 0; frame < frames; frame += 1) {
+      let mixed = 0;
+      for (let channel = 0; channel < channels.length; channel += 1) {
+        mixed += channels[channel][frame] ?? 0;
+      }
+      this.buffer[this.offset] = mixed / channels.length;
+      this.offset += 1;
+      if (this.offset === this.chunkFrames) {
+        this.emitBuffer(this.buffer);
+        this.buffer = new Float32Array(this.chunkFrames);
+        this.offset = 0;
+      }
+    }
+    return true;
+  }
+}
+
+registerProcessor("${PCM_CAPTURE_PROCESSOR_NAME}", MoenarchAudioAnalysisPcmCapture);
+`;
+  return URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+}
+
+function requireBrowserAudioTrack(stream) {
+  if (!stream || typeof stream.getAudioTracks !== "function") {
+    throw new TypeError("Browser MediaStream transcription requires a caller-acquired MediaStream.");
+  }
+  const track = stream.getAudioTracks()[0];
+  if (!track) {
+    throw new Error("The caller-acquired MediaStream contains no audio track.");
+  }
+  if (track.readyState === "ended") {
+    throw new Error("The caller-acquired MediaStream audio track has already ended.");
+  }
+  return track;
+}
+
+async function closeAudioContext(audioContext) {
+  if (!audioContext || audioContext.state === "closed") return;
+  try {
+    await audioContext.close();
+  } catch {
+    // Cleanup must not hide the transcription result or the original failure.
+  }
+}
+
 function validatePcmSamples(samples) {
   if (!(samples instanceof Float32Array) || samples.length === 0) {
     throw new TypeError("audio-analysis browser transcription requires non-empty Float32Array PCM.");
@@ -610,4 +929,13 @@ function nonNegativeFiniteOrInfinity(value, fallback) {
 
 function finiteOrNull(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function toError(value) {
+  if (value instanceof Error) return value;
+  return new Error(String(value));
+}
+
+function formatError(value) {
+  return value instanceof Error ? value.message : String(value);
 }

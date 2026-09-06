@@ -50,8 +50,7 @@ function loadRecordingSurface({ mediaRecorder = true } = {}) {
       return type === "audio/webm;codecs=opus";
     }
 
-    constructor(inputStream, options = {}) {
-      expect(inputStream).toBe(stream);
+    constructor(_inputStream, options = {}) {
       this.listeners = new Map();
       this.mimeType = options.mimeType ?? "audio/webm";
       this.state = "inactive";

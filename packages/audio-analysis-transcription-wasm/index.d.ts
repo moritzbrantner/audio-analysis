@@ -29,7 +29,7 @@ export interface SurfaceResponse {
 }
 
 export interface BrowserTranscriptionProgress {
-  stage: "decode" | "model" | "transcribe";
+  stage: "capture" | "decode" | "model" | "transcribe";
   message: string;
   detail?: unknown;
 }
@@ -92,6 +92,20 @@ export interface BrowserTranscriptionSession {
   readonly plan: BrowserTranscriptionWindowPlan;
 }
 
+export interface BrowserMediaStreamTranscriptionOptions
+  extends BrowserTranscriptionSessionOptions {
+  onSegments?: (segments: BrowserTranscriptionSegment[]) => void;
+}
+
+export interface BrowserMediaStreamTranscriptionSession {
+  finish(): Promise<BrowserTranscriptionResult>;
+  abort(reason?: unknown): Promise<void>;
+  readonly bufferedSeconds: number;
+  readonly closed: boolean;
+  readonly plan: BrowserTranscriptionWindowPlan;
+  readonly sampleRateHz: number;
+}
+
 export interface BrowserTranscriptionStitchOptions {
   committedThroughSeconds?: number;
   commitUntilSeconds?: number;
@@ -127,6 +141,10 @@ export function transcribeAudioSamples(
 export function createBrowserTranscriptionSession(
   options?: BrowserTranscriptionSessionOptions,
 ): BrowserTranscriptionSession;
+export function createBrowserMediaStreamTranscriptionSession(
+  stream: MediaStream,
+  options?: BrowserMediaStreamTranscriptionOptions,
+): Promise<BrowserMediaStreamTranscriptionSession>;
 export function normalizeBrowserTranscriptionOutput(
   output: unknown,
   context?: { durationSeconds?: number; offsetSeconds?: number; source?: string },

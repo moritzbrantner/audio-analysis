@@ -9,7 +9,6 @@ default-members = [
   "crates/audio/audio-analysis-fourier",
   "crates/audio/audio-analysis-io",
   "crates/audio/audio-analysis-pitch",
-  "crates/audio/audio-analysis-playback",
   "crates/audio/audio-analysis-processing",
   "crates/audio/audio-analysis-recognition",
   "crates/audio/audio-analysis-rhythm",
@@ -38,7 +37,6 @@ audio-analysis-core = { package = "moenarch-audio-analysis-core", version = "0.1
 audio-analysis-fourier = { package = "moenarch-audio-analysis-fourier", version = "0.1.0", path = "crates/audio/audio-analysis-fourier" }
 audio-analysis-io = { package = "moenarch-audio-analysis-io", version = "0.1.1", path = "crates/audio/audio-analysis-io" }
 audio-analysis-pitch = { package = "moenarch-audio-analysis-pitch", version = "0.1.0", path = "crates/audio/audio-analysis-pitch" }
-audio-analysis-playback = { package = "moenarch-audio-analysis-playback", version = "0.1.0", path = "crates/audio/audio-analysis-playback" }
 audio-analysis-processing = { package = "moenarch-audio-analysis-processing", version = "0.1.0", path = "crates/audio/audio-analysis-processing" }
 audio-analysis-recognition = { package = "moenarch-audio-analysis-recognition", version = "0.1.0", path = "crates/audio/audio-analysis-recognition" }
 audio-analysis-rhythm = { package = "moenarch-audio-analysis-rhythm", version = "0.1.0", path = "crates/audio/audio-analysis-rhythm" }

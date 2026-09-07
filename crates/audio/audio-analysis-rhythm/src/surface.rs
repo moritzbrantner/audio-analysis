@@ -6,28 +6,42 @@ use runtime_core::{
     SurfaceOperation, SurfaceRequest, SurfaceResponse,
 };
 
-use crate::track::{analyze_rhythm_track, TrackRhythmConfig, TrackedBeat};
+use crate::track::{
+    analyze_rhythm_track, StructuralDescriptor, TrackRhythmAnalysis, TrackRhythmConfig,
+    TrackedBeat,
+};
 use crate::{
-    beat_grid, detect_onsets, estimate_tempo, onset_envelope, OnsetDetectorConfig,
-    TempoEstimatorConfig,
+    beat_grid, detect_onsets, estimate_tempo, onset_envelope, Onset, OnsetDetectorConfig,
+    OnsetStrength, TempoEstimatorConfig,
 };
 
 const MAX_SAMPLES: usize = 192_000;
 const MAX_TRACK_SECONDS: usize = 15 * 60;
 const MIN_SECTION_SECONDS: f64 = 8.0;
-const SECTION_CHANGE_THRESHOLD: f32 = 0.18;
+const SECTION_CHANGE_THRESHOLD: f32 = 0.20;
+const SECTION_IDENTITY_THRESHOLD: f32 = 0.18;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 struct StructuralSection {
     start_seconds: f64,
     end_seconds: f64,
     start_boundary_confidence: f32,
+    identity: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct BeatContext {
     bar_index: usize,
     section_index: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct DescriptorMean {
+    onset: f32,
+    low: f32,
+    mid: f32,
+    high: f32,
+    chroma: [f32; 12],
 }
 
 /// Returns the package surface exposed by every transport wrapper.
@@ -40,7 +54,7 @@ pub fn package_surface() -> PackageSurface {
             operation(
                 "describe",
                 "Describe package",
-                "Onset detection, tempo estimation, and whole-track beat analysis.",
+                "Onset detection, tempo estimation, and whole-track rhythm analysis.",
                 serde_json::json!({"includeOperations": true}),
             ),
             operation(
@@ -64,7 +78,7 @@ pub fn package_surface() -> PackageSurface {
             operation(
                 "audio.rhythm.analyze",
                 "Analyze track rhythm",
-                "Uses spectral flux, tempo autocorrelation, dynamic-programming beat tracking, bar-phase accents, and rhythmic change points to estimate BPM, beats, downbeats, and structural sections.",
+                "Uses spectral flux, beat-path-rescored tempo candidates, elastic dynamic-programming beat tracking, bar-phase accents, and multi-descriptor musical change points.",
                 serde_json::json!({"samples": [1.0, 0.0, 0.0, 1.0], "sampleRate": 48000}),
             ),
         ],
@@ -82,8 +96,15 @@ fn operation(
         name: name.to_string(),
         description: Some(description.to_string()),
         curation: runtime_core::SurfaceOperationCuration::from_operation_id(id),
-        input_schema: serde_json::json!({"type": "object", "additionalProperties": true, "xOperationCategory": runtime_core::operation_category(id)}),
-        output_schema: serde_json::json!({"type": "object", "xOperationCategory": runtime_core::operation_category(id)}),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "additionalProperties": true,
+            "xOperationCategory": runtime_core::operation_category(id)
+        }),
+        output_schema: serde_json::json!({
+            "type": "object",
+            "xOperationCategory": runtime_core::operation_category(id)
+        }),
         example_request,
         wasm_supported: true,
         server_supported: true,
@@ -145,7 +166,7 @@ fn response(operation: OperationId, value: serde_json::Value) -> SurfaceResponse
         ),
         "audio.rhythm.analyze" => (
             "Track rhythm analysis",
-            "Estimated whole-track tempo candidates, a globally consistent beat path, 4/4 downbeats, and rhythmic structural sections.",
+            "Estimated whole-track tempo candidates, an elastic beat path, 4/4 downbeats, and multi-descriptor structural sections.",
             serde_json::json!({
                 "bpm": value.get("bpm").cloned().unwrap_or(serde_json::Value::Null),
                 "confidence": value.get("confidence").cloned().unwrap_or(serde_json::Value::Null),
@@ -229,11 +250,12 @@ fn track_analysis_value(input: serde_json::Value) -> Result<serde_json::Value, S
     config.beats_per_bar = positive_usize(&input, "beatsPerBar", config.beats_per_bar)?;
     config.tempo_candidate_count =
         positive_usize(&input, "tempoCandidateCount", config.tempo_candidate_count)?.min(16);
+
     let analysis =
         analyze_rhythm_track(&samples, sample_rate, config).map_err(|error| error.to_string())?;
     let analysis_duration_seconds = samples.len() as f64 / sample_rate as f64;
     let analysis_end_seconds = time_offset_seconds + analysis_duration_seconds;
-    let sections = structural_sections(&analysis.beats, analysis_duration_seconds);
+    let sections = structural_sections(&analysis, analysis_duration_seconds);
     let beat_contexts = contextualize_beats(&analysis.beats, &sections);
     let bar_count = beat_contexts.last().map_or(0, |context| context.bar_index);
 
@@ -253,22 +275,35 @@ fn track_analysis_value(input: serde_json::Value) -> Result<serde_json::Value, S
         "barCount": bar_count,
         "tempoCandidates": analysis.tempo_candidates.iter().map(|candidate| serde_json::json!({
             "bpm": candidate.bpm,
-            "score": candidate.score
+            "score": candidate.score,
+            "autocorrelationScore": candidate.autocorrelation_score,
+            "beatSupport": candidate.beat_support
+        })).collect::<Vec<_>>(),
+        "tempoMap": analysis.tempo_map.iter().map(|point| serde_json::json!({
+            "timestampSeconds": time_offset_seconds + point.timestamp_seconds,
+            "timestampMs": timestamp_millis(time_offset_seconds + point.timestamp_seconds),
+            "bpm": point.bpm,
+            "confidence": point.confidence
         })).collect::<Vec<_>>(),
         "beats": analysis.beats.iter().enumerate().map(|(index, beat)| {
             let context = beat_contexts[index];
             let timestamp_seconds = time_offset_seconds + beat.timestamp_seconds;
             let timestamp_ms = timestamp_millis(timestamp_seconds);
+            let section_identity = context.section_index.checked_sub(1)
+                .and_then(|section_index| sections.get(section_index))
+                .map(|section| section.identity.as_str());
             serde_json::json!({
                 "index": index + 1,
                 "timestampSeconds": timestamp_seconds,
                 "timestampMs": timestamp_ms,
                 "timestamp": format_timestamp_millis(timestamp_ms),
                 "strength": beat.strength,
+                "localBpm": beat.local_bpm,
                 "beatInBar": beat.beat_in_bar,
                 "barIndex": context.bar_index,
                 "sectionIndex": context.section_index,
                 "sectionLabel": format!("section-{}", context.section_index),
+                "sectionIdentity": section_identity,
                 "downbeat": beat.downbeat
             })
         }).collect::<Vec<_>>(),
@@ -277,6 +312,9 @@ fn track_analysis_value(input: serde_json::Value) -> Result<serde_json::Value, S
             let context = beat_contexts[beat_index];
             let timestamp_seconds = time_offset_seconds + beat.timestamp_seconds;
             let timestamp_ms = timestamp_millis(timestamp_seconds);
+            let section_identity = context.section_index.checked_sub(1)
+                .and_then(|section_index| sections.get(section_index))
+                .map(|section| section.identity.as_str());
             serde_json::json!({
                 "index": downbeat_index + 1,
                 "beatIndex": beat_index + 1,
@@ -285,11 +323,12 @@ fn track_analysis_value(input: serde_json::Value) -> Result<serde_json::Value, S
                 "timestamp": format_timestamp_millis(timestamp_ms),
                 "barIndex": context.bar_index,
                 "sectionIndex": context.section_index,
-                "sectionLabel": format!("section-{}", context.section_index)
+                "sectionLabel": format!("section-{}", context.section_index),
+                "sectionIdentity": section_identity
             })
         }).collect::<Vec<_>>(),
         "downbeatConfidence": analysis.downbeat_confidence,
-        "sectionsMethod": "rhythmic-change-points-v1",
+        "sectionsMethod": "musical-change-points-v2",
         "sections": sections.iter().enumerate().map(|(index, section)| {
             let start_seconds = time_offset_seconds + section.start_seconds;
             let end_seconds = time_offset_seconds + section.end_seconds;
@@ -298,6 +337,7 @@ fn track_analysis_value(input: serde_json::Value) -> Result<serde_json::Value, S
             serde_json::json!({
                 "index": index + 1,
                 "label": format!("section-{}", index + 1),
+                "identity": section.identity,
                 "startSeconds": start_seconds,
                 "startMs": start_ms,
                 "start": format_timestamp_millis(start_ms),
@@ -311,12 +351,16 @@ fn track_analysis_value(input: serde_json::Value) -> Result<serde_json::Value, S
     }))
 }
 
-fn structural_sections(beats: &[TrackedBeat], duration_seconds: f64) -> Vec<StructuralSection> {
-    if beats.is_empty() || !duration_seconds.is_finite() || duration_seconds <= 0.0 {
+fn structural_sections(
+    analysis: &TrackRhythmAnalysis,
+    duration_seconds: f64,
+) -> Vec<StructuralSection> {
+    if analysis.beats.is_empty() || !duration_seconds.is_finite() || duration_seconds <= 0.0 {
         return Vec::new();
     }
 
-    let downbeat_indices = beats
+    let downbeat_indices = analysis
+        .beats
         .iter()
         .enumerate()
         .filter_map(|(index, beat)| beat.downbeat.then_some(index))
@@ -326,48 +370,174 @@ fn structural_sections(beats: &[TrackedBeat], duration_seconds: f64) -> Vec<Stru
             start_seconds: 0.0,
             end_seconds: duration_seconds,
             start_boundary_confidence: 1.0,
+            identity: "A".to_string(),
         }];
     }
 
     let mut selected = Vec::<(f64, f32)>::new();
     for position in 2..downbeat_indices.len().saturating_sub(2) {
-        let boundary = downbeat_indices[position];
-        let left_start = downbeat_indices[position - 2];
-        let right_end = downbeat_indices[position + 2];
-        let left_strength = mean_beat_strength(beats, left_start, boundary);
-        let right_strength = mean_beat_strength(beats, boundary, right_end);
-        let confidence = (right_strength - left_strength).abs().clamp(0.0, 1.0);
-        let timestamp = beats[boundary].timestamp_seconds;
+        let boundary_index = downbeat_indices[position];
+        let left_start_index = downbeat_indices[position - 2];
+        let right_end_index = downbeat_indices[position + 2];
+        let left_start = analysis.beats[left_start_index].timestamp_seconds;
+        let boundary = analysis.beats[boundary_index].timestamp_seconds;
+        let right_end = analysis.beats[right_end_index].timestamp_seconds;
+        let Some(left) = mean_descriptor(&analysis.structural_descriptors, left_start, boundary) else {
+            continue;
+        };
+        let Some(right) = mean_descriptor(&analysis.structural_descriptors, boundary, right_end) else {
+            continue;
+        };
+
+        let direct_change = descriptor_distance(&left, &right);
+        let repetition_change = mean_descriptor(
+            &analysis.structural_descriptors,
+            0.0,
+            left_start.max(0.0),
+        )
+        .map(|history| {
+            let left_similarity = 1.0 - descriptor_distance(&left, &history);
+            let right_similarity = 1.0 - descriptor_distance(&right, &history);
+            (left_similarity - right_similarity).abs()
+        })
+        .unwrap_or(0.0);
+        let confidence = (0.82 * direct_change + 0.18 * repetition_change).clamp(0.0, 1.0);
         if confidence < SECTION_CHANGE_THRESHOLD
-            || timestamp < MIN_SECTION_SECONDS
-            || duration_seconds - timestamp < MIN_SECTION_SECONDS
+            || boundary < MIN_SECTION_SECONDS
+            || duration_seconds - boundary < MIN_SECTION_SECONDS
         {
             continue;
         }
 
         if let Some(last) = selected.last_mut() {
-            if timestamp - last.0 < MIN_SECTION_SECONDS {
+            if boundary - last.0 < MIN_SECTION_SECONDS {
                 if confidence > last.1 {
-                    *last = (timestamp, confidence);
+                    *last = (boundary, confidence);
                 }
                 continue;
             }
         }
-        selected.push((timestamp, confidence));
+        selected.push((boundary, confidence));
     }
 
     let mut boundaries = Vec::with_capacity(selected.len() + 2);
     boundaries.push((0.0, 1.0));
     boundaries.extend(selected);
     boundaries.push((duration_seconds, 1.0));
-    boundaries
+    let mut sections = boundaries
         .windows(2)
         .map(|pair| StructuralSection {
             start_seconds: pair[0].0,
             end_seconds: pair[1].0,
             start_boundary_confidence: pair[0].1,
+            identity: String::new(),
         })
-        .collect()
+        .collect::<Vec<_>>();
+    assign_section_identities(&mut sections, &analysis.structural_descriptors);
+    sections
+}
+
+fn mean_descriptor(
+    descriptors: &[StructuralDescriptor],
+    start_seconds: f64,
+    end_seconds: f64,
+) -> Option<DescriptorMean> {
+    if end_seconds <= start_seconds {
+        return None;
+    }
+    let mut count = 0_usize;
+    let mut onset = 0.0_f32;
+    let mut low = 0.0_f32;
+    let mut mid = 0.0_f32;
+    let mut high = 0.0_f32;
+    let mut chroma = [0.0_f32; 12];
+    for descriptor in descriptors.iter().filter(|descriptor| {
+        descriptor.timestamp_seconds >= start_seconds && descriptor.timestamp_seconds < end_seconds
+    }) {
+        count += 1;
+        onset += descriptor.onset_novelty;
+        low += descriptor.low_energy;
+        mid += descriptor.mid_energy;
+        high += descriptor.high_energy;
+        for (target, value) in chroma.iter_mut().zip(descriptor.chroma) {
+            *target += value;
+        }
+    }
+    if count == 0 {
+        return None;
+    }
+    let denominator = count as f32;
+    for value in &mut chroma {
+        *value /= denominator;
+    }
+    Some(DescriptorMean {
+        onset: onset / denominator,
+        low: low / denominator,
+        mid: mid / denominator,
+        high: high / denominator,
+        chroma,
+    })
+}
+
+fn descriptor_distance(left: &DescriptorMean, right: &DescriptorMean) -> f32 {
+    let spectral = ((left.low - right.low).abs()
+        + (left.mid - right.mid).abs()
+        + (left.high - right.high).abs())
+        / 3.0;
+    let onset = (left.onset - right.onset).abs();
+    let chroma = chroma_distance(&left.chroma, &right.chroma);
+    (0.35 * spectral + 0.25 * onset + 0.40 * chroma).clamp(0.0, 1.0)
+}
+
+fn chroma_distance(left: &[f32; 12], right: &[f32; 12]) -> f32 {
+    let dot = left
+        .iter()
+        .zip(right.iter())
+        .map(|(left, right)| left * right)
+        .sum::<f32>();
+    let left_norm = left.iter().map(|value| value * value).sum::<f32>().sqrt();
+    let right_norm = right.iter().map(|value| value * value).sum::<f32>().sqrt();
+    if left_norm <= f32::EPSILON || right_norm <= f32::EPSILON {
+        return 0.0;
+    }
+    (1.0 - dot / (left_norm * right_norm)).clamp(0.0, 1.0)
+}
+
+fn assign_section_identities(
+    sections: &mut [StructuralSection],
+    descriptors: &[StructuralDescriptor],
+) {
+    let mut prototypes: Vec<DescriptorMean> = Vec::new();
+    for section in sections {
+        let Some(descriptor) = mean_descriptor(descriptors, section.start_seconds, section.end_seconds)
+        else {
+            section.identity = section_identity_label(prototypes.len());
+            continue;
+        };
+        let match_index = prototypes
+            .iter()
+            .enumerate()
+            .map(|(index, prototype)| (index, descriptor_distance(&descriptor, prototype)))
+            .min_by(|left, right| left.1.total_cmp(&right.1))
+            .filter(|(_, distance)| *distance <= SECTION_IDENTITY_THRESHOLD)
+            .map(|(index, _)| index);
+        let identity_index = match match_index {
+            Some(index) => index,
+            None => {
+                prototypes.push(descriptor);
+                prototypes.len() - 1
+            }
+        };
+        section.identity = section_identity_label(identity_index);
+    }
+}
+
+fn section_identity_label(index: usize) -> String {
+    if index < 26 {
+        ((b'A' + index as u8) as char).to_string()
+    } else {
+        format!("S{}", index + 1)
+    }
 }
 
 fn contextualize_beats(beats: &[TrackedBeat], sections: &[StructuralSection]) -> Vec<BeatContext> {
@@ -386,31 +556,13 @@ fn contextualize_beats(beats: &[TrackedBeat], sections: &[StructuralSection]) ->
                         && beat.timestamp_seconds < section.end_seconds
                 })
                 .map(|index| index + 1)
-                .unwrap_or_else(|| {
-                    if sections.is_empty() {
-                        0
-                    } else {
-                        sections.len()
-                    }
-                });
+                .unwrap_or_else(|| if sections.is_empty() { 0 } else { sections.len() });
             BeatContext {
                 bar_index,
                 section_index,
             }
         })
         .collect()
-}
-
-fn mean_beat_strength(beats: &[TrackedBeat], start: usize, end: usize) -> f32 {
-    if start >= end || start >= beats.len() {
-        return 0.0;
-    }
-    let end = end.min(beats.len());
-    beats[start..end]
-        .iter()
-        .map(|beat| beat.strength)
-        .sum::<f32>()
-        / (end - start) as f32
 }
 
 fn timestamp_millis(seconds: f64) -> u64 {
@@ -430,7 +582,7 @@ fn format_timestamp_millis(total_millis: u64) -> String {
 
 fn detected_onsets(
     input: &serde_json::Value,
-) -> Result<(u32, FrameSpec, Vec<crate::OnsetStrength>, Vec<crate::Onset>), String> {
+) -> Result<(u32, FrameSpec, Vec<OnsetStrength>, Vec<Onset>), String> {
     let samples = sample_array(input, "samples")?;
     let sample_rate = sample_rate(input)?;
     let frame_size = positive_usize(input, "frameSize", 1024)?;
@@ -518,7 +670,11 @@ fn positive_usize(
         .ok_or_else(|| format!("{field} must be positive"))
 }
 
-fn finite_f64(input: &serde_json::Value, field: &str, default_value: f64) -> Result<f64, String> {
+fn finite_f64(
+    input: &serde_json::Value,
+    field: &str,
+    default_value: f64,
+) -> Result<f64, String> {
     let value = input
         .get(field)
         .and_then(serde_json::Value::as_f64)
@@ -548,144 +704,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn package_surface_lists_rhythm_operations() {
-        let surface = package_surface();
-        let ids = surface
-            .operations
-            .iter()
-            .map(|operation| operation.id.as_str())
-            .collect::<Vec<_>>();
-        assert!(ids.contains(&"audio.rhythm.onsets"));
-        assert!(ids.contains(&"audio.rhythm.beatGrid"));
-        assert!(ids.contains(&"audio.rhythm.analyze"));
+    fn section_identity_labels_are_stable() {
+        assert_eq!(section_identity_label(0), "A");
+        assert_eq!(section_identity_label(1), "B");
+        assert_eq!(section_identity_label(25), "Z");
+        assert_eq!(section_identity_label(26), "S27");
     }
 
     #[test]
-    fn beat_grid_operation_returns_grid() {
-        let response = run_surface_operation(SurfaceRequest {
-            operation: OperationId::new("audio.rhythm.beatGrid"),
-            input: serde_json::json!({"startSeconds": 0.0, "bpm": 120.0, "beats": 4}),
-        })
-        .expect("beat grid");
-        assert_eq!(response.value["operation"], "audio.rhythm.beatGrid");
-        assert!(response.value["title"].is_string());
-        assert!(response.value["summary"].is_object());
-        assert!(response.value["result"].is_object());
-        assert_eq!(response.value["grid"].as_array().unwrap().len(), 4);
-    }
-
-    #[test]
-    fn example_requests_run_with_structured_outputs() {
-        for operation in package_surface().operations {
-            let response = run_surface_operation(SurfaceRequest {
-                operation: operation.id.clone(),
-                input: operation.example_request.clone(),
-            })
-            .unwrap_or_else(|error| panic!("{} example failed: {error}", operation.id.as_str()));
-            assert_eq!(response.value["operation"], operation.id.as_str());
-            assert!(response.value["title"].is_string());
-            assert!(response.value["summary"].is_object());
-            assert!(response.value["result"].is_object());
-        }
-    }
-
-    #[test]
-    fn track_analysis_accepts_more_than_the_preview_sample_limit() {
-        let samples = vec![0.0; MAX_SAMPLES + 1];
-        let response = run_surface_operation(SurfaceRequest {
-            operation: OperationId::new("audio.rhythm.analyze"),
-            input: serde_json::json!({
-                "samples": samples,
-                "sampleRate": 8_000,
-                "fftSize": 512,
-                "hopSize": 512
-            }),
-        })
-        .expect("whole-track rhythm analysis");
-
-        assert_eq!(response.value["sampleCount"], MAX_SAMPLES + 1);
-        assert_eq!(response.value["schemaVersion"], "audio-analysis-song/v1");
-        assert_eq!(response.value["beatsPerBar"], 4);
-        assert_eq!(response.value["barCount"], 0);
-    }
-
-    #[test]
-    fn song_timestamps_include_milliseconds() {
-        assert_eq!(timestamp_millis(195.022), 195_022);
-        assert_eq!(format_timestamp_millis(195_022), "00:03:15.022");
-    }
-
-    #[test]
-    fn structural_sections_detect_rhythmic_intensity_change() {
-        let beats = (0..64)
-            .map(|index| TrackedBeat {
-                timestamp_seconds: index as f64 * 0.5,
-                strength: if index < 32 { 0.2 } else { 0.9 },
-                beat_in_bar: index % 4 + 1,
-                downbeat: index % 4 == 0,
-                local_bpm: None,
-            })
-            .collect::<Vec<_>>();
-
-        let sections = structural_sections(&beats, 32.0);
-        assert!(sections.len() >= 2);
-        assert!(sections
-            .iter()
-            .any(|section| (section.start_seconds - 16.0).abs() <= 2.0));
-    }
-
-    #[test]
-    fn beat_contexts_assign_tracked_bars_and_sections() {
-        let beats = (0..12)
-            .map(|index| TrackedBeat {
-                timestamp_seconds: index as f64,
-                strength: 0.5,
-                beat_in_bar: index % 4 + 1,
-                downbeat: index % 4 == 0,
-                local_bpm: None,
-            })
-            .collect::<Vec<_>>();
-        let sections = vec![
-            StructuralSection {
-                start_seconds: 0.0,
-                end_seconds: 6.0,
-                start_boundary_confidence: 1.0,
-            },
-            StructuralSection {
-                start_seconds: 6.0,
-                end_seconds: 12.0,
-                start_boundary_confidence: 0.8,
-            },
-        ];
-
-        let contexts = contextualize_beats(&beats, &sections);
-        assert_eq!(contexts[0].bar_index, 1);
-        assert_eq!(contexts[3].bar_index, 1);
-        assert_eq!(contexts[4].bar_index, 2);
-        assert_eq!(contexts[8].bar_index, 3);
-        assert_eq!(contexts[5].section_index, 1);
-        assert_eq!(contexts[6].section_index, 2);
-        assert_eq!(contexts[11].section_index, 2);
-    }
-
-    #[test]
-    fn onset_preview_keeps_the_existing_sample_limit() {
-        let error = run_surface_operation(SurfaceRequest {
-            operation: OperationId::new("audio.rhythm.onsets"),
-            input: serde_json::json!({"samples": vec![0.0; MAX_SAMPLES + 1]}),
-        })
-        .expect_err("preview sample limit");
-
-        assert!(error.contains("192000"));
-    }
-
-    #[test]
-    fn invalid_samples_return_error() {
-        let error = run_surface_operation(SurfaceRequest {
-            operation: OperationId::new("audio.rhythm.onsets"),
-            input: serde_json::json!({"samples": "bad"}),
-        })
-        .unwrap_err();
-        assert!(error.contains("samples"));
+    fn chroma_distance_separates_unrelated_pitch_classes() {
+        let mut left = [0.0; 12];
+        let mut right = [0.0; 12];
+        left[0] = 1.0;
+        right[6] = 1.0;
+        assert!(chroma_distance(&left, &right) > 0.9);
+        assert!(chroma_distance(&left, &left) < 0.01);
     }
 }

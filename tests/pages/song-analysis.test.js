@@ -15,6 +15,10 @@ const pitchWasmBindingUrl = new URL(
   "../../crates/bindings/audio-analysis-pitch-wasm/src/lib.rs",
   import.meta.url,
 );
+const pitchKeyTimelineUrl = new URL(
+  "../../crates/audio/audio-analysis-pitch/src/key/timeline.rs",
+  import.meta.url,
+);
 const html = readFileSync(htmlUrl, "utf8");
 const source = readFileSync(sourceUrl, "utf8");
 const index = readFileSync(indexUrl, "utf8");
@@ -22,6 +26,7 @@ const capabilities = JSON.parse(readFileSync(capabilitiesUrl, "utf8"));
 const buildPages = readFileSync(buildPagesUrl, "utf8");
 const rhythmWasmBinding = readFileSync(rhythmWasmBindingUrl, "utf8");
 const pitchWasmBinding = readFileSync(pitchWasmBindingUrl, "utf8");
+const pitchKeyTimeline = readFileSync(pitchKeyTimelineUrl, "utf8");
 
 describe("whole-song analysis page", () => {
   test("is discoverable from the Audio Inspector", () => {
@@ -44,7 +49,11 @@ describe("whole-song analysis page", () => {
     expect(rhythmWasmBinding).toContain('OperationId::new("audio.rhythm.analyze")');
     expect(pitchWasmBinding).toContain("#[wasm_bindgen(js_name = analyzeTrackKey)]");
     expect(pitchWasmBinding).toContain("samples: &[f32]");
-    expect(pitchWasmBinding).toContain("estimate_musical_key(samples, sample_rate, config)");
+    expect(pitchWasmBinding).toContain(
+      "analyze_key_track(samples, sample_rate, harmonic_config, timeline_config)",
+    );
+    expect(pitchWasmBinding).not.toContain("fn key_timeline(");
+    expect(pitchKeyTimeline).toContain("pub fn analyze_key_track(");
     expect(buildPages).toContain("export async function analyzeTrack(samples, sampleRate, options = {})");
     expect(buildPages).toContain("export async function analyzeTrackKey(samples, sampleRate, options = {})");
   });
@@ -55,7 +64,8 @@ describe("whole-song analysis page", () => {
     expect(source).toContain("keyValue.timeline");
     expect(source).toContain("keyWindowAtTime(time)");
     expect(pitchWasmBinding).toContain('"timelineMinConfidence"');
-    expect(pitchWasmBinding).toContain('"key": estimate.map(key_json)');
+    expect(pitchKeyTimeline).toContain(".filter(|estimate| estimate.confidence >= timeline_config.min_confidence)");
+    expect(pitchKeyTimeline).toContain("Uncertain windows are retained with `key: null`");
     expect(capabilities.coverage.wholeSongKey).toContain("complete bounded Float32 PCM track");
     expect(capabilities.outputs.songKeySchema).toBe("audio-analysis-key-track/v1");
   });

@@ -4,7 +4,6 @@
 //! module also exposes a reusable confidence-bearing timeline contract. Transport
 //! adapters should delegate key semantics here rather than reimplementing them.
 
-#[path = "key_impl.rs"]
 mod implementation;
 mod timeline;
 

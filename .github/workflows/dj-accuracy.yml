@@ -47,6 +47,8 @@ jobs:
           "librosa==0.11.0"
           "essentia==2.1b6.dev1389"
       - name: Measure real-music DJ accuracy evidence
+        env:
+          RUSTUP_TOOLCHAIN: 1.95.0
         run: >-
           python scripts/evaluate-dj-goldens.py
           --require-essentia

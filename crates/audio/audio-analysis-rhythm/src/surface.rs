@@ -623,6 +623,7 @@ mod tests {
                 strength: if index < 32 { 0.2 } else { 0.9 },
                 beat_in_bar: index % 4 + 1,
                 downbeat: index % 4 == 0,
+                local_bpm: None,
             })
             .collect::<Vec<_>>();
 
@@ -641,6 +642,7 @@ mod tests {
                 strength: 0.5,
                 beat_in_bar: index % 4 + 1,
                 downbeat: index % 4 == 0,
+                local_bpm: None,
             })
             .collect::<Vec<_>>();
         let sections = vec![

@@ -1,3 +1,5 @@
+import { buildFrequencyOverview, drawFrequencyOverview } from "./frequency-overview.js";
+
 const MAX_TRACK_SECONDS = 15 * 60;
 const RHYTHM_RATE = 16_000;
 const RHYTHM_FFT_SIZE = 1024;
@@ -6,12 +8,14 @@ const KEY_FFT_SIZE = 4096;
 const KEY_HOP_SIZE = 2048;
 const KEY_TIMELINE_WINDOW_SECONDS = 24;
 const KEY_TIMELINE_HOP_SECONDS = 8;
+const OVERVIEW_BIN_COUNT = 1800;
 const BEAT_PREVIEW_COUNT = 12;
 const KEY_PREVIEW_COUNT = 6;
 
 const state = {
   analysis: null,
   audioBuffer: null,
+  frequencyOverview: null,
   currentObjectUrl: null,
   generation: 0,
   analyzing: false,
@@ -145,6 +149,7 @@ async function analyzeSongFile(file) {
       `Mixing channels and resampling the complete ${formatDuration(audioBuffer.duration)} track to ${Math.round(analysisRate / 1000)} kHz.`,
     );
     const samples = mixAndResample(audioBuffer, analysisRate);
+    state.frequencyOverview = buildFrequencyOverview(samples, analysisRate, OVERVIEW_BIN_COUNT);
     if (!isCurrent(generation)) return;
 
     setStatus(
@@ -200,6 +205,13 @@ async function analyzeSongFile(file) {
         privacy: "browser-local",
         analysisSampleRate: analysisRate,
         pcmTransport: "float32array",
+        overview: {
+          schemaVersion: state.frequencyOverview?.schemaVersion ?? "audio-analysis-frequency-overview/v1",
+          binCount: state.frequencyOverview?.bins?.length ?? 0,
+          lowCutoffHz: state.frequencyOverview?.lowCutoffHz ?? null,
+          midCutoffHz: state.frequencyOverview?.midCutoffHz ?? null,
+          authority: "presentation-only",
+        },
       },
       ...rhythm,
       keySchemaVersion: keyValue.schemaVersion ?? "audio-analysis-key-track/v1",
@@ -393,9 +405,10 @@ function drawSongTimeline() {
   context.fillRect(0, 0, width, height);
 
   drawSectionBands(context, width, height, duration, state.analysis.sections);
-  drawTimelineWaveform(context, width, height, state.audioBuffer);
+  drawFrequencyOverview(context, width, height, state.frequencyOverview);
   drawBeatMarkers(context, width, height, duration, state.analysis.beats);
   drawSectionBoundaries(context, width, height, duration, state.analysis.sections);
+  drawTimelineMetadata(context, width, state.analysis);
   drawTimelineCursor(
     context,
     width,
@@ -407,6 +420,27 @@ function drawSongTimeline() {
   if (state.timelineHoverTime !== null) {
     drawTimelineCursor(context, width, height, duration, state.timelineHoverTime, "rgba(251,191,36,0.95)");
   }
+}
+
+function drawTimelineMetadata(context, width, analysis) {
+  const bpm = finiteNumber(analysis?.bpm);
+  const confidence = finiteNumber(analysis?.confidence);
+  const key = typeof analysis?.key?.label === "string" ? analysis.key.label : null;
+  const keyConfidence = finiteNumber(analysis?.key?.confidence);
+  const parts = [];
+  if (bpm !== null) {
+    parts.push(`${bpm.toFixed(1)} BPM${confidence === null ? "" : ` · ${formatPercent(confidence * 100)}`}`);
+  }
+  if (key) {
+    parts.push(`${key}${keyConfidence === null ? "" : ` · ${formatPercent(keyConfidence * 100)}`}`);
+  }
+  if (!parts.length) return;
+  context.save();
+  context.font = "600 11px system-ui";
+  context.textAlign = "right";
+  context.fillStyle = "rgba(255,255,255,0.78)";
+  context.fillText(parts.join("   "), width - 8, 17);
+  context.restore();
 }
 
 function drawSectionBands(context, width, height, duration, sections) {
@@ -422,38 +456,12 @@ function drawSectionBands(context, width, height, duration, sections) {
     if (right - x >= 72) {
       context.fillStyle = "rgba(255,255,255,0.55)";
       context.font = "11px system-ui";
-      const label = section.identity ? `${section.identity} · ${section.label ?? `section-${index + 1}`}` : String(section.label ?? `section-${index + 1}`);
+      const label = section.identity
+        ? `${section.identity} · ${section.label ?? `section-${index + 1}`}`
+        : String(section.label ?? `section-${index + 1}`);
       context.fillText(label, x + 7, 17);
     }
   });
-}
-
-function drawTimelineWaveform(context, width, height, buffer) {
-  const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index));
-  const framesPerPixel = Math.max(1, Math.floor(buffer.length / width));
-  const mid = height * 0.58;
-  const amplitude = height * 0.25;
-  context.strokeStyle = "rgba(143,160,168,0.72)";
-  context.lineWidth = 1;
-  context.beginPath();
-
-  for (let x = 0; x < width; x += 1) {
-    const start = Math.min(buffer.length - 1, x * framesPerPixel);
-    const end = Math.min(buffer.length, start + framesPerPixel);
-    const sampleStride = Math.max(1, Math.floor((end - start) / 48));
-    let min = 1;
-    let max = -1;
-    for (let frame = start; frame < end; frame += sampleStride) {
-      let sample = 0;
-      for (const channel of channels) sample += channel[frame] ?? 0;
-      sample /= channels.length;
-      min = Math.min(min, sample);
-      max = Math.max(max, sample);
-    }
-    context.moveTo(x + 0.5, mid - max * amplitude);
-    context.lineTo(x + 0.5, mid - min * amplitude);
-  }
-  context.stroke();
 }
 
 function drawBeatMarkers(context, width, height, duration, beats) {
@@ -463,7 +471,7 @@ function drawBeatMarkers(context, width, height, duration, beats) {
     if (timestamp === null || timestamp < 0 || timestamp > duration) continue;
     const x = (timestamp / duration) * width + 0.5;
     const downbeat = beat?.downbeat === true;
-    context.strokeStyle = downbeat ? "rgba(251,191,36,0.88)" : "rgba(45,212,191,0.48)";
+    context.strokeStyle = downbeat ? "rgba(251,191,36,0.88)" : "rgba(255,255,255,0.22)";
     context.lineWidth = downbeat ? 1.4 : 1;
     context.beginPath();
     context.moveTo(x, downbeat ? height * 0.22 : height * 0.48);
@@ -715,6 +723,7 @@ function resetSongAnalysis() {
   state.generation += 1;
   state.analysis = null;
   state.audioBuffer = null;
+  state.frequencyOverview = null;
   state.timelineHoverTime = null;
   setAnalyzing(false);
   setStatus(false);

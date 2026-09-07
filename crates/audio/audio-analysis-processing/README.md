@@ -1,8 +1,8 @@
 # audio-analysis-processing
 
 Realtime-safe audio transforms, named effect presets, deterministic whole-clip
-offline edits, and loudness-oriented metrics for
-`moritzbrantner-video-analysis`.
+offline edits, loudness-oriented metrics, and reusable playback/mixing planning
+helpers for audio applications.
 
 ## Feature flags
 
@@ -54,6 +54,11 @@ let _ = realtime;
   and stereo width.
 - `OfflineAudioProcessor` handles duration/order-changing operations on
   `AudioClip`: trim, reverse, fade, normalize, resample, speed, and pitch shift.
+- `operations::playback` owns policy-neutral equal-power crossfader math,
+  tempo/rate conversion, effective-BPM and tempo-only sync planning,
+  beat-grid-aligned loop selection, and waveform extrema summaries. Consumers
+  such as `dj-party` keep their own tempo limits, loop-size choices, point-count
+  caps, player state, and browser/native I/O.
 - `analyze_loudness` returns peak dBFS, RMS dBFS, crest factor, an approximate
   LUFS-style value, and the shared `AudioFeatureSeries` frame data used to
   derive the report. The LUFS value is a lightweight RMS-gated approximation,
@@ -61,6 +66,11 @@ let _ = realtime;
 - Pure Rust pitch/time operations are deterministic baseline implementations;
   FFmpeg-backed file output should be preferred when production pitch/time
   quality is required.
+
+The playback helpers were independently implemented from general DSP and DJ
+workflow behavior. They may be informed by established tools such as Mixxx,
+but no Mixxx source code is copied or translated into this MIT OR Apache-2.0
+repository.
 
 ## Package surface
 
@@ -100,5 +110,4 @@ external-tool execution.
 ## Related crates
 
 - `audio-analysis-core`
-- `audio-analysis-io`
 - `audio-analysis-io`

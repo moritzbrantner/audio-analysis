@@ -26,15 +26,18 @@
   ],
   "coverage": {
     "fileStatistics": "whole decoded file when practical; deterministic stride sampling for very large inputs",
-    "spectralPitchKey": "bounded representative center windows: a short preview for spectrum and monophonic pitch, plus a longer 20 s window resampled to 16 kHz for musical key",
+    "spectralPitchKey": "fast inspector uses bounded representative center windows: a short preview for spectrum and monophonic pitch, plus a longer 20 s window resampled to 16 kHz for musical key",
     "rhythm": "fast inspector uses a bounded representative center window resampled to 16 kHz with anti-alias averaging and a 1024/128 STFT",
-    "wholeSongRhythm": "explicit song-analysis page analyzes the complete decoded track up to 15 minutes, mixed to mono and resampled to at most 16 kHz before the same Rust/WASM rhythm operation runs"
+    "wholeSongRhythm": "explicit song-analysis page analyzes the complete decoded track up to 15 minutes, mixed to mono and resampled to at most 16 kHz before the Rust/WASM rhythm operation runs",
+    "wholeSongKey": "explicit song-analysis page sends the complete bounded Float32 PCM track through the Rust musical-key analyzer and also evaluates overlapping confidence-bearing local key windows",
+    "wholeSongStructure": "Rust rhythm analysis aligns structural candidates to inferred downbeats and combines multiband spectral energy, onset novelty, harmonic chroma, and earlier-material recurrence into confidence-bearing A/B/A-style identities"
   },
   "outputs": {
     "inspectorReportSchema": "audio-analysis-inspector/v1",
     "songAnalysisSchema": "audio-analysis-song/v1",
+    "songKeySchema": "audio-analysis-key-track/v1",
     "songAnalysisDownload": "<source-stem>.song-analysis.json",
-    "songAnalysisEvents": ["beats", "downbeatEvents", "sections"]
+    "songAnalysisEvents": ["beats", "downbeatEvents", "sections", "keyTimeline"]
   },
   "backend": {
     "defaultLocalBaseUrl": "http://127.0.0.1:3000",

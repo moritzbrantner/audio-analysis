@@ -99,6 +99,19 @@ export async function runOperation(request) {
 }
 EOF
 
+  if [[ "$package" == "audio-analysis-pitch" ]]; then
+    cat >> "$target_root/index.js" <<'EOF'
+
+export async function analyzeTrackKey(samples, sampleRate, options = {}) {
+  const module = await init();
+  if (typeof module.analyzeTrackKey !== "function") {
+    throw new Error("audio-analysis-pitch typed track key entry point is unavailable");
+  }
+  return toPlainValue(await module.analyzeTrackKey(samples, sampleRate, options));
+}
+EOF
+  fi
+
   if [[ "$package" == "audio-analysis-rhythm" ]]; then
     cat >> "$target_root/index.js" <<'EOF'
 

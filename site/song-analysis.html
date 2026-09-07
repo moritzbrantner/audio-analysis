@@ -96,7 +96,7 @@
           <div class="section-heading">
             <div>
               <div class="eyebrow">listen and inspect</div>
-              <h2 id="song-timeline-title">Annotated musical timeline</h2>
+              <h2 id="song-timeline-title">DJ overview and musical timeline</h2>
             </div>
           </div>
           <audio id="song-audio-player" controls preload="metadata"></audio>
@@ -105,7 +105,7 @@
             class="visualization interactive-visualization"
             tabindex="0"
             role="slider"
-            aria-label="Song musical timeline seek control"
+            aria-label="Frequency-colored song overview and musical timeline seek control"
             aria-valuemin="0"
             aria-valuemax="0"
             aria-valuenow="0"
@@ -115,10 +115,12 @@
             Click the timeline or use arrow keys to inspect detected beats.
           </div>
           <p id="song-timeline-note" class="figure-note">
-            Thin markers are detected beats, taller markers are inferred downbeats, and section boundaries come from
-            the Rust analysis. The readout also shows the nearest confidence-bearing key window. Click to seek;
-            Left/Right moves between beats, Shift+Left/Right moves between section boundaries, and Home/End jumps to
-            the track edges.
+            The overview uses warmer tones for low-frequency energy, green/cyan for mids, and blue/violet for highs;
+            brightness follows local energy. Thin markers are detected beats, taller markers are inferred downbeats,
+            and dashed boundaries are Rust-detected sections. BPM, dominant key, and their confidence are shown in the
+            overview header. The colorized waveform is presentation-only: rhythm, key, and structure remain Rust-owned.
+            Click to seek; Left/Right moves between beats, Shift+Left/Right moves between section boundaries, and
+            Home/End jumps to the track edges.
           </p>
         </section>
 

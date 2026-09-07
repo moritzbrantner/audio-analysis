@@ -1,10 +1,10 @@
 //! Whole-track rhythm analysis aimed at music and DJ preparation.
 //!
-//! The legacy onset/tempo helpers in the crate remain intentionally small and
-//! deterministic. This module is the higher-quality path: it derives a true
-//! spectral-flux novelty curve, estimates multiple tempo hypotheses from its
-//! autocorrelation, tracks a globally consistent beat sequence with dynamic
-//! programming, and infers a 4/4 downbeat phase from beat accents.
+//! This path keeps multiple tempo hypotheses visible, but no longer treats the
+//! strongest autocorrelation lag as sufficient evidence by itself. Each tempo
+//! candidate is rescored from the beat path it can actually support. The beat
+//! tracker is intentionally elastic so recorded/live material can produce a
+//! variable beat map instead of being snapped to one synthetic constant grid.
 
 use audio_analysis_fourier::{spectrogram, StftConfig};
 use audio_contracts::{DetectError, Result};
@@ -79,8 +79,23 @@ impl TrackRhythmConfig {
 pub struct TempoCandidate {
     /// Tempo in beats per minute.
     pub bpm: f32,
-    /// Normalized autocorrelation support in the range 0..=1.
+    /// Final score after autocorrelation and beat-path support are combined.
     pub score: f32,
+    /// Normalized onset-envelope autocorrelation support.
+    pub autocorrelation_score: f32,
+    /// Support from the candidate's actual dynamic-programming beat path.
+    pub beat_support: f32,
+}
+
+/// One point in the variable-tempo beat map.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TempoPoint {
+    /// Beat timestamp in seconds.
+    pub timestamp_seconds: f64,
+    /// Locally smoothed tempo at this beat.
+    pub bpm: f32,
+    /// Confidence from local onset strength and interval smoothness.
+    pub confidence: f32,
 }
 
 /// One tracked beat.
@@ -94,6 +109,25 @@ pub struct TrackedBeat {
     pub beat_in_bar: usize,
     /// Whether this beat is the inferred downbeat.
     pub downbeat: bool,
+    /// Locally smoothed tempo at this beat when enough neighbours exist.
+    pub local_bpm: Option<f32>,
+}
+
+/// Per-frame musical descriptors retained for structural analysis.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructuralDescriptor {
+    /// Frame-center timestamp in seconds.
+    pub timestamp_seconds: f64,
+    /// Normalized onset novelty.
+    pub onset_novelty: f32,
+    /// Normalized low-band energy.
+    pub low_energy: f32,
+    /// Normalized mid-band energy.
+    pub mid_energy: f32,
+    /// Normalized high-band energy.
+    pub high_energy: f32,
+    /// Lightweight normalized spectral pitch-class energy, C through B.
+    pub chroma: [f32; 12],
 }
 
 /// Whole-track rhythm result.
@@ -105,7 +139,7 @@ pub struct TrackRhythmAnalysis {
     pub confidence: f32,
     /// Ranked alternative tempo hypotheses.
     pub tempo_candidates: Vec<TempoCandidate>,
-    /// Globally tracked beats.
+    /// Globally tracked, individually timestamped beats.
     pub beats: Vec<TrackedBeat>,
     /// Convenience list of inferred downbeat times.
     pub downbeats: Vec<f64>,
@@ -113,6 +147,10 @@ pub struct TrackRhythmAnalysis {
     pub downbeat_confidence: f32,
     /// Analysis hop duration in seconds.
     pub hop_seconds: f64,
+    /// Local tempo attached to the real beat positions rather than a synthetic grid.
+    pub tempo_map: Vec<TempoPoint>,
+    /// Multi-band, onset, and harmonic descriptors for structural analysis.
+    pub structural_descriptors: Vec<StructuralDescriptor>,
 }
 
 #[derive(Debug, Clone)]
@@ -120,13 +158,15 @@ struct OnsetFeatures {
     novelty: Vec<f32>,
     low_energy: Vec<f32>,
     timestamps: Vec<f64>,
+    structural_descriptors: Vec<StructuralDescriptor>,
 }
 
 /// Analyzes a mono, normalized music track for tempo, beats, and downbeats.
 ///
-/// The returned tempo candidates deliberately remain visible because half/double
-/// tempo ambiguity is intrinsic to musical audio and is useful information for
-/// DJ applications.
+/// The returned candidates deliberately remain visible because half/double
+/// tempo ambiguity is intrinsic to musical audio. The selected candidate is
+/// the one with the strongest combination of autocorrelation and real beat-path
+/// evidence, rather than simply the strongest autocorrelation lag.
 pub fn analyze_rhythm_track(
     samples: &[f32],
     sample_rate: u32,
@@ -155,35 +195,27 @@ pub fn analyze_rhythm_track(
     if features.novelty.is_empty()
         || features.novelty.iter().copied().fold(0.0_f32, f32::max) <= f32::EPSILON
     {
-        return Ok(TrackRhythmAnalysis {
-            bpm: None,
-            confidence: 0.0,
-            tempo_candidates: Vec::new(),
-            beats: Vec::new(),
-            downbeats: Vec::new(),
-            downbeat_confidence: 0.0,
-            hop_seconds,
-        });
+        return Ok(empty_analysis(hop_seconds, features.structural_descriptors));
     }
 
     let frame_rate = sample_rate as f32 / config.hop_size as f32;
+    let raw_count = config.tempo_candidate_count.saturating_mul(3).min(24);
     let candidates = estimate_tempo_candidates(
         &features.novelty,
         frame_rate,
         config.min_bpm,
         config.max_bpm,
+        raw_count,
+    );
+    let candidates = rescore_tempo_candidates(
+        candidates,
+        &features.novelty,
+        frame_rate,
+        config.beat_tightness,
         config.tempo_candidate_count,
     );
     let Some(selected) = candidates.first().copied() else {
-        return Ok(TrackRhythmAnalysis {
-            bpm: None,
-            confidence: 0.0,
-            tempo_candidates: Vec::new(),
-            beats: Vec::new(),
-            downbeats: Vec::new(),
-            downbeat_confidence: 0.0,
-            hop_seconds,
-        });
+        return Ok(empty_analysis(hop_seconds, features.structural_descriptors));
     };
 
     let beat_frames = track_beat_frames(
@@ -192,6 +224,7 @@ pub fn analyze_rhythm_track(
         selected.bpm,
         config.beat_tightness,
     );
+    let tempo_map = build_tempo_map(&beat_frames, &features.timestamps, &features.novelty);
     let (phase, downbeat_confidence) = infer_downbeat_phase(
         &beat_frames,
         &features.novelty,
@@ -209,6 +242,7 @@ pub fn analyze_rhythm_track(
                 strength: features.novelty[*frame],
                 beat_in_bar,
                 downbeat: beat_in_bar == 1,
+                local_bpm: tempo_map.get(index).map(|point| point.bpm),
             }
         })
         .collect::<Vec<_>>();
@@ -219,22 +253,14 @@ pub fn analyze_rhythm_track(
         .collect::<Vec<_>>();
 
     let runner_up = candidates.get(1).map_or(0.0, |candidate| candidate.score);
-    let tempo_margin = if selected.score > f32::EPSILON {
+    let candidate_margin = if selected.score > f32::EPSILON {
         ((selected.score - runner_up).max(0.0) / selected.score).clamp(0.0, 1.0)
     } else {
         0.0
     };
-    let beat_support = if beat_frames.is_empty() {
-        0.0
-    } else {
-        beat_frames
-            .iter()
-            .map(|frame| features.novelty[*frame])
-            .sum::<f32>()
-            / beat_frames.len() as f32
-    };
     let confidence =
-        (0.55 * selected.score + 0.25 * tempo_margin + 0.20 * beat_support).clamp(0.0, 1.0);
+        (0.60 * selected.score + 0.25 * candidate_margin + 0.15 * downbeat_confidence)
+            .clamp(0.0, 1.0);
 
     Ok(TrackRhythmAnalysis {
         bpm: Some(selected.bpm),
@@ -244,7 +270,26 @@ pub fn analyze_rhythm_track(
         downbeats,
         downbeat_confidence,
         hop_seconds,
+        tempo_map,
+        structural_descriptors: features.structural_descriptors,
     })
+}
+
+fn empty_analysis(
+    hop_seconds: f64,
+    structural_descriptors: Vec<StructuralDescriptor>,
+) -> TrackRhythmAnalysis {
+    TrackRhythmAnalysis {
+        bpm: None,
+        confidence: 0.0,
+        tempo_candidates: Vec::new(),
+        beats: Vec::new(),
+        downbeats: Vec::new(),
+        downbeat_confidence: 0.0,
+        hop_seconds,
+        tempo_map: Vec::new(),
+        structural_descriptors,
+    }
 }
 
 fn spectral_onset_features(
@@ -259,23 +304,42 @@ fn spectral_onset_features(
             novelty: Vec::new(),
             low_energy: Vec::new(),
             timestamps: Vec::new(),
+            structural_descriptors: Vec::new(),
         });
     }
 
     let mut novelty = Vec::with_capacity(frames.len());
     let mut low_energy = Vec::with_capacity(frames.len());
+    let mut mid_energy = Vec::with_capacity(frames.len());
+    let mut high_energy = Vec::with_capacity(frames.len());
+    let mut chroma = Vec::with_capacity(frames.len());
     let mut timestamps = Vec::with_capacity(frames.len());
     novelty.push(0.0);
 
     for frame in &frames {
-        let low = frame
-            .spectrum
-            .bins
-            .iter()
-            .filter(|bin| (30.0..=220.0).contains(&bin.frequency_hz))
-            .map(|bin| bin.power)
-            .sum::<f32>();
+        let mut low = 0.0_f32;
+        let mut mid = 0.0_f32;
+        let mut high = 0.0_f32;
+        let mut frame_chroma = [0.0_f32; 12];
+        for bin in &frame.spectrum.bins {
+            if (30.0..=220.0).contains(&bin.frequency_hz) {
+                low += bin.power;
+            } else if (220.0..=2_500.0).contains(&bin.frequency_hz) {
+                mid += bin.power;
+            } else if (2_500.0..=8_000.0).contains(&bin.frequency_hz) {
+                high += bin.power;
+            }
+            if (55.0..=3_500.0).contains(&bin.frequency_hz) && bin.magnitude > 0.0 {
+                let midi = 69.0 + 12.0 * (bin.frequency_hz / 440.0).log2();
+                let class = (midi.round() as i32).rem_euclid(12) as usize;
+                frame_chroma[class] += bin.magnitude.sqrt();
+            }
+        }
+        normalize_chroma(&mut frame_chroma);
         low_energy.push(low.sqrt());
+        mid_energy.push(mid.sqrt());
+        high_energy.push(high.sqrt());
+        chroma.push(frame_chroma);
         timestamps.push(frame.start_seconds + config.fft_size as f64 / (2.0 * sample_rate as f64));
     }
 
@@ -306,12 +370,37 @@ fn spectral_onset_features(
     adaptive_whiten(&mut novelty, 16);
     normalize_nonnegative(&mut novelty);
     normalize_nonnegative(&mut low_energy);
+    normalize_nonnegative(&mut mid_energy);
+    normalize_nonnegative(&mut high_energy);
+
+    let structural_descriptors = timestamps
+        .iter()
+        .enumerate()
+        .map(|(index, timestamp)| StructuralDescriptor {
+            timestamp_seconds: *timestamp,
+            onset_novelty: novelty[index],
+            low_energy: low_energy[index],
+            mid_energy: mid_energy[index],
+            high_energy: high_energy[index],
+            chroma: chroma[index],
+        })
+        .collect();
 
     Ok(OnsetFeatures {
         novelty,
         low_energy,
         timestamps,
+        structural_descriptors,
     })
+}
+
+fn normalize_chroma(chroma: &mut [f32; 12]) {
+    let sum = chroma.iter().sum::<f32>();
+    if sum > f32::EPSILON {
+        for value in chroma {
+            *value = (*value / sum).max(0.0);
+        }
+    }
 }
 
 fn adaptive_whiten(values: &mut [f32], radius: usize) {
@@ -357,7 +446,7 @@ fn estimate_tempo_candidates(
         return Vec::new();
     }
 
-    let mut all = (min_lag..=max_lag)
+    let scored = (min_lag..=max_lag)
         .map(|lag| {
             let support = novelty
                 .iter()
@@ -365,20 +454,33 @@ fn estimate_tempo_candidates(
                 .zip(novelty.iter())
                 .map(|(right, left)| right * left)
                 .sum::<f32>();
-            TempoCandidate {
-                bpm: 60.0 * frame_rate / lag as f32,
-                score: (support / total_energy).clamp(0.0, 1.0),
-            }
+            (lag, (support / total_energy).clamp(0.0, 1.0))
         })
         .collect::<Vec<_>>();
 
-    // Prefer local autocorrelation peaks over adjacent lag bins.
-    all.retain(|candidate| candidate.score > 0.0);
-    all.sort_by(|left, right| right.score.total_cmp(&left.score));
+    let mut peaks = Vec::new();
+    for index in 0..scored.len() {
+        let (lag, score) = scored[index];
+        if score <= 0.0 {
+            continue;
+        }
+        let left = index.checked_sub(1).map_or(0.0, |item| scored[item].1);
+        let right = scored.get(index + 1).map_or(0.0, |item| item.1);
+        if score >= left && score >= right {
+            let bpm = 60.0 * frame_rate / lag as f32;
+            peaks.push(TempoCandidate {
+                bpm,
+                score,
+                autocorrelation_score: score,
+                beat_support: 0.0,
+            });
+        }
+    }
+    peaks.sort_by(|left, right| right.score.total_cmp(&left.score));
 
-    let mut selected: Vec<TempoCandidate> = Vec::new();
-    for candidate in all {
-        if selected.iter().any(|existing| {
+    let mut selected = Vec::new();
+    for candidate in peaks {
+        if selected.iter().any(|existing: &TempoCandidate| {
             ((existing.bpm - candidate.bpm).abs() / existing.bpm.max(candidate.bpm)) < 0.025
         }) {
             continue;
@@ -391,6 +493,58 @@ fn estimate_tempo_candidates(
     selected
 }
 
+fn rescore_tempo_candidates(
+    mut candidates: Vec<TempoCandidate>,
+    novelty: &[f32],
+    frame_rate: f32,
+    tightness: f32,
+    candidate_count: usize,
+) -> Vec<TempoCandidate> {
+    for candidate in &mut candidates {
+        let path = track_beat_frames(novelty, frame_rate, candidate.bpm, tightness);
+        candidate.beat_support = beat_path_support(&path, novelty, frame_rate, candidate.bpm);
+        candidate.score =
+            (0.45 * candidate.autocorrelation_score + 0.55 * candidate.beat_support).clamp(0.0, 1.0);
+    }
+    candidates.sort_by(|left, right| right.score.total_cmp(&left.score));
+    candidates.truncate(candidate_count);
+    candidates
+}
+
+fn beat_path_support(path: &[usize], novelty: &[f32], frame_rate: f32, bpm: f32) -> f32 {
+    if path.len() < 2 || novelty.len() < 2 || frame_rate <= 0.0 || bpm <= 0.0 {
+        return 0.0;
+    }
+    let mean_novelty = path
+        .iter()
+        .filter_map(|frame| novelty.get(*frame))
+        .sum::<f32>()
+        / path.len() as f32;
+    let coverage = (path[path.len() - 1] - path[0]) as f32 / (novelty.len() - 1) as f32;
+    let gaps = path
+        .windows(2)
+        .map(|pair| (pair[1] - pair[0]) as f32)
+        .collect::<Vec<_>>();
+    let period = frame_rate * 60.0 / bpm;
+    let expected = ((path[path.len() - 1] - path[0]) as f32 / period).max(1.0);
+    let count_support = ((path.len() - 1) as f32 / expected).min(expected / (path.len() - 1) as f32);
+    let smoothness = if gaps.len() < 2 {
+        1.0
+    } else {
+        let change = gaps
+            .windows(2)
+            .map(|pair| (pair[1] / pair[0]).ln().abs())
+            .sum::<f32>()
+            / (gaps.len() - 1) as f32;
+        (1.0 - change / 0.35).clamp(0.0, 1.0)
+    };
+    (0.40 * mean_novelty
+        + 0.25 * coverage.clamp(0.0, 1.0)
+        + 0.20 * smoothness
+        + 0.15 * count_support.clamp(0.0, 1.0))
+        .clamp(0.0, 1.0)
+}
+
 fn track_beat_frames(novelty: &[f32], frame_rate: f32, bpm: f32, tightness: f32) -> Vec<usize> {
     if novelty.is_empty() || frame_rate <= 0.0 || bpm <= 0.0 {
         return Vec::new();
@@ -399,8 +553,11 @@ fn track_beat_frames(novelty: &[f32], frame_rate: f32, bpm: f32, tightness: f32)
     if !period.is_finite() || period < 1.0 {
         return Vec::new();
     }
-    let min_gap = (period * 0.75).floor().max(1.0) as usize;
-    let max_gap = (period * 1.33).ceil().max(min_gap as f32) as usize;
+
+    // The wider transition band is deliberate: the selected BPM is a global
+    // hypothesis, while individual beat timestamps may accelerate or decelerate.
+    let min_gap = (period * 0.58).floor().max(1.0) as usize;
+    let max_gap = (period * 1.72).ceil().max(min_gap as f32) as usize;
     let mut cumulative = vec![0.0_f32; novelty.len()];
     let mut back = vec![None; novelty.len()];
 
@@ -449,12 +606,61 @@ fn track_beat_frames(novelty: &[f32], frame_rate: f32, bpm: f32, tightness: f32)
         path.push(endpoint);
     }
     path.reverse();
-
-    // Very short paths are not useful as beat grids.
     if path.len() < 2 {
+        Vec::new()
+    } else {
+        path
+    }
+}
+
+fn build_tempo_map(
+    beat_frames: &[usize],
+    timestamps: &[f64],
+    novelty: &[f32],
+) -> Vec<TempoPoint> {
+    if beat_frames.len() < 2 {
         return Vec::new();
     }
-    path
+    let intervals = beat_frames
+        .windows(2)
+        .filter_map(|pair| {
+            let left = *timestamps.get(pair[0])?;
+            let right = *timestamps.get(pair[1])?;
+            let interval = right - left;
+            (interval.is_finite() && interval > 0.0).then_some(interval)
+        })
+        .collect::<Vec<_>>();
+    if intervals.is_empty() {
+        return Vec::new();
+    }
+
+    beat_frames
+        .iter()
+        .enumerate()
+        .filter_map(|(index, frame)| {
+            let start = index.saturating_sub(2).min(intervals.len() - 1);
+            let end = (index + 2).min(intervals.len() - 1);
+            let mut local = intervals[start..=end].to_vec();
+            local.sort_by(f64::total_cmp);
+            let interval = local[local.len() / 2];
+            let bpm = (60.0 / interval) as f32;
+            if !bpm.is_finite() || bpm <= 0.0 {
+                return None;
+            }
+            let dispersion = local
+                .iter()
+                .map(|value| ((value - interval) / interval).abs() as f32)
+                .sum::<f32>()
+                / local.len() as f32;
+            let onset = novelty.get(*frame).copied().unwrap_or(0.0);
+            Some(TempoPoint {
+                timestamp_seconds: *timestamps.get(*frame)?,
+                bpm,
+                confidence: (0.65 * onset + 0.35 * (1.0 - dispersion * 4.0).clamp(0.0, 1.0))
+                    .clamp(0.0, 1.0),
+            })
+        })
+        .collect()
 }
 
 fn infer_downbeat_phase(
@@ -481,11 +687,7 @@ fn infer_downbeat_phase(
         .zip(counts.iter())
         .enumerate()
         .map(|(phase, (sum, count))| {
-            let score = if *count == 0 {
-                0.0
-            } else {
-                *sum / *count as f32
-            };
+            let score = if *count == 0 { 0.0 } else { *sum / *count as f32 };
             (phase, score)
         })
         .collect::<Vec<_>>();
@@ -529,11 +731,22 @@ mod tests {
     #[test]
     fn tempo_candidates_recover_regular_pulse_rate() {
         let novelty = pulse_envelope(50, 20);
-        let candidates = estimate_tempo_candidates(&novelty, 100.0, 55.0, 220.0, 5);
+        let candidates = estimate_tempo_candidates(&novelty, 100.0, 55.0, 220.0, 8);
         assert!(candidates
             .iter()
             .any(|candidate| (candidate.bpm - 120.0).abs() < 1.0));
-        assert!((candidates[0].bpm - 120.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn beat_path_rescoring_keeps_real_path_support_visible() {
+        let novelty = pulse_envelope(50, 24);
+        let raw = estimate_tempo_candidates(&novelty, 100.0, 55.0, 220.0, 12);
+        let candidates = rescore_tempo_candidates(raw, &novelty, 100.0, 1.25, 5);
+        assert!(!candidates.is_empty());
+        assert!(candidates.iter().all(|candidate| candidate.beat_support > 0.0));
+        assert!(candidates
+            .iter()
+            .any(|candidate| (candidate.bpm - 120.0).abs() < 1.0));
     }
 
     #[test]
@@ -543,8 +756,24 @@ mod tests {
         assert!(beats.len() >= 14);
         assert!(beats.windows(2).all(|pair| {
             let gap = pair[1] - pair[0];
-            (30..=54).contains(&gap)
+            (23..=69).contains(&gap)
         }));
+    }
+
+    #[test]
+    fn tempo_map_preserves_acceleration() {
+        let mut timestamps = vec![0.0];
+        let mut current = 0.0;
+        for index in 0..20 {
+            let bpm = 100.0 + index as f64 * 2.0;
+            current += 60.0 / bpm;
+            timestamps.push(current);
+        }
+        let frames = (0..timestamps.len()).collect::<Vec<_>>();
+        let novelty = vec![1.0; timestamps.len()];
+        let map = build_tempo_map(&frames, &timestamps, &novelty);
+        assert_eq!(map.len(), frames.len());
+        assert!(map.last().unwrap().bpm > map.first().unwrap().bpm + 20.0);
     }
 
     #[test]
@@ -579,6 +808,8 @@ mod tests {
             .iter()
             .any(|candidate| (candidate.bpm - 120.0).abs() < 4.0));
         assert!(!analysis.beats.is_empty());
+        assert_eq!(analysis.tempo_map.len(), analysis.beats.len());
+        assert!(!analysis.structural_descriptors.is_empty());
     }
 
     #[test]
@@ -595,5 +826,6 @@ mod tests {
         .expect("silence");
         assert_eq!(analysis.bpm, None);
         assert!(analysis.beats.is_empty());
+        assert!(analysis.tempo_map.is_empty());
     }
 }

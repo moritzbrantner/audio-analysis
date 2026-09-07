@@ -243,7 +243,8 @@ pub mod playback {
         extrema
     }
 
-    fn valid_beat_grid(beats: &[f64]) -> bool {
+    /// Returns whether `beats` is a finite, strictly increasing beat grid.
+    pub fn valid_beat_grid(beats: &[f64]) -> bool {
         !beats.is_empty()
             && beats.iter().all(|beat| beat.is_finite())
             && beats.windows(2).all(|pair| pair[1] > pair[0])

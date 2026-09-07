@@ -2,7 +2,7 @@ const DEFAULT_BIN_COUNT = 1600;
 const MIN_BIN_COUNT = 64;
 const MAX_BIN_COUNT = 4096;
 const LOW_CUTOFF_HZ = 220;
-const MID_CUTOFF_HZ = 2500;
+const MID_CUTOFF_HZ = 2000;
 
 export function buildFrequencyOverview(samples, sampleRate, requestedBins = DEFAULT_BIN_COUNT) {
   if (!samples || typeof samples.length !== "number" || samples.length === 0) {

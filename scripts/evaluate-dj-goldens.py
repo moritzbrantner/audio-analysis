@@ -181,23 +181,29 @@ def git_blob_sha1(path: pathlib.Path) -> str:
 
 
 def rust_analysis(path: pathlib.Path) -> dict[str, Any]:
+    command = [
+        "cargo",
+        "run",
+        "--quiet",
+        "-p",
+        "moenarch-audio-analysis-rhythm",
+        "--example",
+        "dj_analyze",
+        "--",
+        str(path),
+    ]
     completed = subprocess.run(
-        [
-            "cargo",
-            "run",
-            "--quiet",
-            "-p",
-            "moenarch-audio-analysis-rhythm",
-            "--example",
-            "dj_analyze",
-            "--",
-            str(path),
-        ],
+        command,
         cwd=ROOT,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
     )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "Rust DJ analyzer failed for "
+            f"{path.name} with exit code {completed.returncode}:\n{completed.stderr.strip()}"
+        )
     return json.loads(completed.stdout)
 
 

@@ -2,7 +2,12 @@ const MAX_TRACK_SECONDS = 15 * 60;
 const RHYTHM_RATE = 16_000;
 const RHYTHM_FFT_SIZE = 1024;
 const RHYTHM_HOP_SIZE = 128;
+const KEY_FFT_SIZE = 4096;
+const KEY_HOP_SIZE = 2048;
+const KEY_TIMELINE_WINDOW_SECONDS = 24;
+const KEY_TIMELINE_HOP_SECONDS = 8;
 const BEAT_PREVIEW_COUNT = 12;
+const KEY_PREVIEW_COUNT = 6;
 
 const state = {
   analysis: null,
@@ -11,6 +16,7 @@ const state = {
   generation: 0,
   analyzing: false,
   analyzerPromise: null,
+  keyAnalyzerPromise: null,
   timelineHoverTime: null,
   playbackAnimationFrame: null,
 };
@@ -25,6 +31,7 @@ const elements = {
   result: document.querySelector("#song-result"),
   resultTitle: document.querySelector("#song-result-title"),
   rhythmSummary: document.querySelector("#song-rhythm-summary"),
+  keySummary: document.querySelector("#song-key-summary"),
   audioPlayer: document.querySelector("#song-audio-player"),
   timeline: document.querySelector("#song-timeline"),
   timelineReadout: document.querySelector("#song-timeline-readout"),
@@ -142,10 +149,11 @@ async function analyzeSongFile(file) {
 
     setStatus(
       true,
-      "Detecting tempo, beats and sections…",
-      "Running the Rust/WASM whole-track rhythm analyzer locally in this browser.",
+      "Detecting tempo, beats, structure and key…",
+      "Running the Rust/WASM whole-track rhythm and musical-key analyzers locally in this browser.",
     );
     const analyzer = await loadRhythmAnalyzer();
+    const keyAnalyzer = await loadKeyAnalyzer();
     if (!isCurrent(generation)) return;
 
     const value = await analyzer.analyzeTrack(samples, analysisRate, {
@@ -157,8 +165,21 @@ async function analyzeSongFile(file) {
     });
     if (!isCurrent(generation)) return;
 
+    const keyValue = await keyAnalyzer.analyzeTrackKey(samples, analysisRate, {
+      fftSize: KEY_FFT_SIZE,
+      hopSize: KEY_HOP_SIZE,
+      profile: "ensemble",
+      timelineWindowSeconds: KEY_TIMELINE_WINDOW_SECONDS,
+      timelineHopSeconds: KEY_TIMELINE_HOP_SECONDS,
+      timelineMinConfidence: 0.1,
+    });
+    if (!isCurrent(generation)) return;
+
     if (!value || typeof value !== "object") {
       throw new Error("The rhythm analyzer returned no structured result.");
+    }
+    if (!keyValue || typeof keyValue !== "object") {
+      throw new Error("The musical-key analyzer returned no structured result.");
     }
 
     const { schemaVersion = "audio-analysis-song/v1", ...rhythm } = value;
@@ -181,6 +202,11 @@ async function analyzeSongFile(file) {
         pcmTransport: "float32array",
       },
       ...rhythm,
+      keySchemaVersion: keyValue.schemaVersion ?? "audio-analysis-key-track/v1",
+      key: keyValue.dominant ?? null,
+      keyTimeline: Array.isArray(keyValue.timeline) ? keyValue.timeline : [],
+      keyTimelineWindowSeconds: keyValue.timelineWindowSeconds ?? KEY_TIMELINE_WINDOW_SECONDS,
+      keyTimelineHopSeconds: keyValue.timelineHopSeconds ?? KEY_TIMELINE_HOP_SECONDS,
     };
 
     renderSongAnalysis(state.analysis);
@@ -243,10 +269,19 @@ function loadRhythmAnalyzer() {
   return state.analyzerPromise;
 }
 
+function loadKeyAnalyzer() {
+  state.keyAnalyzerPromise ??= import("./wasm/audio-analysis-pitch/index.js").then(async (module) => {
+    await module.init();
+    return module;
+  });
+  return state.keyAnalyzerPromise;
+}
+
 function renderSongAnalysis(analysis) {
   elements.result.hidden = false;
   elements.resultTitle.textContent = analysis.source.name;
   renderRhythmSummary(analysis);
+  renderKeySummary(analysis);
   renderSections(analysis.sections);
 
   const preview = {
@@ -254,6 +289,8 @@ function renderSongAnalysis(analysis) {
     source: analysis.source,
     bpm: analysis.bpm,
     confidence: analysis.confidence,
+    key: analysis.key,
+    keyTimeline: Array.isArray(analysis.keyTimeline) ? analysis.keyTimeline.slice(0, KEY_PREVIEW_COUNT) : [],
     sectionsMethod: analysis.sectionsMethod,
     sections: analysis.sections,
     beats: Array.isArray(analysis.beats) ? analysis.beats.slice(0, BEAT_PREVIEW_COUNT) : [],
@@ -285,16 +322,50 @@ function renderRhythmSummary(analysis) {
   const explanation = document.createElement("p");
   explanation.className = "result-note";
   explanation.textContent =
-    "The JSON keeps alternative tempo candidates because half-time and double-time interpretations can both be musically plausible.";
+    "The JSON keeps alternative tempo candidates because half-time and double-time interpretations can both be musically plausible. Local BPM values follow the individually tracked beat positions instead of forcing a constant grid.";
 
   elements.rhythmSummary.append(lead, detail, explanation);
+}
+
+function renderKeySummary(analysis) {
+  elements.keySummary.replaceChildren();
+  const key = analysis.key;
+  const lead = document.createElement("p");
+  lead.className = "result-lead";
+  lead.textContent = typeof key?.label === "string" ? key.label : "No stable dominant key was returned.";
+
+  const detail = document.createElement("p");
+  detail.className = "result-note";
+  const confidence = finiteNumber(key?.confidence);
+  const strength = finiteNumber(key?.strength);
+  if (key && (confidence !== null || strength !== null)) {
+    const pieces = [];
+    if (confidence !== null) pieces.push(`confidence ${formatPercent(confidence * 100)}`);
+    if (strength !== null) pieces.push(`profile strength ${formatPercent(strength * 100)}`);
+    const tuning = finiteNumber(key?.tuningCents);
+    if (tuning !== null) pieces.push(`tuning ${tuning >= 0 ? "+" : ""}${tuning.toFixed(1)} cents`);
+    detail.textContent = `Dominant-key evidence: ${pieces.join(" · ")}.`;
+  } else {
+    detail.textContent = "The track did not provide enough stable tonal evidence for authoritative dominant-key metadata.";
+  }
+
+  const timeline = document.createElement("p");
+  timeline.className = "result-note";
+  const windows = Array.isArray(analysis.keyTimeline) ? analysis.keyTimeline : [];
+  const labelled = windows.filter((window) => typeof window?.key?.label === "string");
+  const labels = Array.from(new Set(labelled.map((window) => window.key.label)));
+  timeline.textContent = windows.length
+    ? `${labelled.length} of ${windows.length} local key windows are confidence-bearing${labels.length ? ` (${labels.join(", ")})` : ""}.`
+    : "No local key windows were returned.";
+
+  elements.keySummary.append(lead, detail, timeline);
 }
 
 function renderSections(sections) {
   elements.sections.replaceChildren();
   if (!Array.isArray(sections) || sections.length === 0) {
     const empty = document.createElement("p");
-    empty.textContent = "No stable rhythmic section boundaries were detected.";
+    empty.textContent = "No stable musical section boundaries were detected.";
     elements.sections.append(empty);
     return;
   }
@@ -303,7 +374,8 @@ function renderSections(sections) {
   for (const section of sections) {
     const item = document.createElement("li");
     const title = document.createElement("strong");
-    title.textContent = section.label ?? `section-${section.index ?? "?"}`;
+    const label = section.label ?? `section-${section.index ?? "?"}`;
+    title.textContent = section.identity ? `${section.identity} · ${label}` : label;
     const range = document.createElement("span");
     range.textContent = ` ${section.start ?? formatDuration(section.startSeconds)} → ${section.end ?? formatDuration(section.endSeconds)}`;
     item.append(title, range);
@@ -324,7 +396,14 @@ function drawSongTimeline() {
   drawTimelineWaveform(context, width, height, state.audioBuffer);
   drawBeatMarkers(context, width, height, duration, state.analysis.beats);
   drawSectionBoundaries(context, width, height, duration, state.analysis.sections);
-  drawTimelineCursor(context, width, height, duration, Number(elements.audioPlayer.currentTime) || 0, "rgba(255,255,255,0.95)");
+  drawTimelineCursor(
+    context,
+    width,
+    height,
+    duration,
+    Number(elements.audioPlayer.currentTime) || 0,
+    "rgba(255,255,255,0.95)",
+  );
   if (state.timelineHoverTime !== null) {
     drawTimelineCursor(context, width, height, duration, state.timelineHoverTime, "rgba(251,191,36,0.95)");
   }
@@ -343,7 +422,8 @@ function drawSectionBands(context, width, height, duration, sections) {
     if (right - x >= 72) {
       context.fillStyle = "rgba(255,255,255,0.55)";
       context.font = "11px system-ui";
-      context.fillText(String(section.label ?? `section-${index + 1}`), x + 7, 17);
+      const label = section.identity ? `${section.identity} · ${section.label ?? `section-${index + 1}`}` : String(section.label ?? `section-${index + 1}`);
+      context.fillText(label, x + 7, 17);
     }
   });
 }
@@ -491,7 +571,10 @@ function nearestBeat(time) {
     if (timestamp < time) low = mid + 1;
     else high = mid - 1;
   }
-  const candidates = [beats[Math.max(0, Math.min(beats.length - 1, low))], beats[Math.max(0, high)]].filter(Boolean);
+  const candidates = [
+    beats[Math.max(0, Math.min(beats.length - 1, low))],
+    beats[Math.max(0, high)],
+  ].filter(Boolean);
   return candidates.reduce((best, candidate) => {
     if (!best) return candidate;
     const bestTime = finiteNumber(best.timestampSeconds) ?? 0;
@@ -507,8 +590,27 @@ function sectionAtTime(time) {
       const start = finiteNumber(section?.startSeconds);
       const end = finiteNumber(section?.endSeconds);
       return start !== null && end !== null && time >= start && time < end;
-    }) ?? sections.at(-1) ?? null
+    }) ??
+    sections.at(-1) ??
+    null
   );
+}
+
+function keyWindowAtTime(time) {
+  const windows = Array.isArray(state.analysis?.keyTimeline) ? state.analysis.keyTimeline : [];
+  if (!windows.length) return null;
+  let best = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const window of windows) {
+    const center = finiteNumber(window?.centerSeconds);
+    if (center === null) continue;
+    const distance = Math.abs(center - time);
+    if (distance < bestDistance) {
+      best = window;
+      bestDistance = distance;
+    }
+  }
+  return best;
 }
 
 function seekSong(time) {
@@ -540,12 +642,29 @@ function updateTimelineReadout(time, playbackOnly = false) {
 function timelineContextText(time) {
   const pieces = [formatDuration(time)];
   const section = sectionAtTime(time);
-  if (section) pieces.push(String(section.label ?? `section-${section.index ?? "?"}`));
+  if (section) {
+    const identity = typeof section.identity === "string" ? `${section.identity} · ` : "";
+    pieces.push(`${identity}${String(section.label ?? `section-${section.index ?? "?"}`)}`);
+  }
+  const keyWindow = keyWindowAtTime(time);
+  if (typeof keyWindow?.key?.label === "string") {
+    const confidence = finiteNumber(keyWindow.key.confidence);
+    pieces.push(
+      confidence === null
+        ? `key ${keyWindow.key.label}`
+        : `key ${keyWindow.key.label} (${formatPercent(confidence * 100)})`,
+    );
+  } else if (keyWindow) {
+    pieces.push("key uncertain");
+  }
   const beat = nearestBeat(time);
   if (beat) {
     const beatIndex = Number.isInteger(beat.index) ? `beat ${beat.index}` : "nearest beat";
     const timestamp = typeof beat.timestamp === "string" ? beat.timestamp : formatDuration(beat.timestampSeconds);
-    pieces.push(`${beatIndex}${beat.downbeat === true ? " · downbeat" : ""} at ${timestamp}`);
+    const localBpm = finiteNumber(beat.localBpm);
+    pieces.push(
+      `${beatIndex}${beat.downbeat === true ? " · downbeat" : ""} at ${timestamp}${localBpm === null ? "" : ` · ${localBpm.toFixed(1)} local BPM`}`,
+    );
   }
   return pieces.join(" · ");
 }

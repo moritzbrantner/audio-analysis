@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Analyze a complete song locally in the browser for BPM, beats, downbeats, and rhythmic structural sections, then download timestamped JSON."
+      content="Analyze a complete song locally in the browser for BPM, beats, musical key, key changes, and structural sections, then download timestamped JSON."
     />
     <title>Song Analysis · audio-analysis</title>
     <link rel="stylesheet" href="./styles.css" />
@@ -13,11 +13,11 @@
   <body>
     <main class="shell">
       <header class="hero">
-        <div class="eyebrow">audio-analysis · whole-song rhythm</div>
+        <div class="eyebrow">audio-analysis · whole-song music analysis</div>
         <h1>Get beat-by-beat song analysis as JSON.</h1>
         <p class="hero-copy">
-          Analyze a complete song for tempo, beats, downbeats, and rhythmic structural sections. Every detected event
-          includes seconds, integer milliseconds, and a readable timestamp such as <code>00:03:15.022</code>.
+          Analyze a complete song for tempo, individual beats, downbeats, dominant musical key, local key changes, and
+          structural sections. Detected events stay timestamped for playback and machine-readable export.
         </p>
         <div class="runtime-strip" aria-label="privacy and runtime summary">
           <span class="status-dot status-dot-local" aria-hidden="true"></span>
@@ -41,8 +41,8 @@
           <p class="drop-copy">Choose a song up to 15 minutes long.</p>
           <button id="song-choose-file" class="button button-primary choose-file" type="button">Choose song</button>
           <p class="drop-note">
-            The song is mixed to mono and resampled to at most 16 kHz before the rhythm analyzer runs. No upload is
-            performed.
+            The song is mixed to mono and resampled to at most 16 kHz before the Rust rhythm and musical-key analyzers
+            run. No upload is performed.
           </p>
         </div>
         <p id="song-error" class="error-message" hidden role="alert"></p>
@@ -52,7 +52,7 @@
         <div class="spinner" aria-hidden="true"></div>
         <div class="loading-copy">
           <strong id="song-status-title">Analyzing song…</strong>
-          <p id="song-status-detail">Preparing browser-local rhythm analysis.</p>
+          <p id="song-status-detail">Preparing browser-local music analysis.</p>
         </div>
       </section>
 
@@ -78,11 +78,25 @@
           <div id="song-rhythm-summary" class="result-copy"></div>
         </section>
 
+        <section class="panel report-section" aria-labelledby="song-key-title">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">tonality</div>
+              <h2 id="song-key-title">Musical key</h2>
+            </div>
+          </div>
+          <div id="song-key-summary" class="result-copy"></div>
+          <p class="figure-note">
+            The dominant key and local key windows are confidence-bearing Rust results. Uncertain windows stay
+            unlabelled rather than being promoted to authoritative metadata.
+          </p>
+        </section>
+
         <section class="panel media-panel report-section" aria-labelledby="song-timeline-title">
           <div class="section-heading">
             <div>
               <div class="eyebrow">listen and inspect</div>
-              <h2 id="song-timeline-title">Annotated beat timeline</h2>
+              <h2 id="song-timeline-title">Annotated musical timeline</h2>
             </div>
           </div>
           <audio id="song-audio-player" controls preload="metadata"></audio>
@@ -91,7 +105,7 @@
             class="visualization interactive-visualization"
             tabindex="0"
             role="slider"
-            aria-label="Song beat timeline seek control"
+            aria-label="Song musical timeline seek control"
             aria-valuemin="0"
             aria-valuemax="0"
             aria-valuenow="0"
@@ -101,9 +115,10 @@
             Click the timeline or use arrow keys to inspect detected beats.
           </div>
           <p id="song-timeline-note" class="figure-note">
-            The waveform is contextual only. Thin markers are detected beats, taller markers are inferred downbeats, and
-            section boundaries come from the downloaded analysis. Click to seek; Left/Right moves between beats,
-            Shift+Left/Right moves between section boundaries, and Home/End jumps to the track edges.
+            Thin markers are detected beats, taller markers are inferred downbeats, and section boundaries come from
+            the Rust analysis. The readout also shows the nearest confidence-bearing key window. Click to seek;
+            Left/Right moves between beats, Shift+Left/Right moves between section boundaries, and Home/End jumps to
+            the track edges.
           </p>
         </section>
 
@@ -111,12 +126,12 @@
           <div class="section-heading">
             <div>
               <div class="eyebrow">structural change points</div>
-              <h2 id="song-sections-title">Rhythmic sections</h2>
+              <h2 id="song-sections-title">Musical sections</h2>
             </div>
           </div>
           <p class="figure-note">
-            These are deterministic rhythmic-change sections, not asserted verse/chorus labels. Boundaries are aligned
-            to inferred downbeats when rhythmic intensity changes enough to support a split.
+            These are deterministic A/B/A-style structural identities, not asserted verse/chorus/drop labels.
+            Boundaries stay aligned to inferred downbeats and use spectral, onset, harmonic, and repetition evidence.
           </p>
           <div id="song-sections" class="result-copy"></div>
         </section>
@@ -128,7 +143,9 @@
               <h2 id="song-json-title">JSON preview</h2>
             </div>
           </div>
-          <p class="figure-note">The preview shows only the first beat events. The download contains every detected beat.</p>
+          <p class="figure-note">
+            The preview shows only the first beat and key-window events. The download contains the complete analysis.
+          </p>
           <pre id="song-json-preview"></pre>
         </section>
       </section>

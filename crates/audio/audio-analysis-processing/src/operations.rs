@@ -225,14 +225,20 @@ pub mod playback {
                 end = start + 1;
             }
 
-            let mut minimum = 0.0_f32;
-            let mut maximum = 0.0_f32;
-            for sample in &samples[start..end.min(samples.len())] {
-                if !sample.is_finite() {
-                    continue;
-                }
-                minimum = minimum.min(*sample);
-                maximum = maximum.max(*sample);
+            let mut finite_samples = samples[start..end.min(samples.len())]
+                .iter()
+                .copied()
+                .filter(|sample| sample.is_finite());
+            let Some(first_sample) = finite_samples.next() else {
+                extrema.push(WaveformExtrema { min: 0.0, max: 0.0 });
+                continue;
+            };
+
+            let mut minimum = first_sample;
+            let mut maximum = first_sample;
+            for sample in finite_samples {
+                minimum = minimum.min(sample);
+                maximum = maximum.max(sample);
             }
             extrema.push(WaveformExtrema {
                 min: minimum.clamp(-1.0, 1.0),
@@ -359,7 +365,7 @@ mod tests {
         assert_eq!(
             extrema[0],
             WaveformExtrema {
-                min: 0.0,
+                min: 0.25,
                 max: 0.75
             }
         );
@@ -367,15 +373,12 @@ mod tests {
             extrema[1],
             WaveformExtrema {
                 min: -1.0,
-                max: 0.0
+                max: -0.5
             }
         );
         assert_eq!(
             extrema[2],
-            WaveformExtrema {
-                min: 0.0,
-                max: 1.0
-            }
+            WaveformExtrema { min: 1.0, max: 1.0 }
         );
     }
 }

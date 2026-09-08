@@ -274,83 +274,6 @@ fn features_value(input: serde_json::Value) -> Result<serde_json::Value, String>
     }))
 }
 
-/// Computes phase-aware complex spectral-difference novelty for overlapping frames.
-///
-/// This keeps the reusable FFT/phase primitive in the Fourier capability. It predicts
-/// each bin's next phase from the preceding two frames and returns one non-negative
-/// novelty value per padded STFT frame. Callers remain responsible for musical band
-/// weighting and temporal normalization.
-pub fn complex_spectral_difference(
-    samples: &[f32],
-    sample_rate: u32,
-    fft_size: usize,
-    hop_size: usize,
-) -> audio_contracts::Result<Vec<f32>> {
-    StftConfig::new(fft_size, hop_size)?;
-    if sample_rate == 0 {
-        return Err(audio_contracts::DetectError::InvalidAudioFormat {
-            sample_rate,
-            channels: 1,
-        });
-    }
-    if samples.iter().any(|sample| !sample.is_finite()) {
-        return Err(audio_contracts::DetectError::InvalidArgument(
-            "complex spectral difference samples must contain only finite values".to_string(),
-        ));
-    }
-    if samples.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut planner = rustfft::FftPlanner::<f32>::new();
-    let fft = planner.plan_fft_forward(fft_size);
-    let half_bins = fft_size / 2 + 1;
-    let mut previous_magnitude = vec![0.0_f32; half_bins];
-    let mut previous_phase = vec![0.0_f32; half_bins];
-    let mut previous_previous_phase = vec![0.0_f32; half_bins];
-    let denominator = fft_size.saturating_sub(1).max(1) as f32;
-    let mut novelty = Vec::new();
-    let mut start = 0_usize;
-    let mut frame_index = 0_usize;
-
-    while start < samples.len() {
-        let mut buffer = vec![rustfft::num_complex::Complex32::new(0.0, 0.0); fft_size];
-        for (index, value) in buffer.iter_mut().enumerate() {
-            let sample = samples.get(start + index).copied().unwrap_or(0.0);
-            let window = 0.5
-                - 0.5 * (std::f32::consts::TAU * index as f32 / denominator).cos();
-            value.re = sample * window;
-        }
-        fft.process(&mut buffer);
-
-        let mut frame_difference = 0.0_f32;
-        for (bin_index, value) in buffer.iter().take(half_bins).enumerate().skip(1) {
-            let magnitude = value.norm();
-            let phase = value.im.atan2(value.re);
-            if frame_index > 0 {
-                let predicted_phase = if frame_index > 1 {
-                    2.0 * previous_phase[bin_index] - previous_previous_phase[bin_index]
-                } else {
-                    previous_phase[bin_index]
-                };
-                let predicted = rustfft::num_complex::Complex32::from_polar(
-                    previous_magnitude[bin_index],
-                    predicted_phase,
-                );
-                frame_difference += (1.0 + (*value - predicted).norm()).ln();
-            }
-            previous_previous_phase[bin_index] = previous_phase[bin_index];
-            previous_phase[bin_index] = phase;
-            previous_magnitude[bin_index] = magnitude;
-        }
-        novelty.push(frame_difference);
-        frame_index += 1;
-        start = start.saturating_add(hop_size);
-    }
-
-    Ok(novelty)
-}
-
 fn sample_array(input: &serde_json::Value, field: &str) -> Result<Vec<f32>, String> {
     let values = input
         .get(field)
@@ -469,25 +392,6 @@ mod tests {
                 .len(),
             3
         );
-    }
-
-    #[test]
-    fn complex_spectral_difference_detects_phase_change() {
-        let sample_rate = 8_000;
-        let frequency = 440.0_f32;
-        let mut samples = (0..sample_rate)
-            .map(|index| {
-                (std::f32::consts::TAU * frequency * index as f32 / sample_rate as f32).sin()
-            })
-            .collect::<Vec<_>>();
-        for (index, sample) in samples.iter_mut().enumerate().skip(sample_rate as usize / 2) {
-            *sample = (std::f32::consts::TAU * frequency * index as f32 / sample_rate as f32
-                + std::f32::consts::FRAC_PI_2)
-                .sin();
-        }
-        let novelty = complex_spectral_difference(&samples, sample_rate, 512, 128)
-            .expect("complex spectral difference");
-        assert!(novelty.iter().copied().fold(0.0_f32, f32::max) > 0.1);
     }
 
     #[test]

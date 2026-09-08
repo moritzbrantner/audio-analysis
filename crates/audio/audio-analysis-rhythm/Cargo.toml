@@ -21,6 +21,7 @@ serde_json.workspace = true
 audio-analysis-core.workspace = true
 audio-analysis-fourier.workspace = true
 audio-contracts.workspace = true
+rustfft.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

@@ -2,6 +2,7 @@
   "schema_version": 1,
   "source_commit": "b8b29cf8db0b86ed1b133a18155adf24992f9483",
   "adapted_package_trees": [
+    "crates/audio/audio-analysis-fourier",
     "crates/audio/audio-analysis-io",
     "crates/audio/audio-analysis-pitch",
     "crates/audio/audio-analysis-processing",
@@ -34,6 +35,7 @@
     "packages/audio-generation-tts-app"
   ],
   "reasons": {
+    "crates/audio/audio-analysis-fourier": "adds a destination-owned reusable phase-aware spectral-novelty primitive used by music rhythm analysis without duplicating FFT ownership",
     "crates/audio/audio-analysis-io": "owns the extracted audio-only source contracts and FFmpeg command adapter",
     "crates/audio/audio-analysis-pitch": "adds destination-owned polyphonic chroma, tuning correction, and musical-key analysis for music consumers",
     "crates/audio/audio-analysis-processing": "consumes destination-owned audio source contracts",

@@ -1,0 +1,39 @@
+name: Remediate foundation convention tooling
+
+on:
+  push:
+    branches:
+      - fix/foundation-convention-tooling
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Declare exact convention executables and refresh lock
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = 'package.json';
+          const manifest = JSON.parse(fs.readFileSync(path, 'utf8'));
+          manifest.devDependencies = {
+            ...(manifest.devDependencies ?? {}),
+            oxlint: '1.81.0',
+            'oxlint-tsgolint': '7.0.2001',
+          };
+          fs.writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
+          NODE
+          bun install
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add package.json bun.lock
+          git commit -m 'fix: declare convention lint tooling'
+          git push

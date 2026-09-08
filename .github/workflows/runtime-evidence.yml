@@ -1,0 +1,133 @@
+name: Runtime evidence and Moonlight
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  RUNTIME_PROFILER_REV: 8280c95feb2a1075efa0480a9622e40c723e0b3a
+  MOONLIGHT_REV: a615843b6497cfa0e746224673592c107d969bda
+
+jobs:
+  rhythm-evidence:
+    name: Rhythm runtime evidence and behavior
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate
+          fetch-depth: 0
+
+      - name: Check out exact base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: reference
+          fetch-depth: 0
+
+      - name: Check out pinned Moonlight
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: moritzbrantner/moonlight
+          ref: ${{ env.MOONLIGHT_REV }}
+          path: moonlight
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
+          rustup default 1.95.0
+
+      - name: Install runtime-profiler
+        run: cargo install --git https://github.com/moritzbrantner/runtime-profiler --rev "$RUNTIME_PROFILER_REV" --locked
+
+      - name: Give the base the identical rhythm workload
+        run: |
+          mkdir -p reference/crates/audio/audio-analysis-rhythm/examples reference/profiles/runtime-profiler
+          cp candidate/crates/audio/audio-analysis-rhythm/examples/profile_rhythm.rs \
+            reference/crates/audio/audio-analysis-rhythm/examples/profile_rhythm.rs
+          cp candidate/scripts/profile-rhythm.sh reference/scripts/profile-rhythm.sh
+          cp candidate/profiles/runtime-profiler/rhythm.json reference/profiles/runtime-profiler/rhythm.json
+          git -C reference add \
+            crates/audio/audio-analysis-rhythm/examples/profile_rhythm.rs \
+            scripts/profile-rhythm.sh \
+            profiles/runtime-profiler/rhythm.json
+          git -C reference \
+            -c user.name='runtime-profiler' \
+            -c user.email='runtime-profiler@invalid' \
+            commit -m 'chore: attach comparable rhythm workload'
+
+      - name: Prime deterministic workload
+        run: |
+          (cd reference && bash scripts/profile-rhythm.sh >/dev/null)
+          (cd candidate && bash scripts/profile-rhythm.sh >/dev/null)
+
+      - name: Capture reference evidence
+        working-directory: reference
+        run: |
+          runtime-profiler capture \
+            --scenario profiles/runtime-profiler/rhythm.json \
+            --output "$RUNNER_TEMP/reference-rhythm"
+          runtime-profiler validate --bundle "$RUNNER_TEMP/reference-rhythm"
+
+      - name: Capture candidate evidence
+        working-directory: candidate
+        run: |
+          runtime-profiler capture \
+            --scenario profiles/runtime-profiler/rhythm.json \
+            --output "$RUNNER_TEMP/candidate-rhythm"
+          runtime-profiler validate --bundle "$RUNNER_TEMP/candidate-rhythm"
+
+      - name: Compare runtime evidence
+        run: |
+          set -euo pipefail
+          runtime-profiler score \
+            --reference "$RUNNER_TEMP/reference-rhythm" \
+            --candidate "$RUNNER_TEMP/candidate-rhythm" \
+            --json | tee "$RUNNER_TEMP/runtime-rhythm.json"
+          {
+            echo '### runtime-profiler comparison'
+            echo '```json'
+            cat "$RUNNER_TEMP/runtime-rhythm.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run Moonlight correctness evaluation
+        working-directory: candidate
+        run: |
+          set -euo pipefail
+          git fetch origin "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+          cargo run --quiet \
+            --manifest-path ../moonlight/Cargo.toml \
+            -p moonlight-cli --bin moonlight -- \
+            eval run \
+            --project moonlight.eval.toml \
+            --storage-path .moonlight/runtime-evidence.jsonl \
+            --format markdown \
+            --baseline-ref "${{ github.event.pull_request.base.sha }}" \
+            --candidate-ref "${{ github.event.pull_request.head.sha }}" \
+            | tee "$RUNNER_TEMP/moonlight.md"
+          {
+            echo '### Moonlight evaluation'
+            cat "$RUNNER_TEMP/moonlight.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rhythm-runtime-moonlight-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/reference-rhythm
+            ${{ runner.temp }}/candidate-rhythm
+            ${{ runner.temp }}/runtime-rhythm.json
+            ${{ runner.temp }}/moonlight.md
+          if-no-files-found: warn

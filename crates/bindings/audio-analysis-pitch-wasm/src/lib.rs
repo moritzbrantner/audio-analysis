@@ -1,13 +1,14 @@
 //! WASM bindings for `audio-analysis-pitch`.
 
 use audio_analysis_pitch::key::{
-    analyze_key_track, HarmonicKeyConfig, KeyProfile, KeyTimelineConfig,
+    analyze_key_track_with_boundaries, HarmonicKeyConfig, KeyProfile, KeyTimelineConfig,
 };
 use runtime_core::SurfaceRequest;
 use serde_json::{Map, Value};
 use wasm_bindgen::prelude::*;
 
 const MAX_TRACK_SECONDS: usize = 15 * 60;
+const MAX_BOUNDARIES: usize = 4_096;
 
 #[wasm_bindgen(js_name = packageSurface)]
 pub fn package_surface() -> Result<JsValue, JsValue> {
@@ -23,11 +24,12 @@ pub fn run_operation(request: JsValue) -> Result<JsValue, JsValue> {
     serde_wasm_bindgen::to_value(&response).map_err(into_js_error)
 }
 
-/// Runs complete-track dominant-key and local key-window analysis from typed PCM.
+/// Runs complete-track dominant-key and temporally decoded key analysis from typed PCM.
 ///
-/// This binding owns only typed transport, browser-specific input bounds, and
-/// option decoding. Dominant-key selection, timeline windows, confidence
-/// thresholding, and uncertainty semantics live in `audio-analysis-pitch`.
+/// This binding owns only typed transport, browser-specific input bounds, option
+/// decoding, and optional bar/downbeat boundary transport. Harmonic analysis,
+/// dominant-key selection, temporal decoding, persistence, and uncertainty
+/// semantics live in `audio-analysis-pitch`.
 #[wasm_bindgen(js_name = analyzeTrackKey)]
 pub fn analyze_track_key(
     samples: &[f32],
@@ -46,8 +48,15 @@ pub fn analyze_track_key(
     let options = options_object(options).map_err(into_js_error)?;
     let harmonic_config = harmonic_config(&options).map_err(into_js_error)?;
     let timeline_config = timeline_config(&options).map_err(into_js_error)?;
-    let analysis = analyze_key_track(samples, sample_rate, harmonic_config, timeline_config)
-        .map_err(into_js_error)?;
+    let boundaries = boundary_seconds(&options).map_err(into_js_error)?;
+    let analysis = analyze_key_track_with_boundaries(
+        samples,
+        sample_rate,
+        harmonic_config,
+        timeline_config,
+        &boundaries,
+    )
+    .map_err(into_js_error)?;
     serde_wasm_bindgen::to_value(&analysis).map_err(into_js_error)
 }
 
@@ -111,6 +120,32 @@ fn timeline_config(options: &Map<String, Value>) -> Result<KeyTimelineConfig, St
     }
     config.validate().map_err(|error| error.to_string())?;
     Ok(config)
+}
+
+fn boundary_seconds(options: &Map<String, Value>) -> Result<Vec<f64>, String> {
+    let Some(value) = options.get("barBoundariesSeconds") else {
+        return Ok(Vec::new());
+    };
+    let values = value
+        .as_array()
+        .ok_or_else(|| "barBoundariesSeconds must be an array".to_string())?;
+    if values.len() > MAX_BOUNDARIES {
+        return Err(format!(
+            "barBoundariesSeconds must not contain more than {MAX_BOUNDARIES} entries"
+        ));
+    }
+    values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            value
+                .as_f64()
+                .filter(|value| value.is_finite())
+                .ok_or_else(|| {
+                    format!("barBoundariesSeconds[{index}] must be a finite number")
+                })
+        })
+        .collect()
 }
 
 fn positive_usize(
@@ -204,5 +239,28 @@ mod tests {
         assert_eq!(config.hop_seconds, 6.0);
         assert_eq!(config.min_confidence, 0.25);
         assert_eq!(config.max_windows, 42);
+    }
+
+    #[test]
+    fn adapter_accepts_bar_boundaries_without_owning_key_semantics() {
+        let options = serde_json::json!({
+            "barBoundariesSeconds": [0.0, 1.5, 3.0, 4.5]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        assert_eq!(
+            boundary_seconds(&options).expect("boundaries"),
+            vec![0.0, 1.5, 3.0, 4.5]
+        );
+    }
+
+    #[test]
+    fn adapter_rejects_non_numeric_boundaries() {
+        let options = serde_json::json!({"barBoundariesSeconds": [0.0, "bad"]})
+            .as_object()
+            .unwrap()
+            .clone();
+        assert!(boundary_seconds(&options).is_err());
     }
 }

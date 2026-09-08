@@ -651,8 +651,8 @@ fn estimate_local_tempo_path(
         center = center.saturating_add(block_hop);
     }
 
-    let mut scores = Vec::with_capacity(blocks.len());
-    let mut back = Vec::with_capacity(blocks.len());
+    let mut scores: Vec<Vec<f32>> = Vec::with_capacity(blocks.len());
+    let mut back: Vec<Vec<usize>> = Vec::with_capacity(blocks.len());
     for (block_index, candidates) in blocks.iter().enumerate() {
         let mut block_scores = vec![f32::NEG_INFINITY; candidates.len()];
         let mut block_back = vec![0_usize; candidates.len()];

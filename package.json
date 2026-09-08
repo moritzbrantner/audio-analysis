@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "packageManager": "bun@1.4.0",
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "check:structure": "python3 scripts/check_extraction.py",
     "test:pages": "bun test tests/pages",
@@ -11,5 +13,9 @@
     "test:pages:e2e": "bash scripts/check-pages-e2e.sh",
     "test:e2e:smoke": "bun run test:pages:e2e",
     "check": "bun run check:structure"
+  },
+  "devDependencies": {
+    "oxlint": "1.81.0",
+    "oxlint-tsgolint": "7.0.2001"
   }
 }

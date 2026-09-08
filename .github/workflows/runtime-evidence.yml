@@ -60,10 +60,12 @@ jobs:
             crates/audio/audio-analysis-rhythm/examples/profile_rhythm.rs \
             scripts/profile-rhythm.sh \
             profiles/runtime-profiler/rhythm.json
-          git -C reference \
-            -c user.name='runtime-profiler' \
-            -c user.email='runtime-profiler@invalid' \
-            commit -m 'chore: attach comparable rhythm workload'
+          if ! git -C reference diff --cached --quiet; then
+            git -C reference \
+              -c user.name='runtime-profiler' \
+              -c user.email='runtime-profiler@invalid' \
+              commit -m 'chore: attach comparable rhythm workload'
+          fi
 
       - name: Prime deterministic workload
         run: |

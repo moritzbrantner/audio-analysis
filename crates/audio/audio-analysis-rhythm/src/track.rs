@@ -6,9 +6,8 @@
 //! tempo seeds a locally varying tempo trajectory which then drives beat tracking,
 //! so recorded/live material is not forced onto one global period.
 
-use audio_analysis_fourier::{spectrogram, StftConfig};
+use audio_analysis_fourier::{spectrogram, surface::complex_spectral_difference, StftConfig};
 use audio_contracts::{DetectError, Result};
-use rustfft::{num_complex::Complex32, FftPlanner};
 
 /// Configuration for whole-track rhythm analysis.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -391,12 +390,8 @@ fn spectral_onset_features(
         flux_novelty.push(flux);
     }
 
-    let mut complex_novelty = complex_spectral_difference(
-        samples,
-        sample_rate,
-        config.fft_size,
-        config.hop_size,
-    );
+    let mut complex_novelty =
+        complex_spectral_difference(samples, sample_rate, config.fft_size, config.hop_size)?;
     complex_novelty.resize(frames.len(), 0.0);
     complex_novelty.truncate(frames.len());
 
@@ -443,65 +438,6 @@ fn spectral_onset_features(
         timestamps,
         structural_descriptors,
     })
-}
-
-fn complex_spectral_difference(
-    samples: &[f32],
-    sample_rate: u32,
-    fft_size: usize,
-    hop_size: usize,
-) -> Vec<f32> {
-    if samples.is_empty() || sample_rate == 0 || fft_size == 0 || hop_size == 0 {
-        return Vec::new();
-    }
-    let mut planner = FftPlanner::<f32>::new();
-    let fft = planner.plan_fft_forward(fft_size);
-    let half_bins = fft_size / 2 + 1;
-    let mut previous_magnitude = vec![0.0_f32; half_bins];
-    let mut previous_phase = vec![0.0_f32; half_bins];
-    let mut previous_previous_phase = vec![0.0_f32; half_bins];
-    let denominator = fft_size.saturating_sub(1).max(1) as f32;
-    let mut novelty = Vec::new();
-    let mut start = 0_usize;
-    let mut frame_index = 0_usize;
-
-    while start < samples.len() {
-        let mut buffer = vec![Complex32::new(0.0, 0.0); fft_size];
-        for (index, value) in buffer.iter_mut().enumerate() {
-            let sample = samples.get(start + index).copied().unwrap_or(0.0);
-            let window = 0.5
-                - 0.5 * (std::f32::consts::TAU * index as f32 / denominator).cos();
-            value.re = sample * window;
-        }
-        fft.process(&mut buffer);
-
-        let mut frame_difference = 0.0_f32;
-        for (bin_index, value) in buffer.iter().take(half_bins).enumerate().skip(1) {
-            let magnitude = value.norm();
-            let phase = value.im.atan2(value.re);
-            if frame_index > 0 {
-                let predicted_phase = if frame_index > 1 {
-                    2.0 * previous_phase[bin_index] - previous_previous_phase[bin_index]
-                } else {
-                    previous_phase[bin_index]
-                };
-                let predicted = Complex32::from_polar(
-                    previous_magnitude[bin_index],
-                    predicted_phase,
-                );
-                let difference = (*value - predicted).norm();
-                let frequency_hz = bin_index as f32 * sample_rate as f32 / fft_size as f32;
-                frame_difference += (1.0 + difference).ln() * frequency_weight(frequency_hz);
-            }
-            previous_previous_phase[bin_index] = previous_phase[bin_index];
-            previous_phase[bin_index] = phase;
-            previous_magnitude[bin_index] = magnitude;
-        }
-        novelty.push(frame_difference);
-        frame_index += 1;
-        start = start.saturating_add(hop_size);
-    }
-    novelty
 }
 
 fn frequency_weight(frequency_hz: f32) -> f32 {
@@ -851,7 +787,13 @@ fn track_beat_frames_with_tempo_path(
         return Vec::new();
     }
 
-    let widest_period = frame_rate * 60.0 / fallback_bpm.min(55.0).max(1.0);
+    let slowest_bpm = tempo_path
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .fold(fallback_bpm, f32::min)
+        .max(1.0);
+    let widest_period = frame_rate * 60.0 / slowest_bpm;
     let global_max_gap = (widest_period * 1.72).ceil().max(1.0) as usize;
     let mut cumulative = vec![0.0_f32; novelty.len()];
     let mut back = vec![None; novelty.len()];
@@ -1118,7 +1060,8 @@ mod tests {
                 + std::f32::consts::FRAC_PI_2)
                 .sin();
         }
-        let novelty = complex_spectral_difference(&samples, sample_rate, 512, 128);
+        let novelty = complex_spectral_difference(&samples, sample_rate, 512, 128)
+            .expect("complex spectral difference");
         assert!(novelty.iter().copied().fold(0.0_f32, f32::max) > 0.1);
     }
 

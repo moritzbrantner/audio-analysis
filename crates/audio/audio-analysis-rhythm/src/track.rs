@@ -2,11 +2,11 @@
 //!
 //! This path keeps multiple tempo hypotheses visible, but no longer treats the
 //! strongest autocorrelation lag as sufficient evidence by itself. Each tempo
-//! candidate is rescored from the beat path it can actually support. The beat
-//! tracker is intentionally elastic so recorded/live material can produce a
-//! variable beat map instead of being snapped to one synthetic constant grid.
+//! candidate is rescored from the beat path it can actually support. The selected
+//! tempo seeds a locally varying tempo trajectory which then drives beat tracking,
+//! so recorded/live material is not forced onto one global period.
 
-use audio_analysis_fourier::{spectrogram, StftConfig};
+use audio_analysis_fourier::{spectrogram, surface::complex_spectral_difference, StftConfig};
 use audio_contracts::{DetectError, Result};
 
 /// Configuration for whole-track rhythm analysis.
@@ -16,9 +16,9 @@ pub struct TrackRhythmConfig {
     pub min_bpm: f32,
     /// Maximum tempo considered by the estimator.
     pub max_bpm: f32,
-    /// FFT size used for spectral-flux analysis.
+    /// FFT size used for onset analysis.
     pub fft_size: usize,
-    /// Hop size used for spectral-flux analysis.
+    /// Hop size used for onset analysis.
     pub hop_size: usize,
     /// Number of tempo hypotheses retained in the result.
     pub tempo_candidate_count: usize,
@@ -94,7 +94,7 @@ pub struct TempoPoint {
     pub timestamp_seconds: f64,
     /// Locally smoothed tempo at this beat.
     pub bpm: f32,
-    /// Confidence from local onset strength and interval smoothness.
+    /// Confidence from local onset strength and tempo-path continuity.
     pub confidence: f32,
 }
 
@@ -161,12 +161,25 @@ struct OnsetFeatures {
     structural_descriptors: Vec<StructuralDescriptor>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct LocalTempoCandidate {
+    bpm: f32,
+    score: f32,
+}
+
+#[derive(Debug, Clone)]
+struct TempoPath {
+    bpm_by_frame: Vec<f32>,
+    confidence_by_frame: Vec<f32>,
+}
+
 /// Analyzes a mono, normalized music track for tempo, beats, and downbeats.
 ///
 /// The returned candidates deliberately remain visible because half/double
 /// tempo ambiguity is intrinsic to musical audio. The selected candidate is
 /// the one with the strongest combination of autocorrelation and real beat-path
-/// evidence, rather than simply the strongest autocorrelation lag.
+/// evidence. It seeds a local tempogram path, and that path drives the final
+/// dynamic-programming beat tracker.
 pub fn analyze_rhythm_track(
     samples: &[f32],
     sample_rate: u32,
@@ -218,13 +231,27 @@ pub fn analyze_rhythm_track(
         return Ok(empty_analysis(hop_seconds, features.structural_descriptors));
     };
 
-    let beat_frames = track_beat_frames(
+    let tempo_path = estimate_local_tempo_path(
         &features.novelty,
         frame_rate,
+        config.min_bpm,
+        config.max_bpm,
         selected.bpm,
         config.beat_tightness,
     );
-    let tempo_map = build_tempo_map(&beat_frames, &features.timestamps, &features.novelty);
+    let beat_frames = track_beat_frames_with_tempo_path(
+        &features.novelty,
+        frame_rate,
+        &tempo_path.bpm_by_frame,
+        selected.bpm,
+        config.beat_tightness,
+    );
+    let tempo_map = build_tempo_map_with_path(
+        &beat_frames,
+        &features.timestamps,
+        &features.novelty,
+        &tempo_path,
+    );
     let (phase, downbeat_confidence) = infer_downbeat_phase(
         &beat_frames,
         &features.novelty,
@@ -258,9 +285,12 @@ pub fn analyze_rhythm_track(
     } else {
         0.0
     };
-    let confidence =
-        (0.60 * selected.score + 0.25 * candidate_margin + 0.15 * downbeat_confidence)
-            .clamp(0.0, 1.0);
+    let path_confidence = mean_at_frames(&tempo_path.confidence_by_frame, &beat_frames);
+    let confidence = (0.50 * selected.score
+        + 0.20 * candidate_margin
+        + 0.15 * downbeat_confidence
+        + 0.15 * path_confidence)
+        .clamp(0.0, 1.0);
 
     Ok(TrackRhythmAnalysis {
         bpm: Some(selected.bpm),
@@ -308,13 +338,13 @@ fn spectral_onset_features(
         });
     }
 
-    let mut novelty = Vec::with_capacity(frames.len());
+    let mut flux_novelty = Vec::with_capacity(frames.len());
     let mut low_energy = Vec::with_capacity(frames.len());
     let mut mid_energy = Vec::with_capacity(frames.len());
     let mut high_energy = Vec::with_capacity(frames.len());
     let mut chroma = Vec::with_capacity(frames.len());
     let mut timestamps = Vec::with_capacity(frames.len());
-    novelty.push(0.0);
+    flux_novelty.push(0.0);
 
     for frame in &frames {
         let mut low = 0.0_f32;
@@ -354,20 +384,36 @@ fn spectral_onset_features(
             .map(|(left, right)| {
                 let previous_log = (1.0 + 64.0 * left.magnitude).ln();
                 let current_log = (1.0 + 64.0 * right.magnitude).ln();
-                let frequency_weight = if right.frequency_hz <= 220.0 {
-                    1.5
-                } else if right.frequency_hz <= 2_000.0 {
-                    1.0
-                } else {
-                    0.55
-                };
-                (current_log - previous_log).max(0.0) * frequency_weight
+                (current_log - previous_log).max(0.0) * frequency_weight(right.frequency_hz)
             })
             .sum::<f32>();
-        novelty.push(flux);
+        flux_novelty.push(flux);
     }
 
-    adaptive_whiten(&mut novelty, 16);
+    let mut complex_novelty =
+        complex_spectral_difference(samples, sample_rate, config.fft_size, config.hop_size)?;
+    complex_novelty.resize(frames.len(), 0.0);
+    complex_novelty.truncate(frames.len());
+
+    let mut low_rise = vec![0.0_f32; low_energy.len()];
+    for index in 1..low_energy.len() {
+        low_rise[index] = (low_energy[index] - low_energy[index - 1]).max(0.0);
+    }
+
+    adaptive_whiten(&mut flux_novelty, 16);
+    adaptive_whiten(&mut complex_novelty, 16);
+    adaptive_whiten(&mut low_rise, 16);
+    normalize_nonnegative(&mut flux_novelty);
+    normalize_nonnegative(&mut complex_novelty);
+    normalize_nonnegative(&mut low_rise);
+
+    let mut novelty = flux_novelty
+        .iter()
+        .zip(complex_novelty.iter())
+        .zip(low_rise.iter())
+        .map(|((flux, complex), low)| 0.45 * flux + 0.40 * complex + 0.15 * low)
+        .collect::<Vec<_>>();
+    adaptive_whiten(&mut novelty, 12);
     normalize_nonnegative(&mut novelty);
     normalize_nonnegative(&mut low_energy);
     normalize_nonnegative(&mut mid_energy);
@@ -392,6 +438,16 @@ fn spectral_onset_features(
         timestamps,
         structural_descriptors,
     })
+}
+
+fn frequency_weight(frequency_hz: f32) -> f32 {
+    if frequency_hz <= 220.0 {
+        1.5
+    } else if frequency_hz <= 2_000.0 {
+        1.0
+    } else {
+        0.55
+    }
 }
 
 fn normalize_chroma(chroma: &mut [f32; 12]) {
@@ -545,23 +601,215 @@ fn beat_path_support(path: &[usize], novelty: &[f32], frame_rate: f32, bpm: f32)
         .clamp(0.0, 1.0)
 }
 
-fn track_beat_frames(novelty: &[f32], frame_rate: f32, bpm: f32, tightness: f32) -> Vec<usize> {
-    if novelty.is_empty() || frame_rate <= 0.0 || bpm <= 0.0 {
+fn estimate_local_tempo_path(
+    novelty: &[f32],
+    frame_rate: f32,
+    min_bpm: f32,
+    max_bpm: f32,
+    anchor_bpm: f32,
+    tightness: f32,
+) -> TempoPath {
+    if novelty.is_empty() || frame_rate <= 0.0 || anchor_bpm <= 0.0 {
+        return TempoPath {
+            bpm_by_frame: vec![anchor_bpm; novelty.len()],
+            confidence_by_frame: vec![0.0; novelty.len()],
+        };
+    }
+
+    let radius = ((frame_rate * 4.0).round() as usize).max(1);
+    let block_hop = ((frame_rate * 1.0).round() as usize).max(1);
+    let mut centers = Vec::new();
+    let mut blocks = Vec::new();
+    let mut center = 0_usize;
+    while center < novelty.len() {
+        let start = center.saturating_sub(radius);
+        let end = center.saturating_add(radius + 1).min(novelty.len());
+        let mut candidates = estimate_tempo_candidates(
+            &novelty[start..end],
+            frame_rate,
+            min_bpm,
+            max_bpm,
+            8,
+        )
+        .into_iter()
+        .map(|candidate| LocalTempoCandidate {
+            bpm: candidate.bpm,
+            score: candidate.autocorrelation_score,
+        })
+        .collect::<Vec<_>>();
+        if !candidates.iter().any(|candidate| {
+            (candidate.bpm - anchor_bpm).abs() / candidate.bpm.max(anchor_bpm) < 0.025
+        }) {
+            candidates.push(LocalTempoCandidate {
+                bpm: anchor_bpm.clamp(min_bpm, max_bpm),
+                score: 0.05,
+            });
+        }
+        candidates.sort_by(|left, right| right.score.total_cmp(&left.score));
+        centers.push(center);
+        blocks.push(candidates);
+        center = center.saturating_add(block_hop);
+    }
+
+    let mut scores: Vec<Vec<f32>> = Vec::with_capacity(blocks.len());
+    let mut back: Vec<Vec<usize>> = Vec::with_capacity(blocks.len());
+    for (block_index, candidates) in blocks.iter().enumerate() {
+        let mut block_scores = vec![f32::NEG_INFINITY; candidates.len()];
+        let mut block_back = vec![0_usize; candidates.len()];
+        if block_index == 0 {
+            for (index, candidate) in candidates.iter().enumerate() {
+                let anchor_distance = (candidate.bpm / anchor_bpm).log2().abs();
+                block_scores[index] = candidate.score - 0.08 * anchor_distance;
+            }
+        } else {
+            for (current_index, current) in candidates.iter().enumerate() {
+                let mut best_score = f32::NEG_INFINITY;
+                let mut best_previous = 0_usize;
+                for (previous_index, previous) in blocks[block_index - 1].iter().enumerate() {
+                    let ratio = (current.bpm / previous.bpm).log2().abs();
+                    let transition_penalty = tightness * 0.75 * ratio * ratio;
+                    let score = scores[block_index - 1][previous_index] + current.score
+                        - transition_penalty;
+                    if score > best_score {
+                        best_score = score;
+                        best_previous = previous_index;
+                    }
+                }
+                let anchor_distance = (current.bpm / anchor_bpm).log2().abs();
+                block_scores[current_index] = best_score - 0.04 * anchor_distance;
+                block_back[current_index] = best_previous;
+            }
+        }
+        scores.push(block_scores);
+        back.push(block_back);
+    }
+
+    let mut selected = vec![0_usize; blocks.len()];
+    if let Some(last_scores) = scores.last() {
+        let mut state = last_scores
+            .iter()
+            .enumerate()
+            .max_by(|(_, left), (_, right)| left.total_cmp(right))
+            .map(|(index, _)| index)
+            .unwrap_or(0);
+        for block_index in (0..blocks.len()).rev() {
+            selected[block_index] = state;
+            if block_index > 0 {
+                state = back[block_index][state];
+            }
+        }
+    }
+
+    let block_bpms = blocks
+        .iter()
+        .zip(selected.iter())
+        .map(|(candidates, state)| candidates[*state].bpm)
+        .collect::<Vec<_>>();
+    let block_confidence = blocks
+        .iter()
+        .zip(selected.iter())
+        .map(|(candidates, state)| {
+            let selected_score = candidates[*state].score;
+            let runner_up = candidates
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| *index != *state)
+                .map(|(_, candidate)| candidate.score)
+                .fold(0.0_f32, f32::max);
+            if selected_score <= f32::EPSILON {
+                0.0
+            } else {
+                ((selected_score - runner_up).max(0.0) / selected_score).clamp(0.0, 1.0)
+            }
+        })
+        .collect::<Vec<_>>();
+
+    TempoPath {
+        bpm_by_frame: interpolate_blocks(novelty.len(), &centers, &block_bpms, anchor_bpm),
+        confidence_by_frame: interpolate_blocks(novelty.len(), &centers, &block_confidence, 0.0),
+    }
+}
+
+fn interpolate_blocks(
+    frame_count: usize,
+    centers: &[usize],
+    values: &[f32],
+    fallback: f32,
+) -> Vec<f32> {
+    if frame_count == 0 {
         return Vec::new();
     }
-    let period = frame_rate * 60.0 / bpm;
-    if !period.is_finite() || period < 1.0 {
+    if centers.is_empty() || values.is_empty() {
+        return vec![fallback; frame_count];
+    }
+    if centers.len() == 1 || values.len() == 1 {
+        return vec![values[0]; frame_count];
+    }
+
+    let mut result = Vec::with_capacity(frame_count);
+    let mut left_index = 0_usize;
+    for frame in 0..frame_count {
+        while left_index + 1 < centers.len() && centers[left_index + 1] < frame {
+            left_index += 1;
+        }
+        if left_index + 1 >= centers.len() {
+            result.push(*values.last().unwrap_or(&fallback));
+            continue;
+        }
+        let left_center = centers[left_index];
+        let right_center = centers[left_index + 1];
+        if frame <= left_center || right_center <= left_center {
+            result.push(values[left_index]);
+            continue;
+        }
+        let amount = (frame - left_center) as f32 / (right_center - left_center) as f32;
+        result.push(values[left_index] + (values[left_index + 1] - values[left_index]) * amount);
+    }
+    result
+}
+
+fn track_beat_frames(novelty: &[f32], frame_rate: f32, bpm: f32, tightness: f32) -> Vec<usize> {
+    track_beat_frames_with_tempo_path(novelty, frame_rate, &[], bpm, tightness)
+}
+
+fn track_beat_frames_with_tempo_path(
+    novelty: &[f32],
+    frame_rate: f32,
+    tempo_path: &[f32],
+    fallback_bpm: f32,
+    tightness: f32,
+) -> Vec<usize> {
+    if novelty.is_empty() || frame_rate <= 0.0 || fallback_bpm <= 0.0 {
+        return Vec::new();
+    }
+    let fallback_period = frame_rate * 60.0 / fallback_bpm;
+    if !fallback_period.is_finite() || fallback_period < 1.0 {
         return Vec::new();
     }
 
-    // The wider transition band is deliberate: the selected BPM is a global
-    // hypothesis, while individual beat timestamps may accelerate or decelerate.
-    let min_gap = (period * 0.58).floor().max(1.0) as usize;
-    let max_gap = (period * 1.72).ceil().max(min_gap as f32) as usize;
+    let slowest_bpm = tempo_path
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .fold(fallback_bpm, f32::min)
+        .max(1.0);
+    let widest_period = frame_rate * 60.0 / slowest_bpm;
+    let global_max_gap = (widest_period * 1.72).ceil().max(1.0) as usize;
     let mut cumulative = vec![0.0_f32; novelty.len()];
     let mut back = vec![None; novelty.len()];
 
     for index in 0..novelty.len() {
+        let local_bpm = tempo_path
+            .get(index)
+            .copied()
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .unwrap_or(fallback_bpm);
+        let period = frame_rate * 60.0 / local_bpm;
+        let min_gap = (period * 0.58).floor().max(1.0) as usize;
+        let max_gap = (period * 1.72)
+            .ceil()
+            .max(min_gap as f32)
+            .min(global_max_gap as f32) as usize;
         let mut best_score = 0.0_f32;
         let mut best_previous = None;
         for gap in min_gap..=max_gap {
@@ -569,7 +817,13 @@ fn track_beat_frames(novelty: &[f32], frame_rate: f32, bpm: f32, tightness: f32)
                 break;
             }
             let previous = index - gap;
-            let ratio = gap as f32 / period;
+            let previous_bpm = tempo_path
+                .get(previous)
+                .copied()
+                .filter(|value| value.is_finite() && *value > 0.0)
+                .unwrap_or(local_bpm);
+            let expected_period = frame_rate * 60.0 / ((local_bpm + previous_bpm) * 0.5);
+            let ratio = gap as f32 / expected_period;
             let transition = -tightness * ratio.ln().powi(2);
             let score = cumulative[previous] + transition;
             if best_previous.is_none() || score > best_score {
@@ -613,6 +867,35 @@ fn track_beat_frames(novelty: &[f32], frame_rate: f32, bpm: f32, tightness: f32)
     }
 }
 
+fn build_tempo_map_with_path(
+    beat_frames: &[usize],
+    timestamps: &[f64],
+    novelty: &[f32],
+    tempo_path: &TempoPath,
+) -> Vec<TempoPoint> {
+    beat_frames
+        .iter()
+        .filter_map(|frame| {
+            let bpm = tempo_path.bpm_by_frame.get(*frame).copied()?;
+            if !bpm.is_finite() || bpm <= 0.0 {
+                return None;
+            }
+            let onset = novelty.get(*frame).copied().unwrap_or(0.0);
+            let path_confidence = tempo_path
+                .confidence_by_frame
+                .get(*frame)
+                .copied()
+                .unwrap_or(0.0);
+            Some(TempoPoint {
+                timestamp_seconds: *timestamps.get(*frame)?,
+                bpm,
+                confidence: (0.60 * onset + 0.40 * path_confidence).clamp(0.0, 1.0),
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
 fn build_tempo_map(
     beat_frames: &[usize],
     timestamps: &[f64],
@@ -661,6 +944,21 @@ fn build_tempo_map(
             })
         })
         .collect()
+}
+
+fn mean_at_frames(values: &[f32], frames: &[usize]) -> f32 {
+    if frames.is_empty() {
+        return 0.0;
+    }
+    let present = frames
+        .iter()
+        .filter_map(|frame| values.get(*frame).copied())
+        .collect::<Vec<_>>();
+    if present.is_empty() {
+        0.0
+    } else {
+        present.iter().sum::<f32>() / present.len() as f32
+    }
 }
 
 fn infer_downbeat_phase(
@@ -750,6 +1048,40 @@ mod tests {
     }
 
     #[test]
+    fn complex_difference_responds_to_phase_discontinuity() {
+        let sample_rate = 8_000;
+        let frequency = 440.0_f32;
+        let mut samples = (0..sample_rate)
+            .map(|index| {
+                (std::f32::consts::TAU * frequency * index as f32 / sample_rate as f32).sin()
+            })
+            .collect::<Vec<_>>();
+        for (index, sample) in samples.iter_mut().enumerate().skip(sample_rate as usize / 2) {
+            *sample = (std::f32::consts::TAU * frequency * index as f32 / sample_rate as f32
+                + std::f32::consts::FRAC_PI_2)
+                .sin();
+        }
+        let novelty = complex_spectral_difference(&samples, sample_rate, 512, 128)
+            .expect("complex spectral difference");
+        assert!(novelty.iter().copied().fold(0.0_f32, f32::max) > 0.1);
+    }
+
+    #[test]
+    fn local_tempo_path_follows_a_tempo_change() {
+        let mut novelty = vec![0.0_f32; 2_400];
+        for frame in (0..1_200).step_by(60) {
+            novelty[frame] = 1.0;
+        }
+        for frame in (1_200..2_400).step_by(40) {
+            novelty[frame] = 1.0;
+        }
+        let path = estimate_local_tempo_path(&novelty, 100.0, 60.0, 200.0, 120.0, 1.25);
+        let early = path.bpm_by_frame[600];
+        let late = path.bpm_by_frame[1_800];
+        assert!(late > early + 20.0, "early={early}, late={late}");
+    }
+
+    #[test]
     fn dynamic_programming_tracks_regular_beats() {
         let novelty = pulse_envelope(40, 16);
         let beats = track_beat_frames(&novelty, 80.0, 120.0, 1.25);
@@ -758,6 +1090,40 @@ mod tests {
             let gap = pair[1] - pair[0];
             (23..=69).contains(&gap)
         }));
+    }
+
+    #[test]
+    fn variable_tempo_tracker_uses_local_periods() {
+        let mut novelty = vec![0.0_f32; 2_000];
+        for frame in (0..1_000).step_by(60) {
+            novelty[frame] = 1.0;
+        }
+        for frame in (1_000..2_000).step_by(40) {
+            novelty[frame] = 1.0;
+        }
+        let mut tempo_path = vec![100.0_f32; novelty.len()];
+        tempo_path[1_000..].fill(150.0);
+        let beats = track_beat_frames_with_tempo_path(
+            &novelty,
+            100.0,
+            &tempo_path,
+            120.0,
+            1.25,
+        );
+        let early_gaps = beats
+            .windows(2)
+            .filter(|pair| pair[1] < 1_000)
+            .map(|pair| pair[1] - pair[0])
+            .collect::<Vec<_>>();
+        let late_gaps = beats
+            .windows(2)
+            .filter(|pair| pair[0] >= 1_000)
+            .map(|pair| pair[1] - pair[0])
+            .collect::<Vec<_>>();
+        assert!(!early_gaps.is_empty() && !late_gaps.is_empty());
+        let early = early_gaps.iter().sum::<usize>() as f32 / early_gaps.len() as f32;
+        let late = late_gaps.iter().sum::<usize>() as f32 / late_gaps.len() as f32;
+        assert!(late < early - 10.0, "early={early}, late={late}");
     }
 
     #[test]

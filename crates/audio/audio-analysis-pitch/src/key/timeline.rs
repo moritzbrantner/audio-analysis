@@ -585,7 +585,7 @@ mod tests {
             scale: MusicalScale::Minor,
         };
         let fs_major = KeyState {
-            tonic: NoteName::Fs,
+            tonic: NoteName::FSharp,
             scale: MusicalScale::Major,
         };
         assert!(transition_score(c_major, a_minor) > transition_score(c_major, fs_major));

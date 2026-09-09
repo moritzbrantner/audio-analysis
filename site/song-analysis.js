@@ -169,6 +169,9 @@ async function analyzeSongFile(file) {
       timeOffsetSeconds: 0,
     });
     if (!isCurrent(generation)) return;
+    if (!value || typeof value !== "object") {
+      throw new Error("The rhythm analyzer returned no structured result.");
+    }
 
     const keyValue = await keyAnalyzer.analyzeTrackKey(samples, analysisRate, {
       fftSize: KEY_FFT_SIZE,
@@ -180,10 +183,6 @@ async function analyzeSongFile(file) {
       barBoundariesSeconds: keyBarBoundaries(value.downbeats, audioBuffer.duration),
     });
     if (!isCurrent(generation)) return;
-
-    if (!value || typeof value !== "object") {
-      throw new Error("The rhythm analyzer returned no structured result.");
-    }
     if (!keyValue || typeof keyValue !== "object") {
       throw new Error("The musical-key analyzer returned no structured result.");
     }

@@ -595,7 +595,7 @@ mod tests {
         }
         normalize_chroma(&mut chroma);
         let candidates = score_key_candidates(&chroma, KeyProfile::Krumhansl);
-        assert_eq!(candidates[0].tonic, NoteName::Fs);
+        assert_eq!(candidates[0].tonic, NoteName::FSharp);
         assert_eq!(candidates[0].scale, MusicalScale::Minor);
     }
 

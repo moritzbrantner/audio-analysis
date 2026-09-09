@@ -177,6 +177,7 @@ async function analyzeSongFile(file) {
       timelineWindowSeconds: KEY_TIMELINE_WINDOW_SECONDS,
       timelineHopSeconds: KEY_TIMELINE_HOP_SECONDS,
       timelineMinConfidence: 0.1,
+      barBoundariesSeconds: keyBarBoundaries(value.downbeats, audioBuffer.duration),
     });
     if (!isCurrent(generation)) return;
 
@@ -214,9 +215,11 @@ async function analyzeSongFile(file) {
         },
       },
       ...rhythm,
-      keySchemaVersion: keyValue.schemaVersion ?? "audio-analysis-key-track/v1",
+      keySchemaVersion: keyValue.schemaVersion ?? "audio-analysis-key-track/v2",
       key: keyValue.dominant ?? null,
       keyTimeline: Array.isArray(keyValue.timeline) ? keyValue.timeline : [],
+      keySegments: Array.isArray(keyValue.segments) ? keyValue.segments : [],
+      keyBoundaryAligned: keyValue.boundaryAligned === true,
       keyTimelineWindowSeconds: keyValue.timelineWindowSeconds ?? KEY_TIMELINE_WINDOW_SECONDS,
       keyTimelineHopSeconds: keyValue.timelineHopSeconds ?? KEY_TIMELINE_HOP_SECONDS,
     };
@@ -302,7 +305,9 @@ function renderSongAnalysis(analysis) {
     bpm: analysis.bpm,
     confidence: analysis.confidence,
     key: analysis.key,
+    keyBoundaryAligned: analysis.keyBoundaryAligned,
     keyTimeline: Array.isArray(analysis.keyTimeline) ? analysis.keyTimeline.slice(0, KEY_PREVIEW_COUNT) : [],
+    keySegments: Array.isArray(analysis.keySegments) ? analysis.keySegments.slice(0, KEY_PREVIEW_COUNT) : [],
     sectionsMethod: analysis.sectionsMethod,
     sections: analysis.sections,
     beats: Array.isArray(analysis.beats) ? analysis.beats.slice(0, BEAT_PREVIEW_COUNT) : [],
@@ -366,8 +371,9 @@ function renderKeySummary(analysis) {
   const windows = Array.isArray(analysis.keyTimeline) ? analysis.keyTimeline : [];
   const labelled = windows.filter((window) => typeof window?.key?.label === "string");
   const labels = Array.from(new Set(labelled.map((window) => window.key.label)));
+  const alignment = analysis.keyBoundaryAligned ? " Bar/downbeat boundaries from the Rust rhythm analysis align the local decoder." : "";
   timeline.textContent = windows.length
-    ? `${labelled.length} of ${windows.length} local key windows are confidence-bearing${labels.length ? ` (${labels.join(", ")})` : ""}.`
+    ? `${labelled.length} of ${windows.length} local key windows are confidence-bearing${labels.length ? ` (${labels.join(", ")})` : ""}.${alignment}`
     : "No local key windows were returned.";
 
   elements.keySummary.append(lead, detail, timeline);
@@ -557,6 +563,21 @@ function beatTimes(beats) {
   return beats
     .map((beat) => finiteNumber(beat?.timestampSeconds))
     .filter((time) => time !== null);
+}
+
+function keyBarBoundaries(downbeats, duration) {
+  if (!Array.isArray(downbeats) || downbeats.length < 2 || !Number.isFinite(duration) || duration <= 0) {
+    return [];
+  }
+  const boundaries = downbeats
+    .map((time) => finiteNumber(time))
+    .filter((time) => time !== null && time >= 0 && time <= duration)
+    .sort((left, right) => left - right);
+  const unique = Array.from(new Set(boundaries));
+  if (unique.length < 2) return [];
+  if (unique[0] > 0) unique.unshift(0);
+  if (unique.at(-1) < duration) unique.push(duration);
+  return unique;
 }
 
 function sectionBoundaryTimes(sections, duration) {

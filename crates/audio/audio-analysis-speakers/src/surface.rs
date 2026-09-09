@@ -9,8 +9,8 @@ use runtime_core::{
 use crate::{
     assign_speakers_to_transcript_with_policy, diarize_speakers, DiarizedSpeaker, EnergyVadConfig,
     EnergyVoiceActivityDetector, SpeakerAudio, SpeakerDiarizationRequest,
-    SpeakerDiarizationResponse, SpeakerDiarizer, SpeakerEmbeddingExtractor, SpeakerId,
-    SpeakerIdentificationOptions, SpeakerLabel, SpeakerLibrary, SpeakerSegmentPrediction,
+    SpeakerDiarizationResponse, SpeakerDiarizer, SpeakerEmbedding, SpeakerEmbeddingExtractor,
+    SpeakerId, SpeakerIdentificationOptions, SpeakerLabel, SpeakerLibrary, SpeakerSegmentPrediction,
     SpeakerTranscriptAssignmentPolicy, SpectralSpeakerEmbedder, TranscriptionContract,
     VoiceActivityDetector, WindowedSpeakerDiarizer,
 };
@@ -40,7 +40,7 @@ pub fn package_surface() -> PackageSurface {
             operation(
                 "audio.speakers.identify",
                 "Identify speaker",
-                "Builds a transient enrolled-speaker library and identifies a query embedding.",
+                "Identifies a query against either raw enrollment samples or a persisted model-compatible Speaker Library.",
                 serde_json::json!({"querySamples": [0.0, 1.0, 0.0, -1.0], "sampleRate": 48000, "speakers": [{"id": "speaker-1", "label": "Speaker 1", "samples": [0.0, 1.0, 0.0, -1.0]}]}),
             ),
             operation(
@@ -124,7 +124,7 @@ fn response(operation: OperationId, value: serde_json::Value) -> SurfaceResponse
         ),
         "audio.speakers.identify" => (
             "Speaker identification result",
-            "Built a transient enrolled-speaker library and identified the query embedding.",
+            "Identified the query embedding against a model-compatible Speaker Library.",
             serde_json::json!({
                 "speakerCount": value.get("speakerCount").cloned().unwrap_or(serde_json::Value::Null),
                 "matchCount": value.get("matches").and_then(serde_json::Value::as_array).map_or(0, Vec::len)
@@ -195,52 +195,75 @@ fn embed_value(input: serde_json::Value) -> Result<serde_json::Value, String> {
             "version": embedding.model().version,
             "dimensions": embedding.dimensions()
         },
-        "valuesPreview": embedding.values().iter().copied().take(DEFAULT_PREVIEW_VALUES).collect::<Vec<_>>()
+        "valuesPreview": embedding.values().iter().copied().take(DEFAULT_PREVIEW_VALUES).collect::<Vec<_>>(),
+        "embedding": &embedding
     }))
 }
 
 fn identify_value(input: serde_json::Value) -> Result<serde_json::Value, String> {
-    let query = sample_array(&input, "querySamples")?;
-    let sample_rate = sample_rate(&input)?;
-    let channels = channels(&input)?;
-    let mut embedder = speaker_embedder(&input)?;
-    let query_audio = SpeakerAudio::interleaved(&query, sample_rate, channels)
-        .map_err(|error| error.to_string())?;
-    let query_embedding = embedder
-        .embed_speaker(&query_audio)
-        .map_err(|error| error.to_string())?;
-    let mut library = SpeakerLibrary::new();
-    let speakers = input
-        .get("speakers")
-        .and_then(serde_json::Value::as_array)
-        .ok_or_else(|| "speakers must be an array".to_string())?;
-    for speaker in speakers {
-        let id = speaker
-            .get("id")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "speaker id must be a string".to_string())?;
-        let label = speaker
-            .get("label")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or(id);
-        let samples = sample_array(speaker, "samples")?;
-        let audio = SpeakerAudio::interleaved(&samples, sample_rate, channels)
+    let (query_embedding, library) = if let Some(library_value) = input.get("library") {
+        let query_embedding: SpeakerEmbedding = serde_json::from_value(
+            input
+                .get("queryEmbedding")
+                .cloned()
+                .ok_or_else(|| "queryEmbedding is required with library".to_string())?,
+        )
+        .map_err(|error| format!("invalid queryEmbedding: {error}"))?;
+        let library_json =
+            serde_json::to_string(library_value).map_err(|error| error.to_string())?;
+        let library = SpeakerLibrary::from_json_str(&library_json)
+            .map_err(|error| format!("invalid Speaker Library: {error}"))?;
+        (query_embedding, library)
+    } else {
+        let query = sample_array(&input, "querySamples")?;
+        let sample_rate = sample_rate(&input)?;
+        let channels = channels(&input)?;
+        let mut embedder = speaker_embedder(&input)?;
+        let query_audio = SpeakerAudio::interleaved(&query, sample_rate, channels)
             .map_err(|error| error.to_string())?;
-        library
-            .enroll(
-                SpeakerId::new(id).map_err(|error| error.to_string())?,
-                SpeakerLabel::new(label).map_err(|error| error.to_string())?,
-                &audio,
-                &mut embedder,
-            )
+        let query_embedding = embedder
+            .embed_speaker(&query_audio)
             .map_err(|error| error.to_string())?;
-    }
+        let mut library = SpeakerLibrary::new();
+        let speakers = input
+            .get("speakers")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| "speakers must be an array".to_string())?;
+        for speaker in speakers {
+            let id = speaker
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| "speaker id must be a string".to_string())?;
+            let label = speaker
+                .get("label")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(id);
+            let samples = sample_array(speaker, "samples")?;
+            let audio = SpeakerAudio::interleaved(&samples, sample_rate, channels)
+                .map_err(|error| error.to_string())?;
+            library
+                .enroll(
+                    SpeakerId::new(id).map_err(|error| error.to_string())?,
+                    SpeakerLabel::new(label).map_err(|error| error.to_string())?,
+                    &audio,
+                    &mut embedder,
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        (query_embedding, library)
+    };
+
     let result = library
         .identify(&query_embedding, &SpeakerIdentificationOptions::default())
         .map_err(|error| error.to_string())?;
+    let library_json = library.to_json_string().map_err(|error| error.to_string())?;
+    let library_snapshot: serde_json::Value =
+        serde_json::from_str(&library_json).map_err(|error| error.to_string())?;
     Ok(serde_json::json!({
-        "sampleRate": sample_rate,
+        "sampleRate": query_embedding.sample_rate(),
         "speakerCount": library.len(),
+        "queryEmbedding": &query_embedding,
+        "library": library_snapshot,
         "unknown": result.unknown,
         "margin": result.margin,
         "bestMatch": result.best_match.as_ref().map(|matched| serde_json::json!({
@@ -542,6 +565,7 @@ mod tests {
             .map(|operation| operation.id.as_str())
             .collect::<Vec<_>>();
         assert!(ids.contains(&"audio.speakers.embed"));
+        assert!(ids.contains(&"audio.speakers.identify"));
         assert!(ids.contains(&"audio.speakers.assignTranscript"));
         assert!(ids.contains(&"audio.speakers.vad"));
         assert!(ids.contains(&"audio.speakers.diarize"));
@@ -559,6 +583,45 @@ mod tests {
         assert!(response.value["summary"].is_object());
         assert!(response.value["result"].is_object());
         assert!(response.value["model"]["dimensions"].as_u64().unwrap() > 0);
+        assert!(!response.value["embedding"]["values"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn identify_operation_reuses_persistent_library_snapshot() {
+        let first = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("audio.speakers.identify"),
+            input: serde_json::json!({
+                "querySamples": [0.0, 1.0, 0.0, -1.0],
+                "sampleRate": 4,
+                "channels": 1,
+                "fftSize": 4,
+                "hopSize": 2,
+                "bands": 2,
+                "speakers": [{
+                    "id": "speaker-1",
+                    "label": "Speaker 1",
+                    "samples": [0.0, 1.0, 0.0, -1.0]
+                }]
+            }),
+        })
+        .expect("initial identify");
+        assert_eq!(first.value["bestMatch"]["speakerId"], "speaker-1");
+        assert!(first.value["library"].is_object());
+        assert!(first.value["queryEmbedding"].is_object());
+
+        let second = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("audio.speakers.identify"),
+            input: serde_json::json!({
+                "library": first.value["library"].clone(),
+                "queryEmbedding": first.value["queryEmbedding"].clone()
+            }),
+        })
+        .expect("persistent identify");
+        assert_eq!(second.value["speakerCount"], 1);
+        assert_eq!(second.value["bestMatch"]["speakerId"], "speaker-1");
     }
 
     #[test]

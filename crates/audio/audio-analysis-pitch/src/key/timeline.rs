@@ -480,8 +480,11 @@ fn stable_run_mask(states: &[KeyState], min_windows: usize) -> Vec<bool> {
     if states.is_empty() {
         return Vec::new();
     }
-    if states.len() == 1 {
-        return vec![true];
+    if min_windows <= 1 {
+        return vec![true; states.len()];
+    }
+    if states.len() < min_windows {
+        return vec![false; states.len()];
     }
     let mut stable = vec![false; states.len()];
     let mut start = 0_usize;
@@ -589,6 +592,15 @@ mod tests {
             scale: MusicalScale::Major,
         };
         assert!(transition_score(c_major, a_minor) > transition_score(c_major, fs_major));
+    }
+
+    #[test]
+    fn one_window_is_not_stable_when_two_are_required() {
+        let c_major = KeyState {
+            tonic: NoteName::C,
+            scale: MusicalScale::Major,
+        };
+        assert_eq!(stable_run_mask(&[c_major], 2), vec![false]);
     }
 
     #[test]

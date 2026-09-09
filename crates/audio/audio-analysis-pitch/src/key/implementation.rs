@@ -24,6 +24,10 @@ const KRUMHANSL_MINOR: [f32; 12] = [
 const TEMPERLEY_MAJOR: [f32; 12] = [5.0, 2.0, 3.5, 2.0, 4.5, 4.0, 2.0, 4.5, 2.0, 3.5, 1.5, 4.0];
 const TEMPERLEY_MINOR: [f32; 12] = [5.0, 2.0, 3.5, 4.5, 2.0, 4.0, 2.0, 4.5, 3.5, 2.0, 1.5, 4.0];
 const MIN_TONAL_KEY_STRENGTH: f32 = 0.70;
+// Pearson correlation is scale-invariant, so nearly uniform broadband chroma can
+// correlate strongly by chance. Require a minimum absolute pitch-class contrast
+// before a profile match is allowed to become key metadata.
+const MIN_CHROMA_CONTRAST: f32 = 0.05;
 
 /// Key profile family used to score the chroma vector.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -294,6 +298,9 @@ pub(crate) fn estimate_from_chroma(
     if analysis.peak_count == 0 || analysis.chroma.bins.iter().sum::<f32>() <= f32::EPSILON {
         return None;
     }
+    if chroma_contrast(&analysis.chroma.bins) < MIN_CHROMA_CONTRAST {
+        return None;
+    }
     let candidates = score_key_candidates(&analysis.chroma.bins, profile);
     let selected_index = selected
         .and_then(|(tonic, scale)| {
@@ -506,6 +513,15 @@ fn normalize_chroma(chroma: &mut [f32; 12]) {
     let _ = normalize_nonnegative(chroma);
 }
 
+fn chroma_contrast(chroma: &[f32; 12]) -> f32 {
+    let mean = chroma.iter().sum::<f32>() / chroma.len() as f32;
+    chroma
+        .iter()
+        .map(|value| (*value - mean).powi(2))
+        .sum::<f32>()
+        .sqrt()
+}
+
 fn profile_correlation(
     chroma: &[f32; 12],
     tonic: usize,
@@ -597,6 +613,26 @@ mod tests {
         let candidates = score_key_candidates(&chroma, KeyProfile::Krumhansl);
         assert_eq!(candidates[0].tonic, NoteName::FSharp);
         assert_eq!(candidates[0].scale, MusicalScale::Minor);
+    }
+
+    #[test]
+    fn near_uniform_chroma_cannot_become_a_key_from_correlation_alone() {
+        let profile_mean = KRUMHANSL_MAJOR.iter().sum::<f32>() / 12.0;
+        let mut chroma = [1.0 / 12.0; 12];
+        for (value, profile_value) in chroma.iter_mut().zip(KRUMHANSL_MAJOR) {
+            *value += (profile_value - profile_mean) * 0.0001;
+        }
+        normalize_chroma(&mut chroma);
+        let analysis = HarmonicChromaAnalysis {
+            chroma: ChromaVector { bins: chroma },
+            tuning_cents: 0.0,
+            frame_count: 100,
+            peak_count: 100,
+        };
+        let candidates = score_key_candidates(&analysis.chroma.bins, KeyProfile::Krumhansl);
+        assert!(candidates[0].correlation > 0.99);
+        assert!(chroma_contrast(&analysis.chroma.bins) < MIN_CHROMA_CONTRAST);
+        assert!(estimate_from_chroma(&analysis, KeyProfile::Krumhansl, None).is_none());
     }
 
     #[test]

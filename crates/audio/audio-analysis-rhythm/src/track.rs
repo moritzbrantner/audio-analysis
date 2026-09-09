@@ -895,6 +895,7 @@ fn build_tempo_map_with_path(
         .collect()
 }
 
+#[cfg(test)]
 fn build_tempo_map(
     beat_frames: &[usize],
     timestamps: &[f64],

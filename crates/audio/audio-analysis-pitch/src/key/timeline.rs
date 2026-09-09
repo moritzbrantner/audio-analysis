@@ -531,12 +531,38 @@ fn build_segments(timeline: &[KeyTimelineWindow]) -> Vec<KeySegment> {
             window_count: 1,
         });
     }
+    for index in 0..segments.len().saturating_sub(1) {
+        if segments[index].end_seconds > segments[index + 1].start_seconds {
+            let boundary =
+                (segments[index].end_seconds + segments[index + 1].start_seconds) * 0.5;
+            segments[index].end_seconds = boundary;
+            segments[index + 1].start_seconds = boundary;
+        }
+    }
     segments
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ChromaVector;
+
+    fn test_key(tonic: NoteName, scale: MusicalScale, confidence: f32) -> MusicalKeyEstimate {
+        MusicalKeyEstimate {
+            tonic,
+            scale,
+            strength: 1.0,
+            confidence,
+            runner_up: KeyCandidate {
+                tonic: NoteName::B,
+                scale: MusicalScale::Minor,
+                correlation: 0.0,
+            },
+            tuning_cents: 0.0,
+            chroma: ChromaVector { bins: [0.0; 12] },
+            peak_count: 1,
+        }
+    }
 
     #[test]
     fn timeline_config_rejects_invalid_values() {
@@ -618,6 +644,48 @@ mod tests {
             stable_run_mask(&states, 2),
             vec![true, true, false, true, true]
         );
+    }
+
+    #[test]
+    fn overlapping_fixed_windows_do_not_create_overlapping_key_segments() {
+        let c_major = test_key(NoteName::C, MusicalScale::Major, 0.8);
+        let g_major = test_key(NoteName::G, MusicalScale::Major, 0.9);
+        let timeline = vec![
+            KeyTimelineWindow {
+                start_seconds: 0.0,
+                end_seconds: 24.0,
+                center_seconds: 12.0,
+                key: Some(c_major.clone()),
+            },
+            KeyTimelineWindow {
+                start_seconds: 8.0,
+                end_seconds: 32.0,
+                center_seconds: 20.0,
+                key: Some(c_major.clone()),
+            },
+            KeyTimelineWindow {
+                start_seconds: 16.0,
+                end_seconds: 40.0,
+                center_seconds: 28.0,
+                key: Some(c_major),
+            },
+            KeyTimelineWindow {
+                start_seconds: 24.0,
+                end_seconds: 48.0,
+                center_seconds: 36.0,
+                key: Some(g_major.clone()),
+            },
+            KeyTimelineWindow {
+                start_seconds: 32.0,
+                end_seconds: 56.0,
+                center_seconds: 44.0,
+                key: Some(g_major),
+            },
+        ];
+        let segments = build_segments(&timeline);
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0].end_seconds, 32.0);
+        assert_eq!(segments[1].start_seconds, 32.0);
     }
 
     #[test]

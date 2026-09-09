@@ -7,6 +7,8 @@ use std::collections::VecDeque;
 use audio_analysis_core::mono_samples;
 use audio_contracts::{AnalysisEvent, AudioAnalyzer, AudioFrame, DetectError, Result};
 
+const MIN_PEAK_RELATIVE_SCORE: f32 = 0.9;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 /// Data type for pitch detector config.
 pub struct PitchDetectorConfig {
@@ -415,9 +417,12 @@ impl AutocorrelationPitchDetector {
             scores.push(score);
         }
 
-        let (selected_lag, selected_score) =
-            first_confident_peak(min_lag, &scores, self.config.confidence_threshold)
-                .unwrap_or((best_lag, best_score));
+        let peak_threshold = self
+            .config
+            .confidence_threshold
+            .max(best_score * MIN_PEAK_RELATIVE_SCORE);
+        let (selected_lag, selected_score) = first_confident_peak(min_lag, &scores, peak_threshold)
+            .unwrap_or((best_lag, best_score));
 
         if selected_score < self.config.confidence_threshold {
             return Ok(PitchEstimate::unpitched(best_score.max(0.0)));
@@ -572,6 +577,29 @@ mod tests {
             .collect()
     }
 
+    fn harmonic_tone(
+        fundamental_hz: f32,
+        sample_rate: u32,
+        seconds: f32,
+        harmonic_amplitudes: &[f32],
+    ) -> Vec<f32> {
+        let samples = (sample_rate as f32 * seconds) as usize;
+        (0..samples)
+            .map(|index| {
+                let t = index as f32 / sample_rate as f32;
+                harmonic_amplitudes
+                    .iter()
+                    .enumerate()
+                    .map(|(harmonic, amplitude)| {
+                        let frequency_hz = fundamental_hz * (harmonic + 1) as f32;
+                        amplitude
+                            * (2.0 * std::f32::consts::PI * frequency_hz * t).sin()
+                    })
+                    .sum()
+            })
+            .collect()
+    }
+
     #[test]
     fn config_validation_rejects_invalid_values() {
         assert!(PitchDetectorConfig {
@@ -635,6 +663,22 @@ mod tests {
                 "expected {frequency}, got {actual}"
             );
         }
+    }
+
+    #[test]
+    fn prefers_stronger_fundamental_period_over_early_harmonic_peak() {
+        let detector = AutocorrelationPitchDetector::new(PitchDetectorConfig {
+            min_frequency_hz: 60.0,
+            max_frequency_hz: 500.0,
+            confidence_threshold: 0.6,
+        })
+        .unwrap();
+        let samples = harmonic_tone(82.41, 48_000, 0.12, &[0.05, 1.0, 0.4, 0.2, 0.1]);
+        let estimate = detector.estimate_samples(&samples, 48_000).unwrap();
+
+        assert_approx_eq(estimate.frequency_hz.unwrap(), 82.41, 1.0);
+        assert_eq!(estimate.note_name().as_deref(), Some("E2"));
+        assert!(estimate.confidence > 0.9);
     }
 
     #[test]

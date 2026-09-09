@@ -1,0 +1,21 @@
+[workspace]
+members = ["crates/guitar-tuner-core"]
+resolver = "2"
+
+[package]
+name = "guitar-tuner"
+version = "0.1.0"
+description = "Tauri guitar tuner example"
+authors = ["moritzbrantner"]
+edition = "2021"
+
+[lib]
+name = "guitar_tuner_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.5.6", features = [] }
+
+[dependencies]
+guitar-tuner-core = { path = "crates/guitar-tuner-core" }
+tauri = { version = "=2.10.3", features = [] }

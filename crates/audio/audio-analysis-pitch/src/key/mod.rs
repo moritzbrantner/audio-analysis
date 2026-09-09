@@ -8,4 +8,7 @@ mod implementation;
 mod timeline;
 
 pub use implementation::*;
-pub use timeline::{analyze_key_track, KeyTimelineConfig, KeyTimelineWindow, TrackKeyAnalysis};
+pub use timeline::{
+    analyze_key_track, analyze_key_track_with_boundaries, KeySegment, KeyTimelineConfig,
+    KeyTimelineWindow, TrackKeyAnalysis,
+};

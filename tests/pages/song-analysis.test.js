@@ -49,25 +49,34 @@ describe("whole-song analysis page", () => {
     expect(rhythmWasmBinding).toContain('OperationId::new("audio.rhythm.analyze")');
     expect(pitchWasmBinding).toContain("#[wasm_bindgen(js_name = analyzeTrackKey)]");
     expect(pitchWasmBinding).toContain("samples: &[f32]");
-    expect(pitchWasmBinding).toContain(
-      "analyze_key_track(samples, sample_rate, harmonic_config, timeline_config)",
-    );
+    expect(pitchWasmBinding).toContain("analyze_key_track_with_boundaries(");
+    expect(pitchWasmBinding).toContain("&boundaries,");
     expect(pitchWasmBinding).not.toContain("fn key_timeline(");
     expect(pitchKeyTimeline).toContain("pub fn analyze_key_track(");
+    expect(pitchKeyTimeline).toContain("pub fn analyze_key_track_with_boundaries(");
     expect(buildPages).toContain("export async function analyzeTrack(samples, sampleRate, options = {})");
     expect(buildPages).toContain("export async function analyzeTrackKey(samples, sampleRate, options = {})");
   });
 
-  test("keeps key uncertainty and change windows explicit", () => {
+  test("feeds Rust-owned downbeats into the temporal key decoder", () => {
+    expect(source).toContain("barBoundariesSeconds: keyBarBoundaries(value.downbeats, audioBuffer.duration)");
+    expect(source).toContain("function keyBarBoundaries(downbeats, duration)");
+    expect(source).toContain("keyBoundaryAligned: keyValue.boundaryAligned === true");
+    expect(source).toContain("keySegments: Array.isArray(keyValue.segments) ? keyValue.segments : []");
+    expect(capabilities.coverage.wholeSongKey).toContain("aligns the temporal decoder to Rust-owned downbeats");
+  });
+
+  test("keeps key uncertainty, persistence, and stable segments explicit", () => {
     expect(html).toContain('id="song-key-summary"');
     expect(source).toContain("keyValue.dominant ?? null");
     expect(source).toContain("keyValue.timeline");
+    expect(source).toContain("keyValue.segments");
     expect(source).toContain("keyWindowAtTime(time)");
     expect(pitchWasmBinding).toContain('"timelineMinConfidence"');
     expect(pitchKeyTimeline).toContain(".filter(|estimate| estimate.confidence >= timeline_config.min_confidence)");
-    expect(pitchKeyTimeline).toContain("Uncertain windows are retained with `key: null`");
+    expect(pitchKeyTimeline).toContain("Uncertain or non-persistent windows retain `key: null`");
     expect(capabilities.coverage.wholeSongKey).toContain("complete bounded Float32 PCM track");
-    expect(capabilities.outputs.songKeySchema).toBe("audio-analysis-key-track/v1");
+    expect(capabilities.outputs.songKeySchema).toBe("audio-analysis-key-track/v2");
   });
 
   test("renders Rust-owned beats and sections on an interactive playback timeline", () => {
@@ -93,6 +102,7 @@ describe("whole-song analysis page", () => {
     expect(source).toContain("analysis.sections");
     expect(source).toContain("analysis.beats");
     expect(source).toContain("analysis.keyTimeline");
+    expect(source).toContain("analysis.keySegments");
     expect(source).toContain(".song-analysis.json");
     expect(capabilities.coverage.wholeSongRhythm).toContain("complete decoded track up to 15 minutes");
     expect(capabilities.outputs.songAnalysisSchema).toBe("audio-analysis-song/v1");
@@ -101,6 +111,7 @@ describe("whole-song analysis page", () => {
       "downbeatEvents",
       "sections",
       "keyTimeline",
+      "keySegments",
     ]);
   });
 

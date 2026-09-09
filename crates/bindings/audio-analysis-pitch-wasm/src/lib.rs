@@ -1,13 +1,14 @@
 //! WASM bindings for `audio-analysis-pitch`.
 
 use audio_analysis_pitch::key::{
-    analyze_key_track, HarmonicKeyConfig, KeyProfile, KeyTimelineConfig,
+    analyze_key_track_with_boundaries, HarmonicKeyConfig, KeyProfile, KeyTimelineConfig,
 };
 use runtime_core::SurfaceRequest;
 use serde_json::{Map, Value};
 use wasm_bindgen::prelude::*;
 
 const MAX_TRACK_SECONDS: usize = 15 * 60;
+const MAX_BOUNDARIES: usize = 4_096;
 
 #[wasm_bindgen(js_name = packageSurface)]
 pub fn package_surface() -> Result<JsValue, JsValue> {
@@ -23,11 +24,12 @@ pub fn run_operation(request: JsValue) -> Result<JsValue, JsValue> {
     serde_wasm_bindgen::to_value(&response).map_err(into_js_error)
 }
 
-/// Runs complete-track dominant-key and local key-window analysis from typed PCM.
+/// Runs complete-track dominant-key and temporally decoded key analysis from typed PCM.
 ///
-/// This binding owns only typed transport, browser-specific input bounds, and
-/// option decoding. Dominant-key selection, timeline windows, confidence
-/// thresholding, and uncertainty semantics live in `audio-analysis-pitch`.
+/// This binding owns only typed transport, browser-specific input bounds, option
+/// decoding, and optional bar/downbeat boundary transport. Harmonic analysis,
+/// dominant-key selection, temporal decoding, persistence, and uncertainty
+/// semantics live in `audio-analysis-pitch`.
 #[wasm_bindgen(js_name = analyzeTrackKey)]
 pub fn analyze_track_key(
     samples: &[f32],
@@ -46,8 +48,15 @@ pub fn analyze_track_key(
     let options = options_object(options).map_err(into_js_error)?;
     let harmonic_config = harmonic_config(&options).map_err(into_js_error)?;
     let timeline_config = timeline_config(&options).map_err(into_js_error)?;
-    let analysis = analyze_key_track(samples, sample_rate, harmonic_config, timeline_config)
-        .map_err(into_js_error)?;
+    let boundaries = boundary_seconds(&options).map_err(into_js_error)?;
+    let analysis = analyze_key_track_with_boundaries(
+        samples,
+        sample_rate,
+        harmonic_config,
+        timeline_config,
+        &boundaries,
+    )
+    .map_err(into_js_error)?;
     serde_wasm_bindgen::to_value(&analysis).map_err(into_js_error)
 }
 
@@ -91,26 +100,61 @@ fn harmonic_config(options: &Map<String, Value>) -> Result<HarmonicKeyConfig, St
 
 fn timeline_config(options: &Map<String, Value>) -> Result<KeyTimelineConfig, String> {
     let mut config = KeyTimelineConfig::default();
-    config.window_seconds = positive_f64(
+    config.window_seconds = positive_f64_alias(
         options,
         "timelineWindowSeconds",
+        "windowSeconds",
         config.window_seconds,
     )?;
-    config.hop_seconds =
-        positive_f64(options, "timelineHopSeconds", config.hop_seconds)?;
-    config.min_confidence = unit_f64(
+    config.hop_seconds = positive_f64(options, "timelineHopSeconds", config.hop_seconds)?;
+    config.min_confidence = unit_f64_alias(
         options,
         "timelineMinConfidence",
+        "minConfidence",
         config.min_confidence as f64,
     )? as f32;
-    if let Some(value) = options.get("timelineMaxWindows").and_then(Value::as_u64) {
+    if let Some(value) = option_alias(options, "timelineMaxWindows", "maxWindows").and_then(Value::as_u64) {
         config.max_windows = usize::try_from(value)
             .ok()
             .filter(|value| *value > 0)
-            .ok_or_else(|| "timelineMaxWindows must be positive".to_string())?;
+            .ok_or_else(|| "timelineMaxWindows/maxWindows must be positive".to_string())?;
     }
     config.validate().map_err(|error| error.to_string())?;
     Ok(config)
+}
+
+fn boundary_seconds(options: &Map<String, Value>) -> Result<Vec<f64>, String> {
+    let Some(value) = options.get("barBoundariesSeconds") else {
+        return Ok(Vec::new());
+    };
+    let values = value
+        .as_array()
+        .ok_or_else(|| "barBoundariesSeconds must be an array".to_string())?;
+    if values.len() > MAX_BOUNDARIES {
+        return Err(format!(
+            "barBoundariesSeconds must not contain more than {MAX_BOUNDARIES} entries"
+        ));
+    }
+    values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            value
+                .as_f64()
+                .filter(|value| value.is_finite())
+                .ok_or_else(|| {
+                    format!("barBoundariesSeconds[{index}] must be a finite number")
+                })
+        })
+        .collect()
+}
+
+fn option_alias<'a>(
+    options: &'a Map<String, Value>,
+    preferred: &str,
+    legacy: &str,
+) -> Option<&'a Value> {
+    options.get(preferred).or_else(|| options.get(legacy))
 }
 
 fn positive_usize(
@@ -144,6 +188,22 @@ fn positive_f64(
     }
 }
 
+fn positive_f64_alias(
+    options: &Map<String, Value>,
+    preferred: &str,
+    legacy: &str,
+    default_value: f64,
+) -> Result<f64, String> {
+    let value = option_alias(options, preferred, legacy)
+        .and_then(Value::as_f64)
+        .unwrap_or(default_value);
+    if value.is_finite() && value > 0.0 {
+        Ok(value)
+    } else {
+        Err(format!("{preferred}/{legacy} must be finite and positive"))
+    }
+}
+
 fn unit_f64(
     options: &Map<String, Value>,
     field: &str,
@@ -157,6 +217,22 @@ fn unit_f64(
         Ok(value)
     } else {
         Err(format!("{field} must be between 0 and 1"))
+    }
+}
+
+fn unit_f64_alias(
+    options: &Map<String, Value>,
+    preferred: &str,
+    legacy: &str,
+    default_value: f64,
+) -> Result<f64, String> {
+    let value = option_alias(options, preferred, legacy)
+        .and_then(Value::as_f64)
+        .unwrap_or(default_value);
+    if value.is_finite() && (0.0..=1.0).contains(&value) {
+        Ok(value)
+    } else {
+        Err(format!("{preferred}/{legacy} must be between 0 and 1"))
     }
 }
 
@@ -204,5 +280,65 @@ mod tests {
         assert_eq!(config.hop_seconds, 6.0);
         assert_eq!(config.min_confidence, 0.25);
         assert_eq!(config.max_windows, 42);
+    }
+
+    #[test]
+    fn adapter_preserves_existing_song_analysis_option_names() {
+        let options = serde_json::json!({
+            "windowSeconds": 20.0,
+            "timelineHopSeconds": 6.0,
+            "minConfidence": 0.12,
+            "maxWindows": 256
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        let config = timeline_config(&options).expect("legacy song-analysis config");
+        assert_eq!(config.window_seconds, 20.0);
+        assert_eq!(config.hop_seconds, 6.0);
+        assert_eq!(config.min_confidence, 0.12);
+        assert_eq!(config.max_windows, 256);
+    }
+
+    #[test]
+    fn timeline_prefixed_options_override_legacy_aliases() {
+        let options = serde_json::json!({
+            "timelineWindowSeconds": 18.0,
+            "windowSeconds": 20.0,
+            "timelineMinConfidence": 0.25,
+            "minConfidence": 0.12,
+            "timelineMaxWindows": 42,
+            "maxWindows": 256
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        let config = timeline_config(&options).expect("preferred aliases");
+        assert_eq!(config.window_seconds, 18.0);
+        assert_eq!(config.min_confidence, 0.25);
+        assert_eq!(config.max_windows, 42);
+    }
+
+    #[test]
+    fn adapter_accepts_bar_boundaries_without_owning_key_semantics() {
+        let options = serde_json::json!({
+            "barBoundariesSeconds": [0.0, 1.5, 3.0, 4.5]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        assert_eq!(
+            boundary_seconds(&options).expect("boundaries"),
+            vec![0.0, 1.5, 3.0, 4.5]
+        );
+    }
+
+    #[test]
+    fn adapter_rejects_non_numeric_boundaries() {
+        let options = serde_json::json!({"barBoundariesSeconds": [0.0, "bad"]})
+            .as_object()
+            .unwrap()
+            .clone();
+        assert!(boundary_seconds(&options).is_err());
     }
 }

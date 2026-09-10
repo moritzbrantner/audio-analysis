@@ -541,16 +541,19 @@ impl StreamingFrameBuffer {
     pub fn push_frame(&mut self, frame: &AudioFrame<'_>) -> Result<Vec<AudioWindow>> {
         self.validate_stream_format(frame)?;
         let frame_start_sample = timestamp_to_sample(frame.timestamp, frame.sample_rate)?;
-        if self.next_window_start_sample.is_none() {
-            self.buffered_start_sample = frame_start_sample;
-            self.next_window_start_sample = Some(frame_start_sample);
-        }
+        let mut next_start = match self.next_window_start_sample {
+            Some(next_start) => next_start,
+            None => {
+                self.buffered_start_sample = frame_start_sample;
+                frame_start_sample
+            }
+        };
 
         let buffered_end_sample = self.buffered_start_sample + self.buffer.len() as u64;
         if frame_start_sample > buffered_end_sample {
             self.buffer.clear();
             self.buffered_start_sample = frame_start_sample;
-            self.next_window_start_sample = Some(frame_start_sample);
+            next_start = frame_start_sample;
         } else if frame_start_sample < buffered_end_sample {
             return Err(DetectError::InvalidArgument(
                 "streaming audio frames must not overlap".to_string(),
@@ -564,9 +567,6 @@ impl StreamingFrameBuffer {
         )?);
 
         let mut windows = Vec::new();
-        let mut next_start = self
-            .next_window_start_sample
-            .expect("next window start is initialized above");
         let buffered_end_sample = self.buffered_start_sample + self.buffer.len() as u64;
         while next_start + self.config.frame_size as u64 <= buffered_end_sample {
             let offset = (next_start - self.buffered_start_sample) as usize;
@@ -766,7 +766,7 @@ pub fn windowed_level_series(
             start_sample as f32 / sample_rate as f32,
             end_sample as f32 / sample_rate as f32,
             values,
-        )?);
+        )?;
     }
     AudioFeatureSeries::new(
         sample_rate,

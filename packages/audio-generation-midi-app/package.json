@@ -4,7 +4,6 @@
   "description": "React app for audio-generation-midi: MIDI-like note sequencing, Standard MIDI export, and audio rendering helpers for video-analysis.",
   "private": true,
   "type": "module",
-  "packageManager": "bun@1.3.14",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -p tsconfig.json && vite build",

@@ -4,7 +4,6 @@
   "description": "React app for audio-analysis-pitch: Autocorrelation pitch detection for video-analysis audio pipelines.",
   "private": true,
   "type": "module",
-  "packageManager": "bun@1.3.14",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -p tsconfig.json && vite build",

@@ -65,6 +65,12 @@ pub struct MediaStream {
 /// Typed FFprobe stream inventory.
 pub struct MediaStreamInventory { pub streams: Vec<MediaStream> }
 
+#[derive(Debug, Clone)]
+struct MediaProbeSnapshot {
+    inventory: MediaStreamInventory,
+    duration_seconds: Vec<Option<f64>>,
+}
+
 /// Validates an audio selection against an inventory.
 pub fn validate_audio_stream_selection(
     inventory: &MediaStreamInventory,
@@ -101,6 +107,28 @@ pub struct AudioMetadata {
     pub sample_rate: u32,
     pub channels: u16,
     pub duration_seconds: Option<f64>,
+}
+
+impl MediaProbeSnapshot {
+    fn selected_audio_metadata(
+        &self,
+        input: &str,
+        path: Option<PathBuf>,
+        mode: SourceMode,
+        ordinal: usize,
+    ) -> std::result::Result<AudioMetadata, FfmpegError> {
+        let selected = validate_audio_stream_selection(&self.inventory, AudioStreamSelection::AudioOrdinal(ordinal))?;
+        let position = self
+            .inventory
+            .streams
+            .iter()
+            .position(|stream| stream.index == selected.index)
+            .ok_or_else(|| FfmpegError::InvalidMetadata("selected stream missing from probe snapshot".into()))?;
+        let sample_rate = selected.sample_rate.ok_or_else(|| FfmpegError::InvalidMetadata("missing sample_rate".into()))?;
+        let channels = selected.channels.ok_or_else(|| FfmpegError::InvalidMetadata("missing channels".into()))?;
+        let duration_seconds = self.duration_seconds.get(position).copied().flatten();
+        Ok(AudioMetadata { input: input.into(), path, mode, sample_rate, channels, duration_seconds })
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -248,19 +276,22 @@ pub fn probe_streams(path: impl AsRef<Path>) -> std::result::Result<MediaStreamI
 
 /// Returns a typed inventory of every stream in an input.
 pub fn probe_streams_input(input: impl AsRef<str>) -> std::result::Result<MediaStreamInventory, FfmpegError> {
+    probe_media_snapshot_input(input).map(|snapshot| snapshot.inventory)
+}
+
+fn probe_media_snapshot_input(input: impl AsRef<str>) -> std::result::Result<MediaProbeSnapshot, FfmpegError> {
     let input = input.as_ref();
-    let output = Command::new("ffprobe").args(["-v", "error", "-show_entries", "stream=index,codec_type,codec_name,channels,sample_rate:stream_tags=language:stream_disposition=default", "-of", "json", input]).output().map_err(|error| FfmpegError::ProbeFailed { input: input.into(), message: error.to_string() })?;
+    let output = Command::new("ffprobe").args(["-v", "error", "-show_entries", "stream=index,codec_type,codec_name,channels,sample_rate,duration:stream_tags=language:stream_disposition=default", "-of", "json", input]).output().map_err(|error| FfmpegError::ProbeFailed { input: input.into(), message: error.to_string() })?;
     if !output.status.success() { return Err(FfmpegError::ProbeFailed { input: input.into(), message: String::from_utf8_lossy(&output.stderr).trim().into() }); }
-    parse_stream_inventory(&String::from_utf8_lossy(&output.stdout))
+    parse_media_probe_snapshot(&String::from_utf8_lossy(&output.stdout))
 }
 
 fn probe_selected_audio_input(input: &str, path: Option<PathBuf>, mode: SourceMode, runtime: &FfmpegRuntimeOptions, ordinal: Option<usize>) -> std::result::Result<AudioMetadata, FfmpegError> {
     if matches!(runtime.backend, FfmpegRuntimeBackend::Native) { return Err(FfmpegError::UnsupportedRuntime { message: "native probing is not enabled".into() }); }
     if let Some(ordinal) = ordinal {
-        validate_audio_stream_selection(&probe_streams_input(input)?, AudioStreamSelection::AudioOrdinal(ordinal))?;
+        return probe_media_snapshot_input(input)?.selected_audio_metadata(input, path, mode, ordinal);
     }
-    let ordinal = ordinal.unwrap_or(0);
-    probe_audio_input_with_ordinal(input, path, mode, ordinal)
+    probe_audio_input_with_ordinal(input, path, mode, 0)
 }
 
 fn probe_audio_input_with_ordinal(input: &str, path: Option<PathBuf>, mode: SourceMode, ordinal: usize) -> std::result::Result<AudioMetadata, FfmpegError> {
@@ -281,17 +312,19 @@ fn parse_u16(value: Option<&str>, name: &str) -> std::result::Result<u16, Ffmpeg
     value.ok_or_else(|| FfmpegError::InvalidMetadata(format!("missing {name}")))?.parse().map_err(|error| FfmpegError::InvalidMetadata(format!("invalid {name}: {error}")))
 }
 
-fn parse_stream_inventory(json: &str) -> std::result::Result<MediaStreamInventory, FfmpegError> {
+fn parse_media_probe_snapshot(json: &str) -> std::result::Result<MediaProbeSnapshot, FfmpegError> {
     let value: serde_json::Value = serde_json::from_str(json).map_err(|error| FfmpegError::InvalidMetadata(format!("invalid ffprobe JSON: {error}")))?;
     let streams = value.get("streams").and_then(serde_json::Value::as_array).ok_or_else(|| FfmpegError::InvalidMetadata("missing streams array".into()))?;
     let mut ordinal = 0;
     let mut parsed = Vec::with_capacity(streams.len());
+    let mut duration_seconds = Vec::with_capacity(streams.len());
     for stream in streams {
         let index = stream.get("index").and_then(serde_json::Value::as_u64).and_then(|value| u32::try_from(value).ok()).ok_or_else(|| FfmpegError::InvalidMetadata("invalid stream index".into()))?;
         let media_type = match stream.get("codec_type").and_then(serde_json::Value::as_str).unwrap_or("unknown") {
             "video" => MediaType::Video, "audio" => MediaType::Audio, "subtitle" => MediaType::Subtitle, "data" => MediaType::Data, "attachment" => MediaType::Attachment, other => MediaType::Unknown(other.into()),
         };
         let audio_stream_ordinal = (media_type == MediaType::Audio).then(|| { let value = ordinal; ordinal += 1; value });
+        duration_seconds.push(stream.get("duration").and_then(serde_json::Value::as_str).and_then(|value| value.parse().ok()));
         parsed.push(MediaStream {
             index, media_type, audio_stream_ordinal,
             codec: stream.get("codec_name").and_then(serde_json::Value::as_str).map(str::to_owned),
@@ -301,7 +334,7 @@ fn parse_stream_inventory(json: &str) -> std::result::Result<MediaStreamInventor
             default_disposition: stream.get("disposition").and_then(|value| value.get("default")).and_then(serde_json::Value::as_u64).map(|value| value != 0),
         });
     }
-    Ok(MediaStreamInventory { streams: parsed })
+    Ok(MediaProbeSnapshot { inventory: MediaStreamInventory { streams: parsed }, duration_seconds })
 }
 
 fn into_detect_error(error: FfmpegError) -> DetectError { DetectError::Source(error.to_string()) }

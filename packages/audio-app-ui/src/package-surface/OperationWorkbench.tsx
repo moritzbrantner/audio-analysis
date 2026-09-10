@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import {
   Button,
   Field,
@@ -451,14 +451,32 @@ function StructuredValueField({
   onChange: (value: unknown) => void;
 }) {
   const externalJson = JSON.stringify(value, null, 2);
-  const fieldId = inputFieldId(name);
-  const [draft, setDraft] = useState(() => externalJson);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setDraft(externalJson);
-    setError(null);
-  }, [externalJson]);
+  return (
+    <StructuredValueEditor
+      key={externalJson}
+      compact={compact}
+      initialDraft={externalJson}
+      name={name}
+      onChange={onChange}
+    />
+  );
+}
+
+function StructuredValueEditor({
+  compact,
+  initialDraft,
+  name,
+  onChange,
+}: {
+  compact: boolean;
+  initialDraft: string;
+  name: string;
+  onChange: (value: unknown) => void;
+}) {
+  const fieldId = inputFieldId(name);
+  const [draft, setDraft] = useState(() => initialDraft);
+  const [error, setError] = useState<string | null>(null);
 
   return (
     <Field>

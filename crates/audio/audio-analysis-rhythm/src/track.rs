@@ -79,7 +79,7 @@ impl TrackRhythmConfig {
 pub struct TempoCandidate {
     /// Tempo in beats per minute.
     pub bpm: f32,
-    /// Final score after autocorrelation and beat-path support are combined.
+    /// Final score after octave-family periodicity and beat-path support are combined.
     pub score: f32,
     /// Normalized onset-envelope autocorrelation support.
     pub autocorrelation_score: f32,
@@ -559,12 +559,33 @@ fn rescore_tempo_candidates(
     for candidate in &mut candidates {
         let path = track_beat_frames(novelty, frame_rate, candidate.bpm, tightness);
         candidate.beat_support = beat_path_support(&path, novelty, frame_rate, candidate.bpm);
-        candidate.score =
-            (0.45 * candidate.autocorrelation_score + 0.55 * candidate.beat_support).clamp(0.0, 1.0);
     }
+    combine_tempo_candidate_scores(&mut candidates);
     candidates.sort_by(|left, right| right.score.total_cmp(&left.score));
     candidates.truncate(candidate_count);
     candidates
+}
+
+fn combine_tempo_candidate_scores(candidates: &mut [TempoCandidate]) {
+    let evidence = candidates.to_vec();
+    for candidate in candidates {
+        let family_autocorrelation = evidence
+            .iter()
+            .filter(|other| same_octave_tempo_family(candidate.bpm, other.bpm))
+            .map(|other| other.autocorrelation_score)
+            .fold(candidate.autocorrelation_score, f32::max);
+        candidate.score =
+            (0.45 * family_autocorrelation + 0.55 * candidate.beat_support).clamp(0.0, 1.0);
+    }
+}
+
+fn same_octave_tempo_family(left_bpm: f32, right_bpm: f32) -> bool {
+    if !left_bpm.is_finite() || !right_bpm.is_finite() || left_bpm <= 0.0 || right_bpm <= 0.0 {
+        return false;
+    }
+    let ratio = left_bpm.max(right_bpm) / left_bpm.min(right_bpm);
+    let octaves = ratio.log2();
+    (octaves - octaves.round()).abs() <= 0.06
 }
 
 fn beat_path_support(path: &[usize], novelty: &[f32], frame_rate: f32, bpm: f32) -> f32 {
@@ -1074,6 +1095,36 @@ mod tests {
         assert!(candidates
             .iter()
             .any(|candidate| (candidate.bpm - 120.0).abs() < 1.0));
+    }
+
+    #[test]
+    fn octave_family_periodicity_uses_beat_support_to_choose_pulse_level() {
+        let mut candidates = vec![
+            TempoCandidate {
+                bpm: 59.84,
+                score: 0.0,
+                autocorrelation_score: 0.87,
+                beat_support: 0.81,
+            },
+            TempoCandidate {
+                bpm: 122.28,
+                score: 0.0,
+                autocorrelation_score: 0.64,
+                beat_support: 0.83,
+            },
+            TempoCandidate {
+                bpm: 80.36,
+                score: 0.0,
+                autocorrelation_score: 0.05,
+                beat_support: 0.80,
+            },
+        ];
+        combine_tempo_candidate_scores(&mut candidates);
+        candidates.sort_by(|left, right| right.score.total_cmp(&left.score));
+
+        assert!((candidates[0].bpm - 122.28).abs() < 0.01);
+        assert!((candidates[1].bpm - 59.84).abs() < 0.01);
+        assert!(candidates[0].score > candidates[1].score);
     }
 
     #[test]

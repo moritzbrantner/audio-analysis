@@ -55,7 +55,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 "confidence": rhythm.confidence,
                 "tempoCandidates": rhythm.tempo_candidates.iter().map(|candidate| json!({
                     "bpm": candidate.bpm,
-                    "score": candidate.score
+                    "score": candidate.score,
+                    "autocorrelationScore": candidate.autocorrelation_score,
+                    "beatSupport": candidate.beat_support
                 })).collect::<Vec<_>>(),
                 "beatCount": rhythm.beats.len(),
                 "beats": rhythm.beats.iter().map(|beat| beat.timestamp_seconds).collect::<Vec<_>>(),

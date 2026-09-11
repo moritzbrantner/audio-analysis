@@ -191,6 +191,7 @@ try {
   const pad = recipe.instruments.pad;
   const bass = recipe.instruments.bass;
   const kick = recipe.instruments.kick;
+  const downbeat = recipe.instruments.downbeat;
   const snare = recipe.instruments.snare;
   const hat = recipe.instruments.hat;
 
@@ -198,6 +199,11 @@ try {
     ...kick,
     durationFrames: kick.durationFrames,
     frequencyHz: kick.frequencyHz,
+  });
+  const downbeatAsset = await sourceAsset({
+    ...downbeat,
+    durationFrames: downbeat.durationFrames,
+    frequencyHz: downbeat.frequencyHz,
   });
   const snareAsset = await sourceAsset({ ...snare, durationFrames: snare.durationFrames });
   const hatAsset = await sourceAsset({ ...hat, durationFrames: hat.durationFrames });
@@ -209,6 +215,8 @@ try {
     if (!chord) throw new Error(`unknown chord '${bar.chord}' at bar ${barIndex}`);
     if (!pattern) throw new Error(`unknown pattern '${bar.pattern}' at bar ${barIndex}`);
     const barStart = barIndex * barFrames;
+
+    placements.push({ asset: downbeatAsset, startFrame: barStart });
 
     for (const frequencyHz of chord.frequenciesHz) {
       const asset = await sourceAsset({

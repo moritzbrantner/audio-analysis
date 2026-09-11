@@ -51,6 +51,14 @@
       "fadeInFrames": 0,
       "fadeOutFrames": 3000
     },
+    "downbeat": {
+      "waveform": "square",
+      "frequencyHz": 50,
+      "amplitude": 2800,
+      "durationFrames": 3600,
+      "fadeInFrames": 0,
+      "fadeOutFrames": 3000
+    },
     "snare": {
       "waveform": "noise",
       "seed": "2026091101",

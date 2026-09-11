@@ -651,6 +651,64 @@ fn beat_path_onset_recall(path: &[usize], novelty: &[f32], period: f32) -> f32 {
         / total
 }
 
+fn fold_tempo_to_anchor_octave(
+    bpm: f32,
+    anchor_bpm: f32,
+    min_bpm: f32,
+    max_bpm: f32,
+) -> f32 {
+    if !bpm.is_finite()
+        || !anchor_bpm.is_finite()
+        || bpm <= 0.0
+        || anchor_bpm <= 0.0
+        || min_bpm <= 0.0
+        || max_bpm < min_bpm
+    {
+        return bpm;
+    }
+
+    let mut best = bpm.clamp(min_bpm, max_bpm);
+    let mut best_distance = (best / anchor_bpm).log2().abs();
+    for octave in -4..=4 {
+        let candidate = bpm * 2.0_f32.powi(octave);
+        if candidate < min_bpm || candidate > max_bpm {
+            continue;
+        }
+        let distance = (candidate / anchor_bpm).log2().abs();
+        if distance < best_distance {
+            best = candidate;
+            best_distance = distance;
+        }
+    }
+    best
+}
+
+fn fold_local_tempo_candidates(
+    candidates: Vec<TempoCandidate>,
+    anchor_bpm: f32,
+    min_bpm: f32,
+    max_bpm: f32,
+) -> Vec<LocalTempoCandidate> {
+    let mut folded = Vec::<LocalTempoCandidate>::new();
+    for candidate in candidates {
+        let bpm = fold_tempo_to_anchor_octave(candidate.bpm, anchor_bpm, min_bpm, max_bpm);
+        if let Some(existing) = folded.iter_mut().find(|existing| {
+            (existing.bpm - bpm).abs() / existing.bpm.max(bpm) < 0.025
+        }) {
+            if candidate.autocorrelation_score > existing.score {
+                existing.bpm = bpm;
+                existing.score = candidate.autocorrelation_score;
+            }
+        } else {
+            folded.push(LocalTempoCandidate {
+                bpm,
+                score: candidate.autocorrelation_score,
+            });
+        }
+    }
+    folded
+}
+
 fn estimate_local_tempo_path(
     novelty: &[f32],
     frame_rate: f32,
@@ -674,19 +732,15 @@ fn estimate_local_tempo_path(
     while center < novelty.len() {
         let start = center.saturating_sub(radius);
         let end = center.saturating_add(radius + 1).min(novelty.len());
-        let mut candidates = estimate_tempo_candidates(
+        let raw_candidates = estimate_tempo_candidates(
             &novelty[start..end],
             frame_rate,
             min_bpm,
             max_bpm,
             8,
-        )
-        .into_iter()
-        .map(|candidate| LocalTempoCandidate {
-            bpm: candidate.bpm,
-            score: candidate.autocorrelation_score,
-        })
-        .collect::<Vec<_>>();
+        );
+        let mut candidates =
+            fold_local_tempo_candidates(raw_candidates, anchor_bpm, min_bpm, max_bpm);
         if !candidates.iter().any(|candidate| {
             (candidate.bpm - anchor_bpm).abs() / candidate.bpm.max(anchor_bpm) < 0.025
         }) {
@@ -1152,6 +1206,53 @@ mod tests {
             authored_support > double_support,
             "authored={authored_support}, double={double_support}"
         );
+    }
+
+    #[test]
+    fn local_tempo_candidates_preserve_selected_octave() {
+        let folded = fold_local_tempo_candidates(
+            vec![
+                TempoCandidate {
+                    bpm: 60.0,
+                    score: 0.9,
+                    autocorrelation_score: 0.9,
+                    beat_support: 0.0,
+                },
+                TempoCandidate {
+                    bpm: 120.0,
+                    score: 0.6,
+                    autocorrelation_score: 0.6,
+                    beat_support: 0.0,
+                },
+                TempoCandidate {
+                    bpm: 150.0,
+                    score: 0.5,
+                    autocorrelation_score: 0.5,
+                    beat_support: 0.0,
+                },
+            ],
+            120.0,
+            55.0,
+            220.0,
+        );
+
+        assert!(folded.iter().any(|candidate| {
+            (candidate.bpm - 120.0).abs() < 1.0 && (candidate.score - 0.9).abs() < 0.001
+        }));
+        assert!(!folded.iter().any(|candidate| candidate.bpm < 90.0));
+        assert!(folded.iter().any(|candidate| (candidate.bpm - 150.0).abs() < 1.0));
+    }
+
+    #[test]
+    fn local_tempo_path_preserves_selected_pulse_level_under_half_time_accents() {
+        let mut novelty = vec![0.0_f32; 2_400];
+        for beat in 0..48 {
+            novelty[beat * 50] = if beat % 2 == 0 { 1.0 } else { 0.58 };
+        }
+        let path = estimate_local_tempo_path(&novelty, 100.0, 55.0, 220.0, 120.0, 1.25);
+        let center = path.bpm_by_frame[1_200];
+        assert!(center > 100.0 && center < 140.0, "center={center}");
+        assert!(path.bpm_by_frame.iter().all(|bpm| *bpm >= 90.0));
     }
 
     #[test]

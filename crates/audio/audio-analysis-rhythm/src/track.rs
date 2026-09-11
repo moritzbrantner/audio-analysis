@@ -582,6 +582,12 @@ fn beat_path_support(path: &[usize], novelty: &[f32], frame_rate: f32, bpm: f32)
         .map(|pair| (pair[1] - pair[0]) as f32)
         .collect::<Vec<_>>();
     let period = frame_rate * 60.0 / bpm;
+    let onset_recall = beat_path_onset_recall(path, novelty, period);
+    let onset_alignment = if mean_novelty + onset_recall > f32::EPSILON {
+        2.0 * mean_novelty * onset_recall / (mean_novelty + onset_recall)
+    } else {
+        0.0
+    };
     let expected = ((path[path.len() - 1] - path[0]) as f32 / period).max(1.0);
     let count_support = ((path.len() - 1) as f32 / expected).min(expected / (path.len() - 1) as f32);
     let smoothness = if gaps.len() < 2 {
@@ -594,11 +600,34 @@ fn beat_path_support(path: &[usize], novelty: &[f32], frame_rate: f32, bpm: f32)
             / (gaps.len() - 1) as f32;
         (1.0 - change / 0.35).clamp(0.0, 1.0)
     };
-    (0.40 * mean_novelty
-        + 0.25 * coverage.clamp(0.0, 1.0)
-        + 0.20 * smoothness
+    (0.55 * onset_alignment
+        + 0.15 * coverage.clamp(0.0, 1.0)
+        + 0.15 * smoothness
         + 0.15 * count_support.clamp(0.0, 1.0))
         .clamp(0.0, 1.0)
+}
+
+fn beat_path_onset_recall(path: &[usize], novelty: &[f32], period: f32) -> f32 {
+    if path.is_empty() || novelty.is_empty() || !period.is_finite() || period <= 0.0 {
+        return 0.0;
+    }
+    let total = novelty.iter().copied().sum::<f32>();
+    if total <= f32::EPSILON {
+        return 0.0;
+    }
+    let radius = ((period * 0.18).round() as usize).max(1);
+    let mut covered = vec![false; novelty.len()];
+    for frame in path {
+        let start = frame.saturating_sub(radius);
+        let end = frame.saturating_add(radius + 1).min(novelty.len());
+        covered[start..end].fill(true);
+    }
+    novelty
+        .iter()
+        .zip(covered.iter())
+        .filter_map(|(value, covered)| covered.then_some(*value))
+        .sum::<f32>()
+        / total
 }
 
 fn estimate_local_tempo_path(
@@ -1045,6 +1074,33 @@ mod tests {
         assert!(candidates
             .iter()
             .any(|candidate| (candidate.bpm - 120.0).abs() < 1.0));
+    }
+
+    #[test]
+    fn beat_path_support_penalizes_missing_salient_onsets() {
+        let mut novelty = vec![0.0_f32; 50 * 24 + 1];
+        for beat in 0..24 {
+            novelty[beat * 50] = if beat % 2 == 0 { 0.65 } else { 1.0 };
+        }
+        for frame in (25..novelty.len()).step_by(50) {
+            novelty[frame] = 0.15;
+        }
+
+        let half_time = track_beat_frames(&novelty, 100.0, 60.0, 1.25);
+        let authored = track_beat_frames(&novelty, 100.0, 120.0, 1.25);
+        let double_time = track_beat_frames(&novelty, 100.0, 240.0, 1.25);
+        let half_support = beat_path_support(&half_time, &novelty, 100.0, 60.0);
+        let authored_support = beat_path_support(&authored, &novelty, 100.0, 120.0);
+        let double_support = beat_path_support(&double_time, &novelty, 100.0, 240.0);
+
+        assert!(
+            authored_support > half_support,
+            "authored={authored_support}, half={half_support}"
+        );
+        assert!(
+            authored_support > double_support,
+            "authored={authored_support}, double={double_support}"
+        );
     }
 
     #[test]

@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/dj-generated-evidence.yml"
+      - "crates/audio/audio-analysis-io/**"
       - "crates/audio/audio-analysis-pitch/**"
       - "crates/audio/audio-analysis-rhythm/**"
       - "scripts/evaluate-dj-generated-fixture.py"

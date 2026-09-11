@@ -42,6 +42,13 @@ jobs:
           python3 scripts/evaluate-dj-generated-fixture.py
           --asset-tooling ../asset-tooling
           --report target/dj-goldens/generated/report.json
+      - name: Diagnose Rust analyzer failure
+        if: failure()
+        run: >-
+          cargo run --locked
+          -p moenarch-audio-analysis-rhythm
+          --example dj_analyze
+          -- target/dj-goldens/generated/asset-tooling-half-time-song-a.wav
       - name: Upload generated DJ evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -49,6 +56,7 @@ jobs:
           name: dj-generated-evidence-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             target/dj-goldens/generated/report.json
+            target/dj-goldens/generated/asset-tooling-half-time-song-a.wav
             target/dj-goldens/generated/asset-tooling-half-time-song-a.json
             target/dj-goldens/generated/asset-tooling-half-time-song-b.json
           if-no-files-found: error

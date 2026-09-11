@@ -1,0 +1,114 @@
+{
+  "schemaVersion": "audio-analysis-dj-generated-fixture/v1",
+  "name": "asset-tooling-half-time-song",
+  "generator": {
+    "repository": "moritzbrantner/asset-tooling",
+    "revision": "7b8bd27f002ccc8470afedb0e93bb1086901b1ca",
+    "bunVersion": "1.4.0"
+  },
+  "audio": {
+    "sampleRate": 24000,
+    "channels": 1,
+    "bpm": 120,
+    "beatsPerBar": 4,
+    "bars": 16
+  },
+  "groundTruth": {
+    "key": "A minor",
+    "beatPhaseSeconds": 0.0,
+    "sections": [
+      { "startBar": 0, "endBar": 4, "identity": "A" },
+      { "startBar": 4, "endBar": 8, "identity": "B" },
+      { "startBar": 8, "endBar": 12, "identity": "C" },
+      { "startBar": 12, "endBar": 16, "identity": "A" }
+    ]
+  },
+  "acceptance": {
+    "tempoTolerancePercent": 3.5,
+    "minBeatF1": 0.8,
+    "minDownbeatF1": 0.5,
+    "requireKey": true
+  },
+  "instruments": {
+    "pad": {
+      "waveform": "saw",
+      "amplitude": 800,
+      "fadeInFrames": 480,
+      "fadeOutFrames": 480
+    },
+    "bass": {
+      "waveform": "square",
+      "amplitude": 1800,
+      "durationFrames": 6000,
+      "fadeInFrames": 60,
+      "fadeOutFrames": 1000
+    },
+    "kick": {
+      "waveform": "square",
+      "frequencyHz": 50,
+      "amplitude": 4200,
+      "durationFrames": 3600,
+      "fadeInFrames": 0,
+      "fadeOutFrames": 3000
+    },
+    "snare": {
+      "waveform": "noise",
+      "seed": "2026091101",
+      "amplitude": 2200,
+      "durationFrames": 2400,
+      "fadeInFrames": 0,
+      "fadeOutFrames": 2200
+    },
+    "hat": {
+      "waveform": "noise",
+      "seed": "2026091102",
+      "amplitude": 650,
+      "durationFrames": 600,
+      "fadeInFrames": 0,
+      "fadeOutFrames": 550
+    }
+  },
+  "chords": {
+    "Am": { "rootFrequencyHz": 55, "frequenciesHz": [110, 131, 165] },
+    "Dm": { "rootFrequencyHz": 73, "frequenciesHz": [147, 175, 220] },
+    "E": { "rootFrequencyHz": 82, "frequenciesHz": [165, 208, 247] }
+  },
+  "patterns": {
+    "full": {
+      "kickHalfBeats": [0, 2, 4, 6],
+      "snareHalfBeats": [2, 6],
+      "hatHalfBeats": [0, 1, 2, 3, 4, 5, 6, 7],
+      "bassHalfBeats": [0, 2, 4, 6]
+    },
+    "syncopated": {
+      "kickHalfBeats": [0, 2, 4, 7],
+      "snareHalfBeats": [2, 6],
+      "hatHalfBeats": [0, 1, 2, 3, 4, 5, 6, 7],
+      "bassHalfBeats": [0, 3, 4, 7]
+    },
+    "half-time": {
+      "kickHalfBeats": [0, 4],
+      "snareHalfBeats": [4],
+      "hatHalfBeats": [0, 2, 4, 6],
+      "bassHalfBeats": [0, 4]
+    }
+  },
+  "arrangement": [
+    { "chord": "Am", "pattern": "full" },
+    { "chord": "Dm", "pattern": "full" },
+    { "chord": "Am", "pattern": "full" },
+    { "chord": "E", "pattern": "full" },
+    { "chord": "Am", "pattern": "syncopated" },
+    { "chord": "Dm", "pattern": "syncopated" },
+    { "chord": "Am", "pattern": "syncopated" },
+    { "chord": "E", "pattern": "syncopated" },
+    { "chord": "Am", "pattern": "half-time" },
+    { "chord": "Dm", "pattern": "half-time" },
+    { "chord": "Am", "pattern": "half-time" },
+    { "chord": "E", "pattern": "half-time" },
+    { "chord": "Am", "pattern": "full" },
+    { "chord": "Dm", "pattern": "full" },
+    { "chord": "E", "pattern": "full" },
+    { "chord": "Am", "pattern": "full" }
+  ]
+}

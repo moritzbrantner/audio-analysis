@@ -123,15 +123,15 @@ def beat_f1(
     return 2.0 * precision * recall / (precision + recall)
 
 
-def tempo_error(actual: float, expected: float) -> float:
+def tempo_error(actual: float, expected: float) -> float | None:
     if actual <= 0.0 or expected <= 0.0:
-        return float("inf")
+        return None
     return abs(actual - expected) / expected
 
 
-def tempo_family_error(actual: float, expected: float) -> float:
+def tempo_family_error(actual: float, expected: float) -> float | None:
     if actual <= 0.0 or expected <= 0.0:
-        return float("inf")
+        return None
     return min(
         abs(actual - expected * ratio) / max(actual, expected * ratio)
         for ratio in (0.5, 1.0, 2.0)
@@ -182,12 +182,12 @@ def main() -> int:
     rust_beats = [float(value) for value in rhythm.get("beats", [])]
     rust_downbeats = [float(value) for value in rhythm.get("downbeats", [])]
     exact_tempo_error = (
-        tempo_error(float(rust_bpm), expected_bpm) if rust_bpm is not None else float("inf")
+        tempo_error(float(rust_bpm), expected_bpm) if rust_bpm is not None else None
     )
     family_tempo_error = (
         tempo_family_error(float(rust_bpm), expected_bpm)
         if rust_bpm is not None
-        else float("inf")
+        else None
     )
     authored_beat_f1 = beat_f1(
         rust_beats, reference_beats, BEAT_TOLERANCE_SECONDS
@@ -201,10 +201,16 @@ def main() -> int:
 
     metrics = {
         "reproducible": reproducible,
-        "tempoExact": exact_tempo_error <= tempo_tolerance,
-        "tempoFamilyEquivalent": family_tempo_error <= tempo_tolerance,
-        "tempoExactErrorPercent": exact_tempo_error * 100.0,
-        "tempoFamilyErrorPercent": family_tempo_error * 100.0,
+        "tempoExact": exact_tempo_error is not None
+        and exact_tempo_error <= tempo_tolerance,
+        "tempoFamilyEquivalent": family_tempo_error is not None
+        and family_tempo_error <= tempo_tolerance,
+        "tempoExactErrorPercent": (
+            exact_tempo_error * 100.0 if exact_tempo_error is not None else None
+        ),
+        "tempoFamilyErrorPercent": (
+            family_tempo_error * 100.0 if family_tempo_error is not None else None
+        ),
         "beatF1Authored": authored_beat_f1,
         "downbeatF1Authored": authored_downbeat_f1,
         "keyMatchesAuthored": key_matches,
@@ -276,8 +282,9 @@ def main() -> int:
         "rust": rust,
     }
     args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(f"{json.dumps(report, indent=2)}\n", encoding="utf-8")
-    print(json.dumps(report, indent=2))
+    serialized_report = json.dumps(report, indent=2, allow_nan=False)
+    args.report.write_text(f"{serialized_report}\n", encoding="utf-8")
+    print(serialized_report)
 
     for finding in findings:
         print(f"generated evidence finding: {finding}", file=sys.stderr)

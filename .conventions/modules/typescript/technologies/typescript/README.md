@@ -25,3 +25,18 @@
 
 - Await or return promises by default.
 - Detached asynchronous work must flow through an explicit abstraction that owns lifetime, cancellation, error handling, and observability; a bare `void promise` is not the normal escape hatch.
+
+## TS-007 — Use structurally explicit control flow and side effects
+
+- Require braces around control-flow bodies.
+- Do not use nested ternaries, sequence expressions, chained assignments, or assignments in conditions.
+- Do not place lexical declarations directly under `switch` case labels; introduce a block.
+- Unmarked `switch` fallthrough is invalid; adjacent empty case labels may intentionally share a body.
+- Deterministic lint configuration: [`./TS-007.oxlint.json`](./TS-007.oxlint.json).
+
+## TS-008 — Keep imports mechanically canonical
+
+- Combine duplicate compatible imports from the same resolved module; namespace imports may remain separate when syntax requires it.
+- Prefer inline type specifiers so compatible type and value imports can share one declaration.
+- Let the formatter deterministically sort ordinary imports; preserve side-effect-only import order by default.
+- Deterministic configuration: [`./TS-008.oxlint.json`](./TS-008.oxlint.json) and [`./TS-008.oxfmt.json`](./TS-008.oxfmt.json).

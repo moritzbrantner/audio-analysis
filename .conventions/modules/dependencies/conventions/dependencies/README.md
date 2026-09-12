@@ -106,3 +106,12 @@
 - Use managed snapshots when copied policy, configuration, or generated distribution material remains upstream-owned and consumers should not edit the installed snapshot directly.
 - Keep source-copy registries lightweight. Do not grow them into replacement package managers with general version solving, broad transitive dependency semantics, or automatic semantic conflict merging.
 - Content fingerprints prove source identity and drift, not runtime or API compatibility; consumer tests, type checks, and benchmarks remain the compatibility gate.
+
+## DEP-017 — Prove dependency ranges as a clean consumer
+
+- Treat the repository's locked development graph, the minimum compatibility point declared by peer ranges, and a fresh registry resolution as three different pieces of evidence.
+- Consumer verification for a deterministic compatibility point installs exact versions derived from the package's declared contract rather than floating caret, tilde, or inequality ranges that change meaning over time.
+- For publishable packages, use a clean consumer and the real package-manager resolver to prove both the deterministic minimum compatibility point and the current fresh-range resolution before release or distribution integration.
+- Do not use `--force`, `--legacy-peer-deps`, or equivalent resolver bypasses as proof that a full consumer dependency graph is valid.
+- Registry or network unavailability is an unavailable result, never a passing compatibility result and never evidence that repository code is defective.
+- A locked repository graph passing while a clean consumer fails is an explicit distribution-contract finding; repair the verifier or declared peer contract according to the failing boundary instead of weakening resolution.

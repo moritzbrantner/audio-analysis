@@ -45,3 +45,12 @@
 - Prefer staged replacement: external implementation → explicit capability contract → native candidate → differential/parity validation → representative benchmarks → real consumer → optional default switch or removal.
 - Reimplementation is not justified by implementation cost alone; retain mature external implementations when a replacement has no demonstrated advantage.
 - See also: [ADR 0001 — Capability internalization](../docs/adr/0001-capability-internalization.md).
+
+## PRINCIPLE-008 — Compute and validate once; reuse the trusted representation
+
+- At a semantic or trust boundary, parse, normalize, probe, or otherwise compute the required representation once, validate it there, and pass the resulting trusted typed object downstream.
+- Do not repeatedly re-read raw input, re-parse equivalent bytes, re-run equivalent validation, or recompute the same derived structure merely because another stage needs the same already-proven facts.
+- Keep invalidation explicit: when any deterministic input that gives the object its meaning changes, discard or rebuild the affected trusted object and its derived structures before reuse.
+- Recompute when a consumer genuinely needs different evidence, when independent verification is itself part of the contract, or when reuse would blur ownership or freshness semantics.
+- Prefer ownership-preserving handles, references, immutable snapshots, or other cheap sharing mechanisms over repeated conversion and cloning where the language/runtime supports them.
+- Do not extract a fleet-wide shared type merely to implement this principle. Keep the validated representation with its semantic owner and extract a reusable contract only after multiple real consumers demonstrate the same meaning and lifecycle.

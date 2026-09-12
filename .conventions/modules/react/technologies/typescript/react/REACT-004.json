@@ -8,7 +8,7 @@
       "plugins": ["react"],
       "rules": {
         "react/no-deriving-state-in-effects": "error",
-        "react/set-state-in-effect": "error"
+        "react/set-state-in-effect": "off"
       }
     }
   }

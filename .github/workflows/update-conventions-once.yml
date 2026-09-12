@@ -1,0 +1,73 @@
+name: Update conventions once
+
+on:
+  push:
+    branches:
+      - chore/update-react-conventions
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout consumer
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Checkout coding-tooling
+        uses: actions/checkout@v4
+        with:
+          repository: moritzbrantner/coding-tooling
+          ref: 54b6ae146fc8795022283012ce1fd58686cd4b9a
+          path: .automation/coding-tooling
+
+      - name: Checkout coding-agent-conventions
+        uses: actions/checkout@v4
+        with:
+          repository: moritzbrantner/coding-agent-conventions
+          ref: f8cb06467d00f829d13d0c7c149162d6109f113f
+          path: .automation/coding-agent-conventions
+
+      - name: Install coding-tooling dependencies
+        working-directory: .automation/coding-tooling
+        run: bun install --frozen-lockfile
+
+      - name: Inspect convention update
+        run: >-
+          bun .automation/coding-tooling/src/entry.ts conventions diff
+          --root "$GITHUB_WORKSPACE"
+          --conventions-root "$GITHUB_WORKSPACE/.automation/coding-agent-conventions"
+          --json
+
+      - name: Update conventions through coding-tooling
+        run: >-
+          bun .automation/coding-tooling/src/entry.ts conventions update
+          --root "$GITHUB_WORKSPACE"
+          --conventions-root "$GITHUB_WORKSPACE/.automation/coding-agent-conventions"
+          --json
+
+      - name: Verify installed convention snapshots
+        run: >-
+          bun .automation/coding-tooling/src/entry.ts conventions check
+          --root "$GITHUB_WORKSPACE"
+          --json
+
+      - name: Commit updater output
+        shell: bash
+        run: |
+          rm -rf .automation
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add conventions.json conventions.lock.json .conventions
+          if git diff --cached --quiet; then
+            echo "No convention update was required."
+            exit 0
+          fi
+          git commit -m "chore: update React conventions"
+          git push origin HEAD:chore/update-react-conventions

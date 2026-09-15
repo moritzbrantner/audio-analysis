@@ -1,45 +1,9 @@
 use std::cmp::Ordering;
-use std::fmt::Write as _;
 
 use audio_contracts::{DetectError, Result};
+use media_core::TimedTextWordContract;
 
 use crate::{pitch_track_to_midi_notes, MidiNote, PitchTrackFrame, PitchTrackMidiOptions};
-
-const ULTRASTAR_V1_BEATS_PER_QUARTER: f32 = 4.0;
-const MIDDLE_C_MIDI: i16 = 60;
-
-/// One already-aligned lyric fragment.
-///
-/// Text is a presentation fragment and whitespace is preserved. For best
-/// karaoke quality this should be a syllable. Word-level fragments are valid
-/// input and deliberately remain word-level.
-#[derive(Debug, Clone, PartialEq)]
-pub struct AlignedLyricFragment {
-    /// Text rendered for this fragment.
-    pub text: String,
-    /// Fragment start relative to the beginning of the audio.
-    pub start_seconds: f32,
-    /// Fragment end relative to the beginning of the audio.
-    pub end_seconds: f32,
-    /// Optional transcription/alignment confidence in `0.0..=1.0`.
-    pub confidence: Option<f32>,
-}
-
-impl AlignedLyricFragment {
-    /// Validates this fragment.
-    pub fn validate(&self) -> Result<()> {
-        if self.text.trim().is_empty() {
-            return Err(invalid_argument(
-                "lyric text must contain a non-whitespace character",
-            ));
-        }
-        if contains_line_break(&self.text) {
-            return Err(invalid_argument("lyric text must not contain line breaks"));
-        }
-        validate_time_range(self.start_seconds, self.end_seconds, "lyric")?;
-        validate_optional_confidence(self.confidence, "lyric confidence")
-    }
-}
 
 /// Evidence retained for one generated karaoke note.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -83,6 +47,7 @@ impl KaraokeNote {
             self.end_seconds,
             "karaoke note",
         )?;
+        MidiNote::new(self.midi_note)?;
         validate_confidence(self.evidence.pitch_confidence, "pitch confidence")?;
         validate_optional_confidence(self.evidence.lyric_confidence, "lyric confidence")?;
         validate_confidence(self.evidence.overlap_ratio, "overlap ratio")
@@ -162,7 +127,7 @@ pub struct KaraokeChartBuildOptions {
     pub tempo_bpm: f32,
     /// Audio time corresponding to musical beat zero.
     pub beat_zero_seconds: f32,
-    /// Minimum fraction of a lyric fragment that must overlap a musical note.
+    /// Minimum fraction of a timed-text word that must overlap a musical note.
     pub min_overlap_ratio: f32,
     /// Minimum pitched-note duration retained from the pitch track.
     pub min_note_duration_seconds: f32,
@@ -223,15 +188,20 @@ pub struct KaraokeChartBuildResult {
     pub diagnostics: Vec<String>,
 }
 
-/// Fuses aligned lyric fragments with a timestamped vocal pitch track.
+/// Fuses canonical timed-text words with a timestamped vocal pitch track.
 ///
-/// Existing MIDI-note consolidation is reused to smooth adjacent frames onto
-/// musical notes. Each lyric fragment then selects the consolidated note with
-/// the strongest overlap-duration × pitch-confidence score. This first slice
-/// intentionally emits at most one note per lyric fragment; melisma splitting
-/// remains an explicit later refinement instead of a hidden heuristic.
+/// The input contract stays owned by `media-core`; this module deliberately
+/// does not define a parallel transcript/alignment DTO. Existing MIDI-note
+/// consolidation is reused to smooth adjacent pitch frames onto musical notes.
+/// Each timed-text word then selects the consolidated note with the strongest
+/// overlap-duration × pitch-confidence score. This first slice intentionally
+/// emits at most one note per timed-text word; melisma splitting remains an
+/// explicit later refinement instead of a hidden heuristic.
+///
+/// This function constructs only the neutral karaoke model. File-format
+/// serialization such as UltraStar belongs in downstream adapters.
 pub fn build_karaoke_chart(
-    lyrics: &[AlignedLyricFragment],
+    lyrics: &[TimedTextWordContract],
     pitch_frames: &[PitchTrackFrame],
     options: KaraokeChartBuildOptions,
 ) -> Result<KaraokeChartBuildResult> {
@@ -252,7 +222,8 @@ pub fn build_karaoke_chart(
     let mut notes = Vec::new();
 
     for (lyric_index, lyric) in lyrics.iter().enumerate() {
-        let lyric_duration = lyric.end_seconds - lyric.start_seconds;
+        let (lyric_start, lyric_end) = lyric_time_range(lyric, lyric_index)?;
+        let lyric_duration = lyric_end - lyric_start;
         let mut best: Option<(usize, f32, f32, f32)> = None;
 
         for (note_index, note) in pitch_notes.notes.iter().enumerate() {
@@ -261,8 +232,8 @@ pub fn build_karaoke_chart(
                 note.start_beats + note.duration_beats,
                 options.tempo_bpm,
             );
-            let overlap_start = lyric.start_seconds.max(note_start);
-            let overlap_end = lyric.end_seconds.min(note_end);
+            let overlap_start = lyric_start.max(note_start);
+            let overlap_end = lyric_end.min(note_end);
             let overlap = (overlap_end - overlap_start).max(0.0);
             if overlap <= 0.0 {
                 continue;
@@ -307,8 +278,8 @@ pub fn build_karaoke_chart(
             pitch_note.start_beats + pitch_note.duration_beats,
             options.tempo_bpm,
         );
-        let start_seconds = lyric.start_seconds.max(note_start);
-        let end_seconds = lyric.end_seconds.min(note_end);
+        let start_seconds = lyric_start.max(note_start);
+        let end_seconds = lyric_end.min(note_end);
         if end_seconds - start_seconds < options.min_note_duration_seconds {
             diagnostics.push(format!(
                 "lyric[{lyric_index}] matched pitch but the fused duration was below the minimum"
@@ -323,7 +294,7 @@ pub fn build_karaoke_chart(
             midi_note: pitch_note.note.value(),
             evidence: KaraokeNoteEvidence {
                 pitch_confidence,
-                lyric_confidence: lyric.confidence,
+                lyric_confidence: lyric.confidence(),
                 overlap_ratio: overlap / lyric_duration,
             },
         });
@@ -331,7 +302,7 @@ pub fn build_karaoke_chart(
 
     if notes.is_empty() {
         return Err(invalid_argument(
-            "no lyric fragments could be fused with pitched vocal notes",
+            "no timed-text words could be fused with pitched vocal notes",
         ));
     }
     validate_non_overlapping_notes(&notes, "fused")?;
@@ -362,91 +333,6 @@ pub fn build_karaoke_chart(
     Ok(KaraokeChartBuildResult { chart, diagnostics })
 }
 
-/// Required metadata for an UltraStar v1 text file.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UltraStarV1Metadata {
-    /// Song title.
-    pub title: String,
-    /// Song artist.
-    pub artist: String,
-    /// Audio file reference written to `#MP3`.
-    pub audio_file: String,
-}
-
-impl UltraStarV1Metadata {
-    /// Validates header values against the v1 text grammar used here.
-    pub fn validate(&self) -> Result<()> {
-        validate_header_value(&self.title, "title")?;
-        validate_header_value(&self.artist, "artist")?;
-        validate_header_value(&self.audio_file, "audio_file")
-    }
-}
-
-/// Exports a neutral chart as UltraStar v1-compatible UTF-8 text.
-///
-/// UltraStar v1 implicitly quadruples `#BPM` for its integer note grid. The
-/// chart therefore keeps real quarter-note BPM and this exporter converts
-/// seconds to four UltraStar beats per quarter note only at the format edge.
-pub fn export_ultrastar_v1(
-    chart: &KaraokeChart,
-    metadata: &UltraStarV1Metadata,
-) -> Result<String> {
-    chart.validate()?;
-    metadata.validate()?;
-
-    let gap_millis = (chart.beat_zero_seconds * 1_000.0).round();
-    if !gap_millis.is_finite() || gap_millis < 0.0 || gap_millis > u64::MAX as f32 {
-        return Err(invalid_argument(
-            "beat_zero_seconds cannot be represented as #GAP",
-        ));
-    }
-
-    let mut output = String::new();
-    writeln!(output, "#TITLE:{}", metadata.title).expect("writing to String cannot fail");
-    writeln!(output, "#ARTIST:{}", metadata.artist).expect("writing to String cannot fail");
-    writeln!(output, "#MP3:{}", metadata.audio_file).expect("writing to String cannot fail");
-    writeln!(output, "#BPM:{}", decimal(chart.tempo_bpm)).expect("writing to String cannot fail");
-    writeln!(output, "#GAP:{gap_millis:.0}").expect("writing to String cannot fail");
-
-    for (phrase_index, phrase) in chart.phrases.iter().enumerate() {
-        for note in &phrase.notes {
-            let start_beat = ultrastar_beat(chart, note.start_seconds)?;
-            let end_beat = ultrastar_beat(chart, note.end_seconds)?;
-            let duration = end_beat.saturating_sub(start_beat).max(1);
-            let pitch = i16::from(note.midi_note) - MIDDLE_C_MIDI;
-            writeln!(
-                output,
-                ": {start_beat} {duration} {pitch} {}",
-                note.text
-            )
-            .expect("writing to String cannot fail");
-        }
-
-        if let Some(next_phrase) = chart.phrases.get(phrase_index + 1) {
-            let current_end = phrase
-                .notes
-                .last()
-                .expect("validated phrase contains a note")
-                .end_seconds;
-            let next_start = next_phrase
-                .notes
-                .first()
-                .expect("validated phrase contains a note")
-                .start_seconds;
-            let marker_beat = ultrastar_beat(chart, current_end)?;
-            let next_start_beat = ultrastar_beat(chart, next_start)?;
-            if marker_beat >= next_start_beat {
-                return Err(invalid_argument(
-                    "phrase gap disappears on the UltraStar integer beat grid",
-                ));
-            }
-            writeln!(output, "- {marker_beat}").expect("writing to String cannot fail");
-        }
-    }
-    writeln!(output, "E").expect("writing to String cannot fail");
-    Ok(output)
-}
-
 fn pitch_confidence_for_interval(
     frames: &[PitchTrackFrame],
     note: MidiNote,
@@ -475,42 +361,66 @@ fn pitch_confidence_for_interval(
     Ok((weighted_confidence / total_duration).clamp(0.0, 1.0))
 }
 
-fn ultrastar_beat(chart: &KaraokeChart, seconds: f32) -> Result<u64> {
-    let relative_seconds = seconds - chart.beat_zero_seconds;
-    if relative_seconds < 0.0 {
-        return Err(invalid_argument(
-            "a karaoke note starts before beat_zero_seconds and cannot be encoded in UltraStar v1",
-        ));
-    }
-    let beats_per_second = chart.tempo_bpm * ULTRASTAR_V1_BEATS_PER_QUARTER / 60.0;
-    let beat = (relative_seconds * beats_per_second).round();
-    if !beat.is_finite() || beat < 0.0 || beat > u64::MAX as f32 {
-        return Err(invalid_argument("UltraStar beat position is out of range"));
-    }
-    Ok(beat as u64)
-}
-
 fn beats_to_seconds(beats: f32, tempo_bpm: f32) -> f32 {
     beats * 60.0 / tempo_bpm
 }
 
-fn validate_lyrics(lyrics: &[AlignedLyricFragment]) -> Result<()> {
+fn validate_lyrics(lyrics: &[TimedTextWordContract]) -> Result<()> {
     if lyrics.is_empty() {
         return Err(invalid_argument(
-            "at least one aligned lyric fragment is required",
+            "at least one aligned timed-text word is required",
         ));
     }
-    for lyric in lyrics {
-        lyric.validate()?;
-    }
-    for pair in lyrics.windows(2) {
-        if pair[1].start_seconds < pair[0].end_seconds {
+
+    let mut previous_end = None;
+    for (index, lyric) in lyrics.iter().enumerate() {
+        let (start_seconds, end_seconds) = lyric_time_range(lyric, index)?;
+        if previous_end.is_some_and(|end| start_seconds < end) {
             return Err(invalid_argument(
-                "aligned lyric fragments must be chronological and non-overlapping",
+                "aligned timed-text words must be chronological and non-overlapping",
             ));
         }
+        previous_end = Some(end_seconds);
     }
     Ok(())
+}
+
+fn lyric_time_range(lyric: &TimedTextWordContract, index: usize) -> Result<(f32, f32)> {
+    if lyric.text.trim().is_empty() {
+        return Err(invalid_argument(format!(
+            "timed-text word[{index}] must contain a non-whitespace character"
+        )));
+    }
+    if contains_line_break(&lyric.text) {
+        return Err(invalid_argument(format!(
+            "timed-text word[{index}] must not contain line breaks"
+        )));
+    }
+    validate_optional_confidence(lyric.confidence(), "lyric confidence")?;
+
+    let start_seconds = lyric.start_seconds().ok_or_else(|| {
+        invalid_argument(format!(
+            "timed-text word[{index}] must have an aligned start_seconds"
+        ))
+    })?;
+    let end_seconds = lyric.end_seconds().ok_or_else(|| {
+        invalid_argument(format!(
+            "timed-text word[{index}] must have an aligned end_seconds"
+        ))
+    })?;
+    let start_seconds = seconds_to_f32(start_seconds, "timed-text word start_seconds")?;
+    let end_seconds = seconds_to_f32(end_seconds, "timed-text word end_seconds")?;
+    validate_time_range(start_seconds, end_seconds, "timed-text word")?;
+    Ok((start_seconds, end_seconds))
+}
+
+fn seconds_to_f32(value: f64, name: &str) -> Result<f32> {
+    if !value.is_finite() || value < 0.0 || value > f64::from(f32::MAX) {
+        return Err(invalid_argument(format!(
+            "{name} must be finite, non-negative, and representable as f32"
+        )));
+    }
+    Ok(value as f32)
 }
 
 fn validate_single_voice_pitch_frames(frames: &[PitchTrackFrame]) -> Result<()> {
@@ -581,23 +491,6 @@ fn validate_optional_confidence(value: Option<f32>, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_header_value(value: &str, name: &str) -> Result<()> {
-    if value.trim().is_empty() {
-        return Err(invalid_argument(format!(
-            "UltraStar {name} must not be empty"
-        )));
-    }
-    if value
-        .chars()
-        .any(|character| matches!(character, '\r' | '\n' | ':'))
-    {
-        return Err(invalid_argument(format!(
-            "UltraStar {name} must not contain a colon or line break"
-        )));
-    }
-    Ok(())
-}
-
 fn contains_line_break(value: &str) -> bool {
     value
         .chars()
@@ -606,17 +499,6 @@ fn contains_line_break(value: &str) -> bool {
 
 fn compare_f32(left: f32, right: f32) -> Ordering {
     left.total_cmp(&right)
-}
-
-fn decimal(value: f32) -> String {
-    let mut rendered = format!("{value:.6}");
-    while rendered.contains('.') && rendered.ends_with('0') {
-        rendered.pop();
-    }
-    if rendered.ends_with('.') {
-        rendered.pop();
-    }
-    rendered
 }
 
 fn invalid_argument(message: impl Into<String>) -> DetectError {
@@ -643,20 +525,19 @@ mod tests {
 
     fn lyric(
         text: &str,
-        start_seconds: f32,
-        end_seconds: f32,
+        start_seconds: f64,
+        end_seconds: f64,
         confidence: Option<f32>,
-    ) -> AlignedLyricFragment {
-        AlignedLyricFragment {
-            text: text.to_string(),
-            start_seconds,
-            end_seconds,
-            confidence,
-        }
+    ) -> TimedTextWordContract {
+        TimedTextWordContract::new(text)
+            .with_time_range(Some(start_seconds), Some(end_seconds))
+            .unwrap()
+            .with_confidence(confidence)
+            .unwrap()
     }
 
     #[test]
-    fn builds_notes_from_consolidated_pitch_and_groups_phrases() {
+    fn builds_notes_from_canonical_timed_text_and_consolidated_pitch() {
         let lyrics = vec![
             lyric("Hel", 0.0, 0.25, Some(0.95)),
             lyric("lo", 0.25, 0.50, Some(0.90)),
@@ -715,92 +596,36 @@ mod tests {
     }
 
     #[test]
-    fn exports_ultrastar_v1_with_format_specific_quantization() {
-        let chart = KaraokeChart {
-            tempo_bpm: 120.0,
-            beat_zero_seconds: 0.5,
-            phrases: vec![
-                KaraokePhrase {
-                    notes: vec![
-                        KaraokeNote {
-                            text: "Hel".to_string(),
-                            start_seconds: 0.5,
-                            end_seconds: 0.75,
-                            midi_note: 60,
-                            evidence: KaraokeNoteEvidence {
-                                pitch_confidence: 0.95,
-                                lyric_confidence: Some(0.9),
-                                overlap_ratio: 1.0,
-                            },
-                        },
-                        KaraokeNote {
-                            text: "lo".to_string(),
-                            start_seconds: 0.75,
-                            end_seconds: 1.0,
-                            midi_note: 64,
-                            evidence: KaraokeNoteEvidence {
-                                pitch_confidence: 0.9,
-                                lyric_confidence: Some(0.9),
-                                overlap_ratio: 1.0,
-                            },
-                        },
-                    ],
-                },
-                KaraokePhrase {
-                    notes: vec![KaraokeNote {
-                        text: " world".to_string(),
-                        start_seconds: 1.5,
-                        end_seconds: 1.75,
-                        midi_note: 67,
-                        evidence: KaraokeNoteEvidence {
-                            pitch_confidence: 0.85,
-                            lyric_confidence: Some(0.88),
-                            overlap_ratio: 1.0,
-                        },
-                    }],
-                },
-            ],
-        };
-        let metadata = UltraStarV1Metadata {
-            title: "Example".to_string(),
-            artist: "Singer".to_string(),
-            audio_file: "song.ogg".to_string(),
-        };
+    fn requires_aligned_canonical_timed_text() {
+        let lyrics = vec![TimedTextWordContract::new("word")];
+        let pitch = vec![pitch_frame(0.0, 0.25, 60, 0.9)];
 
-        let output = export_ultrastar_v1(&chart, &metadata).unwrap();
-        assert_eq!(
-            output,
-            "#TITLE:Example\n#ARTIST:Singer\n#MP3:song.ogg\n#BPM:120\n#GAP:500\n: 0 2 0 Hel\n: 2 2 4 lo\n- 4\n: 8 2 7  world\nE\n"
-        );
+        let error = build_karaoke_chart(
+            &lyrics,
+            &pitch,
+            KaraokeChartBuildOptions::default(),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("aligned start_seconds"));
     }
 
     #[test]
-    fn exporter_rejects_notes_before_beat_zero() {
-        let chart = KaraokeChart {
-            tempo_bpm: 120.0,
-            beat_zero_seconds: 1.0,
-            phrases: vec![KaraokePhrase {
-                notes: vec![KaraokeNote {
-                    text: "early".to_string(),
-                    start_seconds: 0.5,
-                    end_seconds: 0.75,
-                    midi_note: 60,
-                    evidence: KaraokeNoteEvidence {
-                        pitch_confidence: 1.0,
-                        lyric_confidence: None,
-                        overlap_ratio: 1.0,
-                    },
-                }],
-            }],
-        };
-        let metadata = UltraStarV1Metadata {
-            title: "Example".to_string(),
-            artist: "Singer".to_string(),
-            audio_file: "song.ogg".to_string(),
+    fn rejects_karaoke_pitch_outside_midi_range() {
+        let note = KaraokeNote {
+            text: "word".to_string(),
+            start_seconds: 0.0,
+            end_seconds: 0.25,
+            midi_note: 128,
+            evidence: KaraokeNoteEvidence {
+                pitch_confidence: 0.9,
+                lyric_confidence: Some(0.9),
+                overlap_ratio: 1.0,
+            },
         };
 
-        let error = export_ultrastar_v1(&chart, &metadata).unwrap_err();
-        assert!(error.to_string().contains("before beat_zero_seconds"));
+        let error = note.validate().unwrap_err();
+        assert!(error.to_string().contains("MIDI note"));
     }
 
     #[test]

@@ -45,7 +45,7 @@
     "crates/audio/audio-analysis-speakers": "assigns speakers through the validated neutral timed-text builder and accessor API",
     "crates/audio/audio-analysis-transcription": "uses destination-owned audio fixture support instead of a visual dev dependency",
     "crates/audio/audio-timed-text-compat": "private destination support preserving the historical Rust crate name while re-exporting media-core timed-text DTOs",
-    "crates/audio/audio-generation-midi": "adds destination-owned neutral karaoke chart construction and UltraStar export while reusing the existing pitch-track-to-note authority",
+    "crates/audio/audio-generation-midi": "adds destination-owned neutral karaoke chart construction from canonical media-core timed text while reusing the existing pitch-track-to-note authority; format exporters remain downstream",
     "crates/audio/audio-generation-tts": "keeps unavailable Reference Voice Prompt ASR fallback as an explicit destination setup requirement",
     "crates/bindings/audio-analysis-pitch-wasm": "adds the destination-owned typed whole-song PCM key-analysis bridge while delegating dominant and local key decisions to the existing Rust pitch analyzer",
     "crates/bindings/audio-analysis-rhythm-wasm": "adds the destination-owned typed whole-song PCM bridge while delegating analysis semantics to the existing Rust rhythm surface",

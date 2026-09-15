@@ -21,4 +21,4 @@ cargo test --locked -p moenarch-audio-generation-tts-server \
   --features candle,model-bundles,audio-io,asr
 
 cargo test --locked -p moenarch-audio-karaoke-pipeline \
-  --features audio-io
+  --features separation

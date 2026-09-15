@@ -1,0 +1,152 @@
+name: Temporary karaoke tail fix
+
+on:
+  push:
+    branches: [codex/singstar-pipeline]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          ref: codex/singstar-pipeline
+      - name: Patch trailing vocal analysis and regression evidence
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('crates/audio/audio-karaoke-pipeline/src/lib.rs')
+          text = path.read_text()
+          old = '''fn analyze_vocal_pitch(
+              samples: &[f32],
+              sample_rate: u32,
+              detector_config: PitchDetectorConfig,
+              frame_size: usize,
+              hop_size: usize,
+          ) -> Result<(Vec<PitchTrackFrame>, usize)> {
+              let frame_spec = FrameSpec::new(frame_size, hop_size)?;
+              let detector = AutocorrelationPitchDetector::new(detector_config)?;
+              let mut pitch_frames = Vec::new();
+              let mut analysis_frame_count = 0_usize;
+
+              for (start_sample, frame) in frame_spec.frames(samples) {
+                  analysis_frame_count += 1;
+                  let estimate = detector.estimate_samples(frame, sample_rate)?;
+                  let Some(frequency_hz) = estimate.frequency_hz else {
+                      continue;
+                  };
+
+                  // The detector sees the full overlapping analysis window. The neutral karaoke
+                  // builder, however, owns a single non-overlapping lead voice. Represent each
+                  // estimate by its hop-sized support interval so analysis context does not become
+                  // overlapping chart evidence.
+                  let end_sample = start_sample.saturating_add(hop_size).min(samples.len());
+                  if end_sample <= start_sample {
+                      continue;
+                  }
+                  pitch_frames.push(PitchTrackFrame {
+                      start_seconds: samples_to_seconds_f32(start_sample, sample_rate)?,
+                      end_seconds: samples_to_seconds_f32(end_sample, sample_rate)?,
+                      frequency_hz,
+                      confidence: estimate.confidence,
+                  });
+              }
+
+              Ok((pitch_frames, analysis_frame_count))
+          }
+          '''
+          new = '''fn analyze_vocal_pitch(
+              samples: &[f32],
+              sample_rate: u32,
+              detector_config: PitchDetectorConfig,
+              frame_size: usize,
+              hop_size: usize,
+          ) -> Result<(Vec<PitchTrackFrame>, usize)> {
+              FrameSpec::new(frame_size, hop_size)?;
+              let detector = AutocorrelationPitchDetector::new(detector_config)?;
+              let mut pitch_frames = Vec::new();
+              let mut analysis_frame_count = 0_usize;
+              let mut analysis_window = vec![0.0_f32; frame_size];
+
+              for start_sample in (0..samples.len()).step_by(hop_size) {
+                  analysis_frame_count += 1;
+                  let copied_end = start_sample.saturating_add(frame_size).min(samples.len());
+                  let copied_len = copied_end - start_sample;
+                  analysis_window.fill(0.0);
+                  analysis_window[..copied_len]
+                      .copy_from_slice(&samples[start_sample..copied_end]);
+
+                  let estimate = detector.estimate_samples(&analysis_window, sample_rate)?;
+                  let Some(frequency_hz) = estimate.frequency_hz else {
+                      continue;
+                  };
+
+                  // The detector sees a full overlapping analysis window, zero-padded at the
+                  // trailing edge when necessary. The neutral karaoke builder owns a single
+                  // non-overlapping lead voice, so each estimate contributes only its real
+                  // hop-sized support interval. Iterating through every hop retains the tail and
+                  // also gives clips shorter than one analysis frame a deterministic pitch pass.
+                  let end_sample = start_sample.saturating_add(hop_size).min(samples.len());
+                  if end_sample <= start_sample {
+                      continue;
+                  }
+                  pitch_frames.push(PitchTrackFrame {
+                      start_seconds: samples_to_seconds_f32(start_sample, sample_rate)?,
+                      end_seconds: samples_to_seconds_f32(end_sample, sample_rate)?,
+                      frequency_hz,
+                      confidence: estimate.confidence,
+                  });
+              }
+
+              Ok((pitch_frames, analysis_frame_count))
+          }
+          '''
+          if old not in text:
+              raise SystemExit('expected analyze_vocal_pitch implementation not found')
+          text = text.replace(old, new, 1)
+
+          marker = '''    #[test]
+              fn rejects_non_finite_vocal_samples_before_analysis() {
+          '''
+          regression = '''    #[test]
+              fn pitch_analysis_pads_short_and_trailing_windows() {
+                  let sample_rate = 4_000;
+                  let vocals = sine_wave(sample_rate, 440.0, 0.19);
+                  let detector = PitchDetectorConfig {
+                      min_frequency_hz: 80.0,
+                      max_frequency_hz: 800.0,
+                      confidence_threshold: 0.1,
+                  };
+
+                  let analyzed = analyze_vocal_pitch(&vocals, sample_rate, detector, 512, 128);
+                  let Ok((frames, analysis_frame_count)) = analyzed else {
+                      panic!("padded trailing pitch analysis should succeed");
+                  };
+
+                  assert_eq!(analysis_frame_count, vocals.len().div_ceil(128));
+                  assert!(analysis_frame_count > 1);
+                  assert!(frames.iter().any(|frame| {
+                      (frame.end_seconds - vocals.len() as f32 / sample_rate as f32).abs()
+                          < 1.0e-6
+                  }));
+              }
+
+          ''' + marker
+          if marker not in text:
+              raise SystemExit('expected regression insertion point not found')
+          text = text.replace(marker, regression, 1)
+          path.write_text(text)
+          PY
+      - name: Commit fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add crates/audio/audio-karaoke-pipeline/src/lib.rs
+          git commit -m 'fix(karaoke): retain trailing vocal pitch evidence'
+          git push origin HEAD:codex/singstar-pipeline

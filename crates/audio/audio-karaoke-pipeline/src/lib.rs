@@ -195,22 +195,30 @@ fn analyze_vocal_pitch(
     frame_size: usize,
     hop_size: usize,
 ) -> Result<(Vec<PitchTrackFrame>, usize)> {
-    let frame_spec = FrameSpec::new(frame_size, hop_size)?;
+    FrameSpec::new(frame_size, hop_size)?;
     let detector = AutocorrelationPitchDetector::new(detector_config)?;
     let mut pitch_frames = Vec::new();
     let mut analysis_frame_count = 0_usize;
+    let mut analysis_window = vec![0.0_f32; frame_size];
 
-    for (start_sample, frame) in frame_spec.frames(samples) {
+    for start_sample in (0..samples.len()).step_by(hop_size) {
         analysis_frame_count += 1;
-        let estimate = detector.estimate_samples(frame, sample_rate)?;
+        let copied_end = start_sample.saturating_add(frame_size).min(samples.len());
+        let copied_len = copied_end - start_sample;
+        analysis_window.fill(0.0);
+        analysis_window[..copied_len]
+            .copy_from_slice(&samples[start_sample..copied_end]);
+
+        let estimate = detector.estimate_samples(&analysis_window, sample_rate)?;
         let Some(frequency_hz) = estimate.frequency_hz else {
             continue;
         };
 
-        // The detector sees the full overlapping analysis window. The neutral karaoke
-        // builder, however, owns a single non-overlapping lead voice. Represent each
-        // estimate by its hop-sized support interval so analysis context does not become
-        // overlapping chart evidence.
+        // The detector sees a full overlapping analysis window, zero-padded at the
+        // trailing edge when necessary. The neutral karaoke builder owns a single
+        // non-overlapping lead voice, so each estimate contributes only its real
+        // hop-sized support interval. Iterating through every hop retains the tail and
+        // also gives clips shorter than one analysis frame a deterministic pitch pass.
         let end_sample = start_sample.saturating_add(hop_size).min(samples.len());
         if end_sample <= start_sample {
             continue;
@@ -405,6 +413,29 @@ mod tests {
             panic!("missing full mix must fail");
         };
         assert!(error.to_string().contains("full-mix samples"));
+    }
+
+    #[test]
+    fn pitch_analysis_pads_short_and_trailing_windows() {
+        let sample_rate = 4_000;
+        let vocals = sine_wave(sample_rate, 440.0, 0.19);
+        let detector = PitchDetectorConfig {
+            min_frequency_hz: 80.0,
+            max_frequency_hz: 800.0,
+            confidence_threshold: 0.1,
+        };
+
+        let analyzed = analyze_vocal_pitch(&vocals, sample_rate, detector, 512, 128);
+        let Ok((frames, analysis_frame_count)) = analyzed else {
+            panic!("padded trailing pitch analysis should succeed");
+        };
+
+        assert_eq!(analysis_frame_count, vocals.len().div_ceil(128));
+        assert!(analysis_frame_count > 1);
+        assert!(frames.iter().any(|frame| {
+            (frame.end_seconds - vocals.len() as f32 / sample_rate as f32).abs()
+                < 1.0e-6
+        }));
     }
 
     #[test]

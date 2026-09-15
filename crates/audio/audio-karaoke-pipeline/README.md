@@ -68,6 +68,10 @@ Decoded streams retain independent sample rates and then enter the same pure
 failures distinct from analysis/export failures instead of flattening errors to
 strings.
 
+Pure pipeline options, output metadata, and required-source presence are
+validated before the first decode so invalid requests cannot trigger expensive
+FFmpeg work or have their validation errors masked by media failures.
+
 ```rust,ignore
 use audio_analysis_io::SelectedMediaSource;
 use audio_karaoke_formats::UltraStarV1Metadata;
@@ -83,6 +87,45 @@ let result = build_ultrastar_from_media(
 # Ok::<(), audio_karaoke_pipeline::media::KaraokeMediaPipelineError>(())
 ```
 
-Stem separation (Demucs) and transcription/alignment remain explicit later
-adapter stages. They are not hidden behind file decoding, which keeps external
-tool execution observable and independently replaceable.
+## Vocal separation adapter
+
+Enable the `separation` feature for the explicit Demucs stage. It includes the
+`audio-io` feature and reuses `audio-analysis-separation::HtdemucsSeparator`;
+this crate does not build another command wrapper or duplicate Demucs output
+layout rules.
+
+`separation::karaoke_vocal_separation_options(output_dir)` creates the efficient
+karaoke default: Demucs two-stem output with `vocals` and `no_vocals`. Callers
+may supply any `HtdemucsOptions`, but the adapter rejects layouts that cannot
+produce `Stem::Vocals` before external execution. `plan_vocal_separation`
+returns the exact command and expected output layout without invoking Demucs.
+
+`build_ultrastar_with_demucs` validates karaoke options and UltraStar metadata,
+runs the caller-configured separator, retains the complete typed
+`SeparationResult`, finds the non-empty vocal stem, and passes that stem plus the
+original song through the same media adapter above. The caller owns the
+separation output directory and its lifecycle; no hidden temporary directory is
+created or deleted.
+
+```rust,ignore
+use audio_karaoke_formats::UltraStarV1Metadata;
+use audio_karaoke_pipeline::{
+    separation::{build_ultrastar_with_demucs, karaoke_vocal_separation_options},
+    KaraokePipelineOptions,
+};
+
+let result = build_ultrastar_with_demucs(
+    "song.flac",
+    &aligned_lyrics,
+    KaraokePipelineOptions::default(),
+    &UltraStarV1Metadata::new("Song", "Artist", "song.flac"),
+    karaoke_vocal_separation_options("separated"),
+)?;
+
+let _ = (result.separation, result.vocal_path, result.karaoke);
+# Ok::<(), audio_karaoke_pipeline::separation::KaraokeSeparationPipelineError>(())
+```
+
+Transcription/alignment remains a later, separate stage. Separation is explicit
+external-tool execution, while lyric timing remains canonical caller input; the
+pipeline still never invents lyrics or syllable boundaries.

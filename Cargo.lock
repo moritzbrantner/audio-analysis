@@ -2274,6 +2274,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "moenarch-audio-karaoke-pipeline"
+version = "0.1.0"
+dependencies = [
+ "moenarch-audio-analysis-core",
+ "moenarch-audio-analysis-pitch",
+ "moenarch-audio-analysis-rhythm",
+ "moenarch-audio-contracts",
+ "moenarch-audio-generation-midi",
+ "moenarch-audio-karaoke-formats",
+ "moenarch-media-core",
+]
+
+[[package]]
 name = "moenarch-audio-timed-text-compat"
 version = "0.1.0"
 dependencies = [

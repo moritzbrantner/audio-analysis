@@ -1,6 +1,6 @@
 # audio-generation-midi
 
-MIDI-like note sequencing, Standard MIDI export, and deterministic audio rendering helpers for `moritzbrantner-video-analysis`.
+MIDI-like note sequencing, Standard MIDI export, deterministic audio rendering, and neutral vocal/karaoke chart generation helpers for `moritzbrantner-video-analysis`.
 
 ## Feature flags
 
@@ -26,6 +26,44 @@ let _ = (midi_bytes, audio);
 # Ok::<(), audio_contracts::DetectError>(())
 ```
 
+## Karaoke chart generation
+
+The `karaoke` module combines canonical `media_core::TimedTextWordContract` values with a timestamped vocal pitch track. It deliberately does not define a second transcript/alignment DTO. It reuses this crate's pitch-track-to-note consolidation so neutral karaoke construction and MIDI generation agree on musical note boundaries.
+
+The neutral `KaraokeChart` keeps seconds, MIDI pitch, phrase structure, and confidence evidence. This crate does not own UltraStar, SingStar, or other karaoke-file serialization. Format-specific exporters belong in downstream adapters so their quantization, metadata, and grammar rules cannot leak back into the neutral model.
+
+Callers should provide syllable-level timed-text words when available. Word-level alignments are accepted without guessing syllable boundaries. The first slice supports one lead voice, regular pitched notes, and at most one generated note per aligned timed-text word; melisma splitting, rap/golden notes, duet tracks, and format-specific integer grids remain explicit downstream capabilities.
+
+```rust,ignore
+use audio_generation_midi::karaoke::{build_karaoke_chart, KaraokeChartBuildOptions};
+use audio_generation_midi::{MidiNote, PitchTrackFrame};
+use media_core::TimedTextWordContract;
+
+let lyrics = vec![TimedTextWordContract::new("Hello")
+    .with_time_range(Some(0.5), Some(1.0))?
+    .with_confidence(Some(0.95))?];
+let pitch = vec![PitchTrackFrame {
+    start_seconds: 0.5,
+    end_seconds: 1.0,
+    frequency_hz: MidiNote::new(60)?.frequency_hz(),
+    confidence: 0.9,
+}];
+let built = build_karaoke_chart(
+    &lyrics,
+    &pitch,
+    KaraokeChartBuildOptions {
+        tempo_bpm: 120.0,
+        beat_zero_seconds: 0.5,
+        ..KaraokeChartBuildOptions::default()
+    },
+)?;
+
+let _ = built.chart;
+# Ok::<(), audio_contracts::DetectError>(())
+```
+
+Downstream integer-grid exporters must validate their encoded note sequence as a whole. If minimum-duration rounding would make adjacent notes overlap, the adapter must reject the representation (or use a documented joint quantization policy) rather than silently changing the single-lead timing.
+
 ## Package surface
 
 Primary workflow: `audio.midi.render`.
@@ -36,12 +74,14 @@ Workflow operations:
 - `audio.midi.render`: Renders a MIDI-like note sequence into deterministic in-memory audio samples.
 - `audio.midi.fromPitchTrack`: Converts pitch-track frames into merged MIDI-like note events and a byte summary.
 
+Karaoke chart construction is currently library-first and intentionally does not add another transport operation in this slice.
+
 Debug operations:
 
 - `describe`: inspect package metadata and runtime support.
 - `audio.midi.note`: Inspects frequency metadata for a MIDI note number or note name.
 
-Runtime support: library, CLI, server, and WASM wrappers expose these operations.
+Runtime support: library, CLI, server, and WASM wrappers expose the MIDI workflow operations above.
 
 Run the primary workflow through the CLI:
 
@@ -59,5 +99,9 @@ external-tool execution.
 
 ## Related crates
 
+- `audio-analysis-pitch`
+- `audio-analysis-rhythm`
+- `audio-analysis-separation`
+- `audio-analysis-transcription`
 - `audio-analysis-synthesis`
 - `video-analysis-core`

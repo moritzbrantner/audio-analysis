@@ -2266,6 +2266,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "moenarch-audio-karaoke-formats"
+version = "0.1.0"
+dependencies = [
+ "moenarch-audio-contracts",
+ "moenarch-audio-generation-midi",
+]
+
+[[package]]
 name = "moenarch-audio-timed-text-compat"
 version = "0.1.0"
 dependencies = [

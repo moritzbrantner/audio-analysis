@@ -1,11 +1,12 @@
 #![doc = include_str!("../README.md")]
 
 use audio_contracts::{DetectError, Result};
-use audio_generation_midi::karaoke::{KaraokeChart, KaraokeNote};
+use audio_generation_midi::karaoke::{KaraokeChart, KaraokeLyricRole, KaraokeNote};
 
 const ULTRASTAR_VERSION: &str = "1.0.0";
 const GRID_UNITS_PER_QUARTER_NOTE: f64 = 4.0;
 const MIDDLE_C_MIDI_NOTE: i16 = 60;
+const ULTRASTAR_MELISMA_CONTINUATION: &str = "~";
 
 /// Required metadata for a single-voice UltraStar v1 song file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,8 +60,10 @@ impl QuantizedNote {
 /// The neutral chart stays authoritative. UltraStar-specific integer timing is
 /// introduced only here, and export fails when rounding would collapse a note,
 /// overlap notes, place a note before the gap, or leave no legal phrase-break
-/// beat. The exporter never changes neutral note boundaries to force a valid
-/// file.
+/// beat. Neutral lyric continuations are rendered using the UltraStar ecosystem
+/// `~` continuation convention; that spelling never leaks into the neutral
+/// chart model. The exporter never changes neutral note boundaries to force a
+/// valid file.
 pub fn export_ultrastar_v1(
     chart: &KaraokeChart,
     metadata: &UltraStarV1Metadata,
@@ -193,11 +196,16 @@ fn quantize_note(
         )));
     }
 
+    let text = match note.lyric_role {
+        KaraokeLyricRole::Primary => note.text.clone(),
+        KaraokeLyricRole::Continuation => ULTRASTAR_MELISMA_CONTINUATION.to_string(),
+    };
+
     Ok(QuantizedNote {
         start_beat,
         end_beat,
         pitch: i16::from(note.midi_note) - MIDDLE_C_MIDI_NOTE,
-        text: note.text.clone(),
+        text,
     })
 }
 
@@ -288,9 +296,16 @@ mod tests {
     use super::*;
     use audio_generation_midi::karaoke::{KaraokeNoteEvidence, KaraokePhrase};
 
-    fn note(text: &str, start_seconds: f32, end_seconds: f32, midi_note: u8) -> KaraokeNote {
+    fn note_with_role(
+        text: &str,
+        lyric_role: KaraokeLyricRole,
+        start_seconds: f32,
+        end_seconds: f32,
+        midi_note: u8,
+    ) -> KaraokeNote {
         KaraokeNote {
             text: text.to_string(),
+            lyric_role,
             start_seconds,
             end_seconds,
             midi_note,
@@ -300,6 +315,16 @@ mod tests {
                 overlap_ratio: 1.0,
             },
         }
+    }
+
+    fn note(text: &str, start_seconds: f32, end_seconds: f32, midi_note: u8) -> KaraokeNote {
+        note_with_role(
+            text,
+            KaraokeLyricRole::Primary,
+            start_seconds,
+            end_seconds,
+            midi_note,
+        )
     }
 
     fn metadata() -> UltraStarV1Metadata {
@@ -342,6 +367,35 @@ mod tests {
             exported_or_panic(&chart),
             "#VERSION:1.0.0\n#MP3:audio/song.ogg\n#TITLE:Example\n#ARTIST:Artist\n#BPM:120\n#GAP:500\n: 0 2 0 Hel\n: 2 2 4 lo\n- 4\n: 8 2 -2  world\nE\n"
         );
+    }
+
+    #[test]
+    fn renders_neutral_continuations_as_ultrastar_melisma_notes() {
+        let chart = KaraokeChart {
+            tempo_bpm: 120.0,
+            beat_zero_seconds: 0.0,
+            phrases: vec![KaraokePhrase {
+                notes: vec![
+                    note("lo", 0.0, 0.25, 60),
+                    note_with_role(
+                        "lo",
+                        KaraokeLyricRole::Continuation,
+                        0.25,
+                        0.50,
+                        62,
+                    ),
+                    note_with_role(
+                        "lo",
+                        KaraokeLyricRole::Continuation,
+                        0.50,
+                        0.75,
+                        64,
+                    ),
+                ],
+            }],
+        };
+
+        assert!(exported_or_panic(&chart).contains(": 0 2 0 lo\n: 2 2 2 ~\n: 4 2 4 ~\n"));
     }
 
     #[test]

@@ -2180,6 +2180,7 @@ dependencies = [
  "moenarch-audio-analysis-synthesis",
  "moenarch-audio-contracts",
  "moenarch-data-inversion-core",
+ "moenarch-media-core",
  "moenarch-runtime-core",
  "serde_json",
 ]

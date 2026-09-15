@@ -12,15 +12,35 @@ pub struct KaraokeNoteEvidence {
     pub pitch_confidence: f32,
     /// Confidence reported by lyric alignment, when available.
     pub lyric_confidence: Option<f32>,
-    /// Fraction of the lyric fragment covered by the selected musical note.
+    /// Fraction of the lyric fragment covered by this musical note.
     pub overlap_ratio: f32,
+}
+
+/// Relationship between a pitched note and its aligned lyric fragment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KaraokeLyricRole {
+    /// First pitched note carrying this lyric fragment.
+    Primary,
+    /// Later pitched note that continues the immediately preceding lyric fragment.
+    Continuation,
+}
+
+/// Strategy used when one aligned lyric fragment spans several pitch notes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KaraokeMelismaMode {
+    /// Preserve the original one-best-note-per-lyric behavior.
+    SingleBestNote,
+    /// Emit every sufficiently covered pitch note and mark later notes as continuations.
+    SplitAcrossPitchNotes,
 }
 
 /// One neutral pitched lyric note.
 #[derive(Debug, Clone, PartialEq)]
 pub struct KaraokeNote {
-    /// Lyric fragment rendered for this note.
+    /// Source lyric fragment aligned to this note.
     pub text: String,
+    /// Whether this note starts or continues the source lyric fragment.
+    pub lyric_role: KaraokeLyricRole,
     /// Note start relative to the beginning of the audio.
     pub start_seconds: f32,
     /// Note end relative to the beginning of the audio.
@@ -69,8 +89,20 @@ impl KaraokePhrase {
                 "karaoke phrase must contain at least one note",
             ));
         }
-        for note in &self.notes {
+        for (index, note) in self.notes.iter().enumerate() {
             note.validate()?;
+            if note.lyric_role == KaraokeLyricRole::Continuation {
+                let Some(previous) = index.checked_sub(1).and_then(|previous| self.notes.get(previous)) else {
+                    return Err(invalid_argument(
+                        "karaoke continuation note must follow a primary or continuation note",
+                    ));
+                };
+                if previous.text != note.text {
+                    return Err(invalid_argument(
+                        "karaoke continuation note must preserve the preceding lyric fragment",
+                    ));
+                }
+            }
         }
         validate_non_overlapping_notes(&self.notes, "phrase")
     }
@@ -127,12 +159,16 @@ pub struct KaraokeChartBuildOptions {
     pub tempo_bpm: f32,
     /// Audio time corresponding to musical beat zero.
     pub beat_zero_seconds: f32,
-    /// Minimum fraction of a timed-text word that must overlap a musical note.
+    /// Minimum fraction of a timed-text lyric fragment covered by accepted pitch notes.
     pub min_overlap_ratio: f32,
     /// Minimum pitched-note duration retained from the pitch track.
     pub min_note_duration_seconds: f32,
     /// Silence gap after which a new lyric phrase is started.
     pub phrase_gap_seconds: f32,
+    /// Whether one aligned lyric fragment may span several pitch notes.
+    pub melisma_mode: KaraokeMelismaMode,
+    /// Minimum fraction of each pitch note that must lie inside the lyric fragment in melisma mode.
+    pub min_pitch_note_overlap_ratio: f32,
 }
 
 impl Default for KaraokeChartBuildOptions {
@@ -143,6 +179,8 @@ impl Default for KaraokeChartBuildOptions {
             min_overlap_ratio: 0.35,
             min_note_duration_seconds: 0.05,
             phrase_gap_seconds: 1.0,
+            melisma_mode: KaraokeMelismaMode::SingleBestNote,
+            min_pitch_note_overlap_ratio: 0.5,
         }
     }
 }
@@ -175,6 +213,13 @@ impl KaraokeChartBuildOptions {
                 "phrase_gap_seconds must be finite and non-negative",
             ));
         }
+        if !self.min_pitch_note_overlap_ratio.is_finite()
+            || !(0.0..=1.0).contains(&self.min_pitch_note_overlap_ratio)
+        {
+            return Err(invalid_argument(
+                "min_pitch_note_overlap_ratio must be finite and between 0.0 and 1.0",
+            ));
+        }
         Ok(())
     }
 }
@@ -193,10 +238,12 @@ pub struct KaraokeChartBuildResult {
 /// The input contract stays owned by `media-core`; this module deliberately
 /// does not define a parallel transcript/alignment DTO. Existing MIDI-note
 /// consolidation is reused to smooth adjacent pitch frames onto musical notes.
-/// Each timed-text word then selects the consolidated note with the strongest
-/// overlap-duration × pitch-confidence score. This first slice intentionally
-/// emits at most one note per timed-text word; melisma splitting remains an
-/// explicit later refinement instead of a hidden heuristic.
+/// By default each lyric fragment selects the consolidated note with the
+/// strongest overlap-duration × pitch-confidence score, preserving the
+/// original one-note behavior. Callers can opt into deterministic melisma
+/// splitting: every sufficiently covered pitch note inside the already-aligned
+/// lyric interval is emitted, with later notes marked as lyric continuations.
+/// No syllable boundary is guessed or synthesized.
 ///
 /// This function constructs only the neutral karaoke model. File-format
 /// serialization such as UltraStar belongs in downstream adapters.
@@ -223,81 +270,30 @@ pub fn build_karaoke_chart(
 
     for (lyric_index, lyric) in lyrics.iter().enumerate() {
         let (lyric_start, lyric_end) = lyric_time_range(lyric, lyric_index)?;
-        let lyric_duration = lyric_end - lyric_start;
-        let mut best: Option<(usize, f32, f32, f32)> = None;
-
-        for (note_index, note) in pitch_notes.notes.iter().enumerate() {
-            let note_start = beats_to_seconds(note.start_beats, options.tempo_bpm);
-            let note_end = beats_to_seconds(
-                note.start_beats + note.duration_beats,
-                options.tempo_bpm,
-            );
-            let overlap_start = lyric_start.max(note_start);
-            let overlap_end = lyric_end.min(note_end);
-            let overlap = (overlap_end - overlap_start).max(0.0);
-            if overlap <= 0.0 {
-                continue;
-            }
-            let overlap_ratio = overlap / lyric_duration;
-            if overlap_ratio < options.min_overlap_ratio {
-                continue;
-            }
-            let pitch_confidence = pitch_confidence_for_interval(
+        match options.melisma_mode {
+            KaraokeMelismaMode::SingleBestNote => fuse_single_best_note(
+                lyric,
+                lyric_index,
+                lyric_start,
+                lyric_end,
+                &pitch_notes.notes,
                 pitch_frames,
-                note.note,
-                overlap_start,
-                overlap_end,
-            )?;
-            let score = overlap * pitch_confidence;
-            let replace = best
-                .as_ref()
-                .map(|(_, current_overlap, current_confidence, current_score)| {
-                    compare_f32(score, *current_score) == Ordering::Greater
-                        || (compare_f32(score, *current_score) == Ordering::Equal
-                            && compare_f32(overlap, *current_overlap) == Ordering::Greater)
-                        || (compare_f32(score, *current_score) == Ordering::Equal
-                            && compare_f32(overlap, *current_overlap) == Ordering::Equal
-                            && compare_f32(pitch_confidence, *current_confidence)
-                                == Ordering::Greater)
-                })
-                .unwrap_or(true);
-            if replace {
-                best = Some((note_index, overlap, pitch_confidence, score));
-            }
+                options,
+                &mut notes,
+                &mut diagnostics,
+            )?,
+            KaraokeMelismaMode::SplitAcrossPitchNotes => fuse_melisma_notes(
+                lyric,
+                lyric_index,
+                lyric_start,
+                lyric_end,
+                &pitch_notes.notes,
+                pitch_frames,
+                options,
+                &mut notes,
+                &mut diagnostics,
+            )?,
         }
-
-        let Some((note_index, overlap, pitch_confidence, _)) = best else {
-            diagnostics.push(format!(
-                "lyric[{lyric_index}] had no pitched note meeting the overlap threshold"
-            ));
-            continue;
-        };
-        let pitch_note = pitch_notes.notes[note_index];
-        let note_start = beats_to_seconds(pitch_note.start_beats, options.tempo_bpm);
-        let note_end = beats_to_seconds(
-            pitch_note.start_beats + pitch_note.duration_beats,
-            options.tempo_bpm,
-        );
-        let start_seconds = lyric_start.max(note_start);
-        let end_seconds = lyric_end.min(note_end);
-        if end_seconds - start_seconds < options.min_note_duration_seconds {
-            diagnostics.push(format!(
-                "lyric[{lyric_index}] matched pitch but the fused duration was below the minimum"
-            ));
-            continue;
-        }
-
-        notes.push(KaraokeNote {
-            text: lyric.text.clone(),
-            start_seconds,
-            end_seconds,
-            midi_note: pitch_note.note.value(),
-            evidence: KaraokeNoteEvidence {
-                pitch_confidence,
-                lyric_confidence: lyric.confidence(),
-                overlap_ratio: overlap / lyric_duration,
-            },
-        });
     }
 
     if notes.is_empty() {
@@ -309,17 +305,22 @@ pub fn build_karaoke_chart(
 
     let mut phrases: Vec<KaraokePhrase> = Vec::new();
     for note in notes {
-        let starts_new_phrase = phrases
-            .last()
-            .and_then(|phrase| phrase.notes.last())
-            .map(|previous| {
-                note.start_seconds - previous.end_seconds > options.phrase_gap_seconds
-            })
-            .unwrap_or(true);
+        let starts_new_phrase = note.lyric_role == KaraokeLyricRole::Primary
+            && phrases
+                .last()
+                .and_then(|phrase| phrase.notes.last())
+                .map(|previous| {
+                    note.start_seconds - previous.end_seconds > options.phrase_gap_seconds
+                })
+                .unwrap_or(true);
         if starts_new_phrase {
             phrases.push(KaraokePhrase { notes: vec![note] });
         } else if let Some(phrase) = phrases.last_mut() {
             phrase.notes.push(note);
+        } else {
+            return Err(invalid_argument(
+                "karaoke continuation note cannot start the first phrase",
+            ));
         }
     }
 
@@ -331,6 +332,173 @@ pub fn build_karaoke_chart(
     chart.validate()?;
 
     Ok(KaraokeChartBuildResult { chart, diagnostics })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fuse_single_best_note(
+    lyric: &TimedTextWordContract,
+    lyric_index: usize,
+    lyric_start: f32,
+    lyric_end: f32,
+    pitch_notes: &[crate::MidiNoteEvent],
+    pitch_frames: &[PitchTrackFrame],
+    options: KaraokeChartBuildOptions,
+    notes: &mut Vec<KaraokeNote>,
+    diagnostics: &mut Vec<String>,
+) -> Result<()> {
+    let lyric_duration = lyric_end - lyric_start;
+    let mut best: Option<(usize, f32, f32, f32)> = None;
+
+    for (note_index, note) in pitch_notes.iter().enumerate() {
+        let note_start = beats_to_seconds(note.start_beats, options.tempo_bpm);
+        let note_end = beats_to_seconds(note.start_beats + note.duration_beats, options.tempo_bpm);
+        let overlap_start = lyric_start.max(note_start);
+        let overlap_end = lyric_end.min(note_end);
+        let overlap = (overlap_end - overlap_start).max(0.0);
+        if overlap <= 0.0 {
+            continue;
+        }
+        let overlap_ratio = overlap / lyric_duration;
+        if overlap_ratio < options.min_overlap_ratio {
+            continue;
+        }
+        let pitch_confidence = pitch_confidence_for_interval(
+            pitch_frames,
+            note.note,
+            overlap_start,
+            overlap_end,
+        )?;
+        let score = overlap * pitch_confidence;
+        let replace = best
+            .as_ref()
+            .map(|(_, current_overlap, current_confidence, current_score)| {
+                compare_f32(score, *current_score) == Ordering::Greater
+                    || (compare_f32(score, *current_score) == Ordering::Equal
+                        && compare_f32(overlap, *current_overlap) == Ordering::Greater)
+                    || (compare_f32(score, *current_score) == Ordering::Equal
+                        && compare_f32(overlap, *current_overlap) == Ordering::Equal
+                        && compare_f32(pitch_confidence, *current_confidence)
+                            == Ordering::Greater)
+            })
+            .unwrap_or(true);
+        if replace {
+            best = Some((note_index, overlap, pitch_confidence, score));
+        }
+    }
+
+    let Some((note_index, overlap, pitch_confidence, _)) = best else {
+        diagnostics.push(format!(
+            "lyric[{lyric_index}] had no pitched note meeting the overlap threshold"
+        ));
+        return Ok(());
+    };
+    let pitch_note = pitch_notes[note_index];
+    let note_start = beats_to_seconds(pitch_note.start_beats, options.tempo_bpm);
+    let note_end = beats_to_seconds(
+        pitch_note.start_beats + pitch_note.duration_beats,
+        options.tempo_bpm,
+    );
+    let start_seconds = lyric_start.max(note_start);
+    let end_seconds = lyric_end.min(note_end);
+    if end_seconds - start_seconds < options.min_note_duration_seconds {
+        diagnostics.push(format!(
+            "lyric[{lyric_index}] matched pitch but the fused duration was below the minimum"
+        ));
+        return Ok(());
+    }
+
+    notes.push(KaraokeNote {
+        text: lyric.text.clone(),
+        lyric_role: KaraokeLyricRole::Primary,
+        start_seconds,
+        end_seconds,
+        midi_note: pitch_note.note.value(),
+        evidence: KaraokeNoteEvidence {
+            pitch_confidence,
+            lyric_confidence: lyric.confidence(),
+            overlap_ratio: overlap / lyric_duration,
+        },
+    });
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fuse_melisma_notes(
+    lyric: &TimedTextWordContract,
+    lyric_index: usize,
+    lyric_start: f32,
+    lyric_end: f32,
+    pitch_notes: &[crate::MidiNoteEvent],
+    pitch_frames: &[PitchTrackFrame],
+    options: KaraokeChartBuildOptions,
+    notes: &mut Vec<KaraokeNote>,
+    diagnostics: &mut Vec<String>,
+) -> Result<()> {
+    let lyric_duration = lyric_end - lyric_start;
+    let mut matches = Vec::new();
+    let mut total_overlap = 0.0_f32;
+
+    for pitch_note in pitch_notes {
+        let note_start = beats_to_seconds(pitch_note.start_beats, options.tempo_bpm);
+        let note_end = beats_to_seconds(
+            pitch_note.start_beats + pitch_note.duration_beats,
+            options.tempo_bpm,
+        );
+        let note_duration = note_end - note_start;
+        let overlap_start = lyric_start.max(note_start);
+        let overlap_end = lyric_end.min(note_end);
+        let overlap = (overlap_end - overlap_start).max(0.0);
+        if overlap < options.min_note_duration_seconds || note_duration <= 0.0 {
+            continue;
+        }
+        let pitch_note_overlap_ratio = overlap / note_duration;
+        if pitch_note_overlap_ratio < options.min_pitch_note_overlap_ratio {
+            continue;
+        }
+        let pitch_confidence = pitch_confidence_for_interval(
+            pitch_frames,
+            pitch_note.note,
+            overlap_start,
+            overlap_end,
+        )?;
+        total_overlap += overlap;
+        matches.push((
+            overlap_start,
+            overlap_end,
+            pitch_note.note.value(),
+            pitch_confidence,
+            overlap / lyric_duration,
+        ));
+    }
+
+    if matches.is_empty() || total_overlap / lyric_duration < options.min_overlap_ratio {
+        diagnostics.push(format!(
+            "lyric[{lyric_index}] had no pitch-note sequence meeting the melisma overlap thresholds"
+        ));
+        return Ok(());
+    }
+
+    for (match_index, (start_seconds, end_seconds, midi_note, pitch_confidence, overlap_ratio)) in
+        matches.into_iter().enumerate()
+    {
+        notes.push(KaraokeNote {
+            text: lyric.text.clone(),
+            lyric_role: if match_index == 0 {
+                KaraokeLyricRole::Primary
+            } else {
+                KaraokeLyricRole::Continuation
+            },
+            start_seconds,
+            end_seconds,
+            midi_note,
+            evidence: KaraokeNoteEvidence {
+                pitch_confidence,
+                lyric_confidence: lyric.confidence(),
+                overlap_ratio,
+            },
+        });
+    }
+    Ok(())
 }
 
 fn pitch_confidence_for_interval(
@@ -564,6 +732,10 @@ mod tests {
 
         assert_eq!(result.chart.phrases.len(), 2);
         assert_eq!(result.chart.phrases[0].notes.len(), 2);
+        assert_eq!(
+            result.chart.phrases[0].notes[0].lyric_role,
+            KaraokeLyricRole::Primary
+        );
         assert_eq!(result.chart.phrases[0].notes[0].midi_note, 60);
         assert_eq!(result.chart.phrases[0].notes[1].midi_note, 64);
         assert_eq!(result.chart.phrases[1].notes[0].midi_note, 67);
@@ -571,6 +743,66 @@ mod tests {
         assert_eq!(evidence.lyric_confidence, Some(0.95));
         assert!((evidence.pitch_confidence - 0.81).abs() < 1.0e-5);
         assert!((evidence.overlap_ratio - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn splits_aligned_fragment_across_real_pitch_notes_when_enabled() {
+        let lyrics = vec![lyric("lo", 0.0, 0.75, Some(0.95))];
+        let pitch = vec![
+            pitch_frame(0.0, 0.25, 60, 0.90),
+            pitch_frame(0.25, 0.50, 62, 0.92),
+            pitch_frame(0.50, 0.75, 64, 0.94),
+        ];
+
+        let result = build_karaoke_chart(
+            &lyrics,
+            &pitch,
+            KaraokeChartBuildOptions {
+                min_overlap_ratio: 0.9,
+                melisma_mode: KaraokeMelismaMode::SplitAcrossPitchNotes,
+                min_pitch_note_overlap_ratio: 0.8,
+                ..KaraokeChartBuildOptions::default()
+            },
+        )
+        .unwrap();
+
+        let notes = &result.chart.phrases[0].notes;
+        assert_eq!(notes.len(), 3);
+        assert_eq!(notes[0].text, "lo");
+        assert_eq!(notes[1].text, "lo");
+        assert_eq!(notes[2].text, "lo");
+        assert_eq!(notes[0].lyric_role, KaraokeLyricRole::Primary);
+        assert_eq!(notes[1].lyric_role, KaraokeLyricRole::Continuation);
+        assert_eq!(notes[2].lyric_role, KaraokeLyricRole::Continuation);
+        assert_eq!(notes[0].midi_note, 60);
+        assert_eq!(notes[1].midi_note, 62);
+        assert_eq!(notes[2].midi_note, 64);
+    }
+
+    #[test]
+    fn default_mode_does_not_turn_word_alignment_into_implicit_melisma() {
+        let lyrics = vec![lyric("word", 0.0, 0.75, None)];
+        let pitch = vec![
+            pitch_frame(0.0, 0.25, 60, 0.90),
+            pitch_frame(0.25, 0.50, 62, 0.92),
+            pitch_frame(0.50, 0.75, 64, 0.94),
+        ];
+
+        let result = build_karaoke_chart(
+            &lyrics,
+            &pitch,
+            KaraokeChartBuildOptions {
+                min_overlap_ratio: 0.3,
+                ..KaraokeChartBuildOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.chart.phrases[0].notes.len(), 1);
+        assert_eq!(
+            result.chart.phrases[0].notes[0].lyric_role,
+            KaraokeLyricRole::Primary
+        );
     }
 
     #[test]
@@ -614,6 +846,7 @@ mod tests {
     fn rejects_karaoke_pitch_outside_midi_range() {
         let note = KaraokeNote {
             text: "word".to_string(),
+            lyric_role: KaraokeLyricRole::Primary,
             start_seconds: 0.0,
             end_seconds: 0.25,
             midi_note: 128,
@@ -626,6 +859,27 @@ mod tests {
 
         let error = note.validate().unwrap_err();
         assert!(error.to_string().contains("MIDI note"));
+    }
+
+    #[test]
+    fn rejects_continuation_without_matching_preceding_fragment() {
+        let phrase = KaraokePhrase {
+            notes: vec![KaraokeNote {
+                text: "word".to_string(),
+                lyric_role: KaraokeLyricRole::Continuation,
+                start_seconds: 0.0,
+                end_seconds: 0.25,
+                midi_note: 60,
+                evidence: KaraokeNoteEvidence {
+                    pitch_confidence: 0.9,
+                    lyric_confidence: Some(0.9),
+                    overlap_ratio: 0.5,
+                },
+            }],
+        };
+
+        let error = phrase.validate().unwrap_err();
+        assert!(error.to_string().contains("continuation note"));
     }
 
     #[test]

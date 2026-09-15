@@ -3,17 +3,22 @@
 Downstream file-format adapters for the neutral karaoke charts produced by
 `audio-generation-midi`.
 
-The neutral chart remains authoritative for timing, phrase structure, and MIDI
-pitch. This crate owns format-specific grammar, metadata, and quantization so
+The neutral chart remains authoritative for timing, phrase structure, MIDI
+pitch, and lyric-continuation semantics. This crate owns format-specific
+grammar, metadata, spelling conventions, and quantization so
 UltraStar/SingStar-style compatibility rules do not leak into audio/MIDI note
 generation.
 
 ## UltraStar v1
 
 `export_ultrastar_v1` writes a deterministic UTF-8 UltraStar v1 text document
-for one lead vocal track. The exporter currently emits regular pitched notes
-only because the neutral chart does not yet model golden, rap, freestyle, or
-duet semantics.
+for one lead vocal track. Primary lyric notes emit their source text. Neutral
+`KaraokeLyricRole::Continuation` notes emit `~`, following the established
+UltraStar chart-authoring convention for an additional pitch on the same lyric
+fragment. The neutral model itself never stores `~` as lyric text.
+
+The exporter currently emits regular pitched notes only because the neutral
+chart does not yet model golden, rap, freestyle, or duet semantics.
 
 Timing is quantized only at this adapter boundary. Export fails closed when the
 integer UltraStar grid would collapse a note to zero duration, make notes

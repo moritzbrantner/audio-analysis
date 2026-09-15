@@ -30,12 +30,14 @@ let _ = (midi_bytes, audio);
 
 The `karaoke` module combines canonical `media_core::TimedTextWordContract` values with a timestamped vocal pitch track. It deliberately does not define a second transcript/alignment DTO. It reuses this crate's pitch-track-to-note consolidation so neutral karaoke construction and MIDI generation agree on musical note boundaries.
 
-The neutral `KaraokeChart` keeps seconds, MIDI pitch, phrase structure, and confidence evidence. This crate does not own UltraStar, SingStar, or other karaoke-file serialization. Format-specific exporters belong in downstream adapters so their quantization, metadata, and grammar rules cannot leak back into the neutral model.
+The neutral `KaraokeChart` keeps seconds, MIDI pitch, phrase structure, confidence evidence, and whether a note starts or continues an already-aligned lyric fragment. This crate does not own UltraStar, SingStar, or other karaoke-file serialization. Format-specific exporters belong in downstream adapters so their quantization, metadata, and grammar rules cannot leak back into the neutral model.
 
-Callers should provide syllable-level timed-text words when available. Word-level alignments are accepted without guessing syllable boundaries. The first slice supports one lead voice, regular pitched notes, and at most one generated note per aligned timed-text word; melisma splitting, rap/golden notes, duet tracks, and format-specific integer grids remain explicit downstream capabilities.
+Callers should provide syllable-level timed-text words when available. Word-level alignments remain word-level: the builder never guesses a syllable boundary. The default `KaraokeMelismaMode::SingleBestNote` preserves one generated note per aligned lyric fragment. Callers that already trust the lyric interval can opt into `SplitAcrossPitchNotes`; every consolidated pitch note sufficiently covered by that interval is retained, the first carries `KaraokeLyricRole::Primary`, and later notes carry `Continuation`. `min_pitch_note_overlap_ratio` rejects incidental edge overlaps while `min_overlap_ratio` still requires enough of the complete lyric interval to be explained by accepted notes.
 
 ```rust,ignore
-use audio_generation_midi::karaoke::{build_karaoke_chart, KaraokeChartBuildOptions};
+use audio_generation_midi::karaoke::{
+    build_karaoke_chart, KaraokeChartBuildOptions, KaraokeMelismaMode,
+};
 use audio_generation_midi::{MidiNote, PitchTrackFrame};
 use media_core::TimedTextWordContract;
 
@@ -54,6 +56,7 @@ let built = build_karaoke_chart(
     KaraokeChartBuildOptions {
         tempo_bpm: 120.0,
         beat_zero_seconds: 0.5,
+        melisma_mode: KaraokeMelismaMode::SplitAcrossPitchNotes,
         ..KaraokeChartBuildOptions::default()
     },
 )?;
@@ -63,6 +66,8 @@ let _ = built.chart;
 ```
 
 Downstream integer-grid exporters must validate their encoded note sequence as a whole. If minimum-duration rounding would make adjacent notes overlap, the adapter must reject the representation (or use a documented joint quantization policy) rather than silently changing the single-lead timing.
+
+Rap/golden-note classification, duet tracks, and format-specific integer grids remain explicit downstream or later neutral capabilities rather than hidden heuristics in pitch/lyric fusion.
 
 ## Package surface
 

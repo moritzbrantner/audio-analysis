@@ -92,13 +92,15 @@ let result = build_ultrastar_from_media(
 Enable the `separation` feature for the explicit Demucs stage. It includes the
 `audio-io` feature and reuses `audio-analysis-separation::HtdemucsSeparator`;
 this crate does not build another command wrapper or duplicate Demucs output
-layout rules.
+layout rules. Because separation is a file/media concern, the API lives under
+`media::separation` rather than the pure analysis root.
 
-`separation::karaoke_vocal_separation_options(output_dir)` creates the efficient
-karaoke default: Demucs two-stem output with `vocals` and `no_vocals`. Callers
-may supply any `HtdemucsOptions`, but the adapter rejects layouts that cannot
-produce `Stem::Vocals` before external execution. `plan_vocal_separation`
-returns the exact command and expected output layout without invoking Demucs.
+`media::separation::karaoke_vocal_separation_options(output_dir)` creates the
+efficient karaoke default: Demucs two-stem output with `vocals` and
+`no_vocals`. Callers may supply any `HtdemucsOptions`, but the adapter rejects
+layouts that cannot produce `Stem::Vocals` before external execution.
+`plan_vocal_separation` returns the exact command and expected output layout
+without invoking Demucs.
 
 `build_ultrastar_with_demucs` validates karaoke options and UltraStar metadata,
 runs the caller-configured separator, retains the complete typed
@@ -110,7 +112,7 @@ created or deleted.
 ```rust,ignore
 use audio_karaoke_formats::UltraStarV1Metadata;
 use audio_karaoke_pipeline::{
-    separation::{build_ultrastar_with_demucs, karaoke_vocal_separation_options},
+    media::separation::{build_ultrastar_with_demucs, karaoke_vocal_separation_options},
     KaraokePipelineOptions,
 };
 
@@ -123,7 +125,7 @@ let result = build_ultrastar_with_demucs(
 )?;
 
 let _ = (result.separation, result.vocal_path, result.karaoke);
-# Ok::<(), audio_karaoke_pipeline::separation::KaraokeSeparationPipelineError>(())
+# Ok::<(), audio_karaoke_pipeline::media::separation::KaraokeSeparationPipelineError>(())
 ```
 
 Transcription/alignment remains a later, separate stage. Separation is explicit

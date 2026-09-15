@@ -2281,6 +2281,7 @@ dependencies = [
  "moenarch-audio-analysis-io",
  "moenarch-audio-analysis-pitch",
  "moenarch-audio-analysis-rhythm",
+ "moenarch-audio-analysis-separation",
  "moenarch-audio-contracts",
  "moenarch-audio-generation-midi",
  "moenarch-audio-karaoke-formats",

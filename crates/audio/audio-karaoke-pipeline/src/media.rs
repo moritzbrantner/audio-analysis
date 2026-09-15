@@ -3,6 +3,9 @@
 //! This module is intentionally feature-gated because it owns FFmpeg-backed
 //! decoding policy. The neutral pipeline remains pure and in-memory.
 
+#[cfg(feature = "separation")]
+pub mod separation;
+
 use std::fmt::{Display, Formatter};
 
 use audio_analysis_io::{

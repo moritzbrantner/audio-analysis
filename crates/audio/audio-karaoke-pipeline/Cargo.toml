@@ -14,8 +14,13 @@ categories.workspace = true
 [lib]
 name = "audio_karaoke_pipeline"
 
+[features]
+default = []
+audio-io = ["dep:audio-analysis-io"]
+
 [dependencies]
 audio-analysis-core.workspace = true
+audio-analysis-io = { workspace = true, optional = true }
 audio-analysis-pitch.workspace = true
 audio-analysis-rhythm.workspace = true
 audio-contracts.workspace = true

@@ -1,5 +1,8 @@
 #![doc = include_str!("../README.md")]
 
+#[cfg(feature = "audio-io")]
+pub mod media;
+
 use audio_analysis_core::FrameSpec;
 use audio_analysis_pitch::{AutocorrelationPitchDetector, PitchDetectorConfig};
 use audio_analysis_rhythm::track::{analyze_rhythm_track, TrackRhythmConfig};
@@ -18,6 +21,25 @@ pub enum KaraokeTempoSource {
     Explicit,
     /// Analyze the full mix with `audio-analysis-rhythm` and use its selected tempo.
     AnalyzeFullMix,
+}
+
+/// One decoded mono PCM input with its own sampling rate.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KaraokeAudio<'a> {
+    /// Finite normalized mono samples.
+    pub samples: &'a [f32],
+    /// Sampling rate for this stream.
+    pub sample_rate: u32,
+}
+
+impl<'a> KaraokeAudio<'a> {
+    /// Creates a borrowed karaoke-analysis audio input.
+    pub const fn new(samples: &'a [f32], sample_rate: u32) -> Self {
+        Self {
+            samples,
+            sample_rate,
+        }
+    }
 }
 
 /// Configuration for the in-memory song-to-karaoke orchestration slice.
@@ -98,10 +120,9 @@ pub struct KaraokePipelineResult {
 
 /// Builds a neutral karaoke chart and UltraStar v1 document from decoded mono samples.
 ///
-/// `full_mix_samples` are used only for whole-track rhythm analysis. They may be empty
-/// when `KaraokeTempoSource::Explicit` is selected. `vocal_samples` are always required
-/// and are analyzed only by the existing monophonic pitch detector. Lyrics must already
-/// be canonically aligned; this function does not transcribe, realign, or syllabify text.
+/// This compatibility entry point applies one sample rate to both inputs. New adapters
+/// should prefer [`build_ultrastar_from_audio`] so independently decoded full-mix and
+/// vocal streams retain their own sampling rates.
 pub fn build_ultrastar_from_samples(
     full_mix_samples: &[f32],
     vocal_samples: &[f32],
@@ -110,19 +131,53 @@ pub fn build_ultrastar_from_samples(
     options: KaraokePipelineOptions,
     metadata: &UltraStarV1Metadata,
 ) -> Result<KaraokePipelineResult> {
+    build_ultrastar_from_audio(
+        Some(KaraokeAudio::new(full_mix_samples, sample_rate)),
+        KaraokeAudio::new(vocal_samples, sample_rate),
+        lyrics,
+        options,
+        metadata,
+    )
+}
+
+/// Builds a neutral chart and UltraStar v1 document from independently sampled PCM inputs.
+///
+/// Vocals are always required. The full mix is required only when tempo is analyzed; it
+/// may be omitted for explicit caller-authoritative tempo. Rhythm and pitch analyzers each
+/// receive the sampling rate of the stream they actually consume.
+pub fn build_ultrastar_from_audio(
+    full_mix: Option<KaraokeAudio<'_>>,
+    vocals: KaraokeAudio<'_>,
+    lyrics: &[TimedTextWordContract],
+    options: KaraokePipelineOptions,
+    metadata: &UltraStarV1Metadata,
+) -> Result<KaraokePipelineResult> {
     options.validate()?;
-    validate_sample_rate(sample_rate)?;
-    validate_samples(vocal_samples, "vocal")?;
-    if options.tempo_source == KaraokeTempoSource::AnalyzeFullMix {
-        validate_samples(full_mix_samples, "full-mix")?;
-    } else {
-        validate_finite_samples(full_mix_samples, "full-mix")?;
+    validate_sample_rate(vocals.sample_rate)?;
+    validate_samples(vocals.samples, "vocal")?;
+
+    match options.tempo_source {
+        KaraokeTempoSource::Explicit => {
+            if let Some(full_mix) = full_mix {
+                validate_sample_rate(full_mix.sample_rate)?;
+                validate_finite_samples(full_mix.samples, "full-mix")?;
+            }
+        }
+        KaraokeTempoSource::AnalyzeFullMix => {
+            let full_mix = full_mix.ok_or_else(|| {
+                invalid_argument(
+                    "full-mix audio is required when tempo_source is AnalyzeFullMix",
+                )
+            })?;
+            validate_sample_rate(full_mix.sample_rate)?;
+            validate_samples(full_mix.samples, "full-mix")?;
+        }
     }
 
-    let tempo = resolve_tempo(full_mix_samples, sample_rate, options)?;
+    let tempo = resolve_tempo(full_mix, options)?;
     let (pitch_frames, pitch_analysis_frame_count) = analyze_vocal_pitch(
-        vocal_samples,
-        sample_rate,
+        vocals.samples,
+        vocals.sample_rate,
         options.pitch_detector,
         options.pitch_frame_size,
         options.pitch_hop_size,
@@ -160,8 +215,7 @@ struct ResolvedTempo {
 }
 
 fn resolve_tempo(
-    full_mix_samples: &[f32],
-    sample_rate: u32,
+    full_mix: Option<KaraokeAudio<'_>>,
     options: KaraokePipelineOptions,
 ) -> Result<ResolvedTempo> {
     match options.tempo_source {
@@ -173,7 +227,16 @@ fn resolve_tempo(
             downbeat_count: 0,
         }),
         KaraokeTempoSource::AnalyzeFullMix => {
-            let analysis = analyze_rhythm_track(full_mix_samples, sample_rate, options.rhythm)?;
+            let full_mix = full_mix.ok_or_else(|| {
+                invalid_argument(
+                    "full-mix audio is required when tempo_source is AnalyzeFullMix",
+                )
+            })?;
+            let analysis = analyze_rhythm_track(
+                full_mix.samples,
+                full_mix.sample_rate,
+                options.rhythm,
+            )?;
             let bpm = analysis.bpm.ok_or_else(|| {
                 invalid_argument("whole-track rhythm analysis did not select a karaoke tempo")
             })?;
@@ -393,6 +456,52 @@ mod tests {
         assert!(result.evidence.tempo_candidate_count > 0);
         assert!(result.evidence.beat_count > 0);
         assert!((80.0..=160.0).contains(&result.evidence.tempo_bpm));
+    }
+
+    #[test]
+    fn independently_sampled_inputs_keep_analyzer_rates_separate() {
+        let full_mix_rate = 4_000;
+        let vocal_rate = 8_000;
+        let full_mix = click_track(full_mix_rate, 120.0, 8.0);
+        let vocals = sine_wave(vocal_rate, 440.0, 2.0);
+        let lyrics = vec![lyric("hello", 0.25, 1.5)];
+
+        let result = build_ultrastar_from_audio(
+            Some(KaraokeAudio::new(&full_mix, full_mix_rate)),
+            KaraokeAudio::new(&vocals, vocal_rate),
+            &lyrics,
+            test_options(KaraokeTempoSource::AnalyzeFullMix),
+            &metadata(),
+        );
+        let Ok(result) = result else {
+            panic!("independently sampled inputs should be accepted");
+        };
+
+        assert!(result.evidence.tempo_confidence.is_some());
+        assert!(result.evidence.pitch_analysis_frame_count > 0);
+        assert!(result.ultrastar_text.contains("hello"));
+    }
+
+    #[test]
+    fn explicit_tempo_accepts_missing_full_mix_audio() {
+        let vocal_rate = 8_000;
+        let vocals = sine_wave(vocal_rate, 440.0, 2.0);
+        let lyrics = vec![lyric("hello", 0.25, 1.5)];
+
+        let result = build_ultrastar_from_audio(
+            None,
+            KaraokeAudio::new(&vocals, vocal_rate),
+            &lyrics,
+            test_options(KaraokeTempoSource::Explicit),
+            &metadata(),
+        );
+        let Ok(result) = result else {
+            panic!("explicit tempo should not require a full mix");
+        };
+
+        assert_eq!(result.evidence.tempo_confidence, None);
+        assert!(result.ultrastar_text.contains("#BPM:120
+"));
     }
 
     #[test]

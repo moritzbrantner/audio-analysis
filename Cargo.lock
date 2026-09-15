@@ -2278,6 +2278,7 @@ name = "moenarch-audio-karaoke-pipeline"
 version = "0.1.0"
 dependencies = [
  "moenarch-audio-analysis-core",
+ "moenarch-audio-analysis-io",
  "moenarch-audio-analysis-pitch",
  "moenarch-audio-analysis-rhythm",
  "moenarch-audio-contracts",

@@ -68,6 +68,10 @@ pub type KaraokeMediaPipelineResult<T> = std::result::Result<T, KaraokeMediaPipe
 /// sample rate, so a separator-produced vocal stem does not need to match the
 /// source song's sample rate.
 ///
+/// Pure request validation runs before the first media decode so invalid
+/// analysis options, invalid output metadata, or a missing required full-mix
+/// source cannot trigger expensive FFmpeg work or be masked by a decode error.
+///
 /// Decoding uses the repository's recorded-input defaults and equal channel
 /// averaging. Audio stream selection stays caller-owned through
 /// [`SelectedMediaSource::audio_stream_index`].
@@ -78,6 +82,8 @@ pub fn build_ultrastar_from_media(
     options: KaraokePipelineOptions,
     metadata: &UltraStarV1Metadata,
 ) -> KaraokeMediaPipelineResult<KaraokePipelineResult> {
+    validate_media_request(&full_mix_source, options, metadata)?;
+
     let (vocal_metadata, vocal_samples) = decode_selected_media_to_mono_f32(
         vocal_source,
         AudioInputOptions::recorded(),
@@ -108,9 +114,30 @@ pub fn build_ultrastar_from_media(
     build_ultrastar_from_audio(full_mix, vocals, lyrics, options, metadata).map_err(Into::into)
 }
 
+fn validate_media_request(
+    full_mix_source: &Option<SelectedMediaSource>,
+    options: KaraokePipelineOptions,
+    metadata: &UltraStarV1Metadata,
+) -> KaraokeMediaPipelineResult<()> {
+    options.validate()?;
+    metadata.validate()?;
+    if options.tempo_source == KaraokeTempoSource::AnalyzeFullMix && full_mix_source.is_none() {
+        return Err(KaraokeMediaPipelineError::Pipeline(
+            DetectError::InvalidArgument(
+                "full_mix_source is required when tempo_source is AnalyzeFullMix".to_string(),
+            ),
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn metadata() -> UltraStarV1Metadata {
+        UltraStarV1Metadata::new("Song", "Artist", "song.ogg")
+    }
 
     #[test]
     fn media_error_preserves_pipeline_category() {
@@ -119,5 +146,39 @@ mod tests {
         ));
         assert!(error.to_string().contains("karaoke analysis failed"));
         assert!(std::error::Error::source(&error).is_some());
+    }
+
+    #[test]
+    fn invalid_options_fail_before_attempting_vocal_decode() {
+        let mut options = KaraokePipelineOptions::default();
+        options.tempo_source = KaraokeTempoSource::Explicit;
+        options.pitch_hop_size = 0;
+
+        let result = build_ultrastar_from_media(
+            None,
+            SelectedMediaSource::new("definitely-missing-vocals.wav"),
+            &[],
+            options,
+            &metadata(),
+        );
+        let Err(KaraokeMediaPipelineError::Pipeline(error)) = result else {
+            panic!("invalid options must fail as a pipeline error before media decoding");
+        };
+        assert!(error.to_string().contains("hop"));
+    }
+
+    #[test]
+    fn missing_required_full_mix_fails_before_attempting_vocal_decode() {
+        let result = build_ultrastar_from_media(
+            None,
+            SelectedMediaSource::new("definitely-missing-vocals.wav"),
+            &[],
+            KaraokePipelineOptions::default(),
+            &metadata(),
+        );
+        let Err(KaraokeMediaPipelineError::Pipeline(error)) = result else {
+            panic!("missing full mix must fail before media decoding");
+        };
+        assert!(error.to_string().contains("full_mix_source"));
     }
 }

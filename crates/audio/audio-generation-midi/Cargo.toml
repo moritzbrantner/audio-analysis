@@ -21,3 +21,4 @@ serde_json.workspace = true
 audio-analysis-synthesis.workspace = true
 data-inversion-core.workspace = true
 audio-contracts.workspace = true
+media-core.workspace = true

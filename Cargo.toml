@@ -18,6 +18,7 @@ default-members = [
   "crates/audio/audio-analysis-transcription",
   "crates/audio/audio-generation-midi",
   "crates/audio/audio-generation-tts",
+  "crates/audio/audio-karaoke-formats",
 ]
 
 [workspace.package]
@@ -46,6 +47,7 @@ audio-analysis-synthesis = { package = "moenarch-audio-analysis-synthesis", vers
 audio-analysis-transcription = { package = "moenarch-audio-analysis-transcription", version = "0.1.15", path = "crates/audio/audio-analysis-transcription" }
 audio-generation-midi = { package = "moenarch-audio-generation-midi", version = "0.1.0", path = "crates/audio/audio-generation-midi" }
 audio-generation-tts = { package = "moenarch-audio-generation-tts", version = "0.1.0", path = "crates/audio/audio-generation-tts" }
+audio-karaoke-formats = { package = "moenarch-audio-karaoke-formats", version = "0.1.0", path = "crates/audio/audio-karaoke-formats" }
 
 # External capability contracts are registry-only and exact. Normal source work
 # may override these coordinates through .coding-tooling.source-deps.json.

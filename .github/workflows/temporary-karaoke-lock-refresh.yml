@@ -56,7 +56,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
           cargo metadata --format-version 1 >/dev/null
+          if ! git diff --quiet -- Cargo.lock; then
+            git add Cargo.lock
+            git commit -m 'chore: reconcile karaoke registry Cargo lock'
+          fi
 
           set +e
           activation_output="$(bash scripts/source-deps activate 2>&1)"
@@ -78,14 +85,10 @@ jobs:
           bash scripts/source-deps activate
           bash scripts/source-deps deactivate
           cargo metadata --locked --format-version 1 >/dev/null
-      - name: Commit refreshed lock evidence
-        run: |
-          if git diff --quiet -- Cargo.lock .coding-tooling.source-lock.sha256; then
-            echo 'Lock evidence already current.'
-            exit 0
+
+          if ! git diff --quiet -- .coding-tooling.source-lock.sha256; then
+            git add .coding-tooling.source-lock.sha256
+            git commit -m 'chore: refresh karaoke source lock fingerprint'
           fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Cargo.lock .coding-tooling.source-lock.sha256
-          git commit -m 'chore: reconcile karaoke Cargo lock'
+
           git push origin HEAD:codex/singstar-ultrastar-export

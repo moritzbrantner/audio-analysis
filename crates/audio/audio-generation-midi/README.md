@@ -28,25 +28,20 @@ let _ = (midi_bytes, audio);
 
 ## Karaoke chart generation
 
-The `karaoke` module combines already-aligned lyric fragments with a timestamped vocal pitch track. It reuses this crate's pitch-track-to-note consolidation so karaoke export and MIDI generation agree on musical note boundaries.
+The `karaoke` module combines canonical `media_core::TimedTextWordContract` values with a timestamped vocal pitch track. It deliberately does not define a second transcript/alignment DTO. It reuses this crate's pitch-track-to-note consolidation so neutral karaoke construction and MIDI generation agree on musical note boundaries.
 
-The neutral `KaraokeChart` keeps seconds, MIDI pitch, phrase structure, and confidence evidence. UltraStar v1 timing and pitch conventions are applied only by `export_ultrastar_v1`, so another singing-game or karaoke format can reuse the same chart later.
+The neutral `KaraokeChart` keeps seconds, MIDI pitch, phrase structure, and confidence evidence. This crate does not own UltraStar, SingStar, or other karaoke-file serialization. Format-specific exporters belong in downstream adapters so their quantization, metadata, and grammar rules cannot leak back into the neutral model.
 
-Callers should provide syllable-level alignments when available. Word-level alignments are accepted without guessing syllable boundaries. The first slice supports one lead voice, regular pitched notes, and at most one generated note per aligned lyric fragment; melisma splitting, rap/golden notes, and duet tracks remain explicit future capabilities.
+Callers should provide syllable-level timed-text words when available. Word-level alignments are accepted without guessing syllable boundaries. The first slice supports one lead voice, regular pitched notes, and at most one generated note per aligned timed-text word; melisma splitting, rap/golden notes, duet tracks, and format-specific integer grids remain explicit downstream capabilities.
 
 ```rust,ignore
-use audio_generation_midi::karaoke::{
-    build_karaoke_chart, export_ultrastar_v1, AlignedLyricFragment,
-    KaraokeChartBuildOptions, UltraStarV1Metadata,
-};
+use audio_generation_midi::karaoke::{build_karaoke_chart, KaraokeChartBuildOptions};
 use audio_generation_midi::{MidiNote, PitchTrackFrame};
+use media_core::TimedTextWordContract;
 
-let lyrics = vec![AlignedLyricFragment {
-    text: "Hello".to_string(),
-    start_seconds: 0.5,
-    end_seconds: 1.0,
-    confidence: Some(0.95),
-}];
+let lyrics = vec![TimedTextWordContract::new("Hello")
+    .with_time_range(Some(0.5), Some(1.0))?
+    .with_confidence(Some(0.95))?];
 let pitch = vec![PitchTrackFrame {
     start_seconds: 0.5,
     end_seconds: 1.0,
@@ -62,18 +57,12 @@ let built = build_karaoke_chart(
         ..KaraokeChartBuildOptions::default()
     },
 )?;
-let ultrastar = export_ultrastar_v1(
-    &built.chart,
-    &UltraStarV1Metadata {
-        title: "Example".to_string(),
-        artist: "Singer".to_string(),
-        audio_file: "song.ogg".to_string(),
-    },
-)?;
 
-let _ = ultrastar;
+let _ = built.chart;
 # Ok::<(), audio_contracts::DetectError>(())
 ```
+
+Downstream integer-grid exporters must validate their encoded note sequence as a whole. If minimum-duration rounding would make adjacent notes overlap, the adapter must reject the representation (or use a documented joint quantization policy) rather than silently changing the single-lead timing.
 
 ## Package surface
 

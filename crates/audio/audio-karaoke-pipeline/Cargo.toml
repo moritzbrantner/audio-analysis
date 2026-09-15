@@ -17,12 +17,14 @@ name = "audio_karaoke_pipeline"
 [features]
 default = []
 audio-io = ["dep:audio-analysis-io"]
+separation = ["audio-io", "dep:audio-analysis-separation"]
 
 [dependencies]
 audio-analysis-core.workspace = true
 audio-analysis-io = { workspace = true, optional = true }
 audio-analysis-pitch.workspace = true
 audio-analysis-rhythm.workspace = true
+audio-analysis-separation = { workspace = true, optional = true }
 audio-contracts.workspace = true
 audio-generation-midi.workspace = true
 audio-karaoke-formats.workspace = true

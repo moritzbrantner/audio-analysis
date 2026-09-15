@@ -14,6 +14,9 @@ OWNERSHIP = ROOT / "docs/repository-split/package-ownership.json"
 ADAPTATIONS = ROOT / "docs/repository-split/copy-adaptations.json"
 IDENTITY = ROOT / "docs/repository-split/byte-identity.json"
 EXPECTED_DIGEST = "5aa9380ee57698e24537a43f538fe61407c3ca6bbfbeb4677b0ed0d788c66d8b"
+DESTINATION_NATIVE_CARGO = {
+    "crates/audio/audio-karaoke-formats/Cargo.toml",
+}
 EXPECTED_EXTERNAL = {
     "audio-contracts": ("moenarch-audio-contracts", "=0.1.0"),
     "data-inversion-core": ("moenarch-data-inversion-core", "=0.1.1"),
@@ -91,8 +94,9 @@ def main() -> int:
 
     actual_cargo = sorted(path.relative_to(ROOT).as_posix() for path in (ROOT / "crates").rglob("Cargo.toml"))
     expected_cargo = sorted(record["manifest_path"] for record in cargo_records)
-    if actual_cargo != expected_cargo:
-        errors.append("Cargo manifest set differs from the 54 reviewed records")
+    allowed_cargo = sorted([*expected_cargo, *DESTINATION_NATIVE_CARGO])
+    if actual_cargo != allowed_cargo:
+        errors.append("Cargo manifest set differs from the reviewed extraction plus destination-native allowlist")
     actual_bun = sorted(
         path.relative_to(ROOT).as_posix()
         for path in (ROOT / "packages").glob("*/package.json")
@@ -111,8 +115,8 @@ def main() -> int:
         elif "path" in spec or "git" in spec:
             errors.append(f"external dependency {alias} must be registry-only")
 
-    cargo_manifest_set = set(expected_cargo)
-    for manifest_path in [ROOT / "Cargo.toml", *(ROOT / path for path in expected_cargo)]:
+    cargo_manifest_set = set(allowed_cargo)
+    for manifest_path in [ROOT / "Cargo.toml", *(ROOT / path for path in allowed_cargo)]:
         manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
         tables = dependency_tables(manifest)
         if manifest_path == ROOT / "Cargo.toml":
@@ -190,8 +194,8 @@ def main() -> int:
         return 1
     print(
         "audio extraction structure valid: "
-        f"{len(cargo_records)} Cargo, {len(bun_records)} Bun, "
-        f"{len(unadapted_trees)} byte-identical trees"
+        f"{len(cargo_records)} extracted Cargo, {len(DESTINATION_NATIVE_CARGO)} destination-native Cargo, "
+        f"{len(bun_records)} Bun, {len(unadapted_trees)} byte-identical trees"
     )
     return 0
 

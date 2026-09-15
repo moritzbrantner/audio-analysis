@@ -16,6 +16,7 @@ IDENTITY = ROOT / "docs/repository-split/byte-identity.json"
 EXPECTED_DIGEST = "5aa9380ee57698e24537a43f538fe61407c3ca6bbfbeb4677b0ed0d788c66d8b"
 DESTINATION_NATIVE_CARGO = {
     "crates/audio/audio-karaoke-formats/Cargo.toml",
+    "crates/audio/audio-karaoke-pipeline/Cargo.toml",
 }
 EXPECTED_EXTERNAL = {
     "audio-contracts": ("moenarch-audio-contracts", "=0.1.0"),

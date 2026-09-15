@@ -76,7 +76,11 @@ pub fn export_ultrastar_v1(
     push_header(&mut output, "MP3", &metadata.audio_file);
     push_header(&mut output, "TITLE", &metadata.title);
     push_header(&mut output, "ARTIST", &metadata.artist);
-    push_header(&mut output, "BPM", &format_decimal(f64::from(chart.tempo_bpm), 6));
+    push_header(
+        &mut output,
+        "BPM",
+        &format_decimal(f64::from(chart.tempo_bpm), 6),
+    );
     push_header(
         &mut output,
         "GAP",
@@ -123,7 +127,8 @@ pub fn export_ultrastar_v1(
 }
 
 fn quantize_chart(chart: &KaraokeChart) -> Result<Vec<Vec<QuantizedNote>>> {
-    let units_per_second = f64::from(chart.tempo_bpm) * GRID_UNITS_PER_QUARTER_NOTE / 60.0;
+    let units_per_second =
+        f64::from(chart.tempo_bpm) * GRID_UNITS_PER_QUARTER_NOTE / 60.0;
     let gap_seconds = f64::from(chart.beat_zero_seconds);
     let mut previous_end = None;
     let mut phrases = Vec::with_capacity(chart.phrases.len());
@@ -224,7 +229,10 @@ fn validate_header_text(value: &str, label: &str) -> Result<()> {
             "UltraStar {label} must not be empty"
         )));
     }
-    if value.contains(['\r', '\n', '\0']) {
+    if value
+        .chars()
+        .any(|character| matches!(character, '\r' | '\n' | '\0'))
+    {
         return Err(invalid_argument(format!(
             "UltraStar {label} must not contain line breaks or NUL characters"
         )));
@@ -278,9 +286,7 @@ fn invalid_argument(message: impl Into<String>) -> DetectError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use audio_generation_midi::karaoke::{
-        KaraokeNoteEvidence, KaraokePhrase,
-    };
+    use audio_generation_midi::karaoke::{KaraokeNoteEvidence, KaraokePhrase};
 
     fn note(text: &str, start_seconds: f32, end_seconds: f32, midi_note: u8) -> KaraokeNote {
         KaraokeNote {
@@ -298,6 +304,20 @@ mod tests {
 
     fn metadata() -> UltraStarV1Metadata {
         UltraStarV1Metadata::new("Example", "Artist", "audio/song.ogg")
+    }
+
+    fn exported_or_panic(chart: &KaraokeChart) -> String {
+        match export_ultrastar_v1(chart, &metadata()) {
+            Ok(exported) => exported,
+            Err(error) => panic!("expected chart to export: {error}"),
+        }
+    }
+
+    fn error_or_panic(chart: &KaraokeChart) -> DetectError {
+        match export_ultrastar_v1(chart, &metadata()) {
+            Ok(_) => panic!("expected chart export to fail"),
+            Err(error) => error,
+        }
     }
 
     #[test]
@@ -318,9 +338,8 @@ mod tests {
             ],
         };
 
-        let exported = export_ultrastar_v1(&chart, &metadata()).expect("valid chart exports");
         assert_eq!(
-            exported,
+            exported_or_panic(&chart),
             "#VERSION:1.0.0\n#MP3:audio/song.ogg\n#TITLE:Example\n#ARTIST:Artist\n#BPM:120\n#GAP:500\n: 0 2 0 Hel\n: 2 2 4 lo\n- 4\n: 8 2 -2  world\nE\n"
         );
     }
@@ -335,8 +354,7 @@ mod tests {
             }],
         };
 
-        let error = export_ultrastar_v1(&chart, &metadata()).expect_err("note must fail closed");
-        assert!(error.to_string().contains("zero duration"));
+        assert!(error_or_panic(&chart).to_string().contains("zero duration"));
     }
 
     #[test]
@@ -349,8 +367,9 @@ mod tests {
             }],
         };
 
-        let error = export_ultrastar_v1(&chart, &metadata()).expect_err("pre-gap note must fail");
-        assert!(error.to_string().contains("before the UltraStar #GAP"));
+        assert!(error_or_panic(&chart)
+            .to_string()
+            .contains("before the UltraStar #GAP"));
     }
 
     #[test]
@@ -368,14 +387,19 @@ mod tests {
             ],
         };
 
-        let error = export_ultrastar_v1(&chart, &metadata())
-            .expect_err("contiguous phrase boundary must fail closed");
-        assert!(error.to_string().contains("no safe phrase marker"));
+        assert!(error_or_panic(&chart)
+            .to_string()
+            .contains("no safe phrase marker"));
     }
 
     #[test]
     fn rejects_unsafe_audio_file_references() {
-        for audio_file in ["../song.ogg", "/tmp/song.ogg", "C:\\song.ogg", "https://example.test/song.ogg"] {
+        for audio_file in [
+            "../song.ogg",
+            "/tmp/song.ogg",
+            "C:\\song.ogg",
+            "https://example.test/song.ogg",
+        ] {
             let metadata = UltraStarV1Metadata::new("Example", "Artist", audio_file);
             assert!(metadata.validate().is_err(), "{audio_file} must be rejected");
         }
@@ -391,7 +415,6 @@ mod tests {
             }],
         };
 
-        let exported = export_ultrastar_v1(&chart, &metadata()).expect("valid chart exports");
-        assert!(exported.contains(": 0 2 0  leading and trailing \n"));
+        assert!(exported_or_panic(&chart).contains(": 0 2 0  leading and trailing \n"));
     }
 }

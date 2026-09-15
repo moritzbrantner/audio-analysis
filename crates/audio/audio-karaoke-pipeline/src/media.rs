@@ -118,6 +118,6 @@ mod tests {
             "missing full mix".to_string(),
         ));
         assert!(error.to_string().contains("karaoke analysis failed"));
-        assert!(error.source().is_some());
+        assert!(std::error::Error::source(&error).is_some());
     }
 }

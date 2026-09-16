@@ -15,10 +15,23 @@ categories.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-runtime-core.workspace = true
+media-core.workspace = true
+runtime-core = { workspace = true, optional = true }
 js-sys = "0.3.82"
 serde.workspace = true
 serde_json.workspace = true
 serde-wasm-bindgen = "0.6.5"
 wasm-bindgen = "0.2.105"
-audio-analysis-transcription.workspace = true
+audio-analysis-transcription = { workspace = true, optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+burn-core = { workspace = true, optional = true }
+burn-wgpu = { workspace = true, optional = true }
+getrandom-02 = { package = "getrandom", version = "0.2.17", features = ["js"] }
+getrandom-03 = { package = "getrandom", version = "0.3.4", features = ["wasm_js"] }
+getrandom-04 = { package = "getrandom", version = "0.4.3", features = ["wasm_js"] }
+
+[features]
+default = ["surface"]
+surface = ["dep:audio-analysis-transcription", "dep:runtime-core"]
+burn-webgpu = ["dep:burn-core", "dep:burn-wgpu"]

@@ -26,6 +26,7 @@ if [[ ! -f "$OUTPUT_DIR/index.html" ]]; then
 fi
 
 cp "$ROOT_DIR/tests/pages/audio-inspector.e2e.mjs" "$TOOL_DIR/audio-inspector.e2e.mjs"
+cp "$ROOT_DIR/tests/pages/waveform-overlay.e2e.mjs" "$TOOL_DIR/waveform-overlay.e2e.mjs"
 cat > "$TOOL_DIR/package.json" <<EOF
 {
   "private": true,
@@ -75,3 +76,4 @@ if [[ "$ready" != "1" ]]; then
 fi
 
 PAGES_E2E_BASE_URL="$BASE_URL" bun "$TOOL_DIR/audio-inspector.e2e.mjs"
+PAGES_E2E_BASE_URL="$BASE_URL" bun "$TOOL_DIR/waveform-overlay.e2e.mjs"

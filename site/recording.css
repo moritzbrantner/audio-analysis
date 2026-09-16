@@ -1,3 +1,5 @@
+@import url("./waveform-overlay.css");
+
 .audio-input-actions {
   display: flex;
   flex-wrap: wrap;

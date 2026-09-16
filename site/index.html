@@ -5,10 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Inspect an audio file locally in your browser with the Rust/WASM audio-analysis packages."
+      content="Inspect or record audio locally in your browser with the Rust/WASM audio-analysis packages."
     />
     <title>Audio Inspector · audio-analysis</title>
     <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./recording.css" />
   </head>
   <body>
     <main class="shell">
@@ -16,8 +17,8 @@
         <div class="eyebrow">audio-analysis · browser lab</div>
         <h1>Understand an audio file in seconds.</h1>
         <p class="hero-copy">
-          Drop a file or choose one from your device. Audio Inspector explains what stands out, then lets you inspect
-          waveform, levels, spectrum, pitch, key, and rhythm in detail.
+          Drop a file, choose one from your device, or record your voice. Audio Inspector explains what stands out,
+          then lets you inspect waveform, levels, spectrum, pitch, key, and rhythm in detail.
         </p>
         <div class="runtime-strip" aria-label="privacy and runtime summary">
           <span class="status-dot status-dot-local" aria-hidden="true"></span>
@@ -41,8 +42,21 @@
           />
           <div class="drop-icon" aria-hidden="true">♪</div>
           <h2 id="input-title" class="drop-kicker">Inspect your audio</h2>
-          <p class="drop-copy">Drop an audio file here, or choose one from your device.</p>
-          <button id="choose-file" class="button button-primary choose-file" type="button">Choose audio file</button>
+          <p class="drop-copy">Drop an audio file here, choose one from your device, or record from your microphone.</p>
+          <div class="audio-input-actions" aria-label="Audio input actions">
+            <button id="choose-file" class="button button-primary choose-file" type="button">Choose audio file</button>
+            <button
+              id="record-audio"
+              class="button button-secondary choose-file"
+              type="button"
+              aria-pressed="false"
+            >
+              Record voice
+            </button>
+          </div>
+          <p id="recording-status" class="drop-note recording-status" role="status" aria-live="polite">
+            A recording is analyzed through the same local pipeline as an uploaded file.
+          </p>
           <p class="drop-note">Decoded locally by your browser. The public site never uploads the selected audio.</p>
         </div>
 
@@ -318,6 +332,7 @@
       <span>Rust-first audio analysis · browser-local by default</span>
     </footer>
 
+    <script type="module" src="./recording.js"></script>
     <script type="module" src="./app.js"></script>
   </body>
 </html>

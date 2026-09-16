@@ -7,6 +7,13 @@ browser-local Whisper provider used by static consumers: audio is decoded and re
 mono in the browser, then transcribed with Whisper tiny on WebGPU. Model assets are cached by the
 browser and no server, Python, or CPU fallback is used.
 
+The proven browser executor is still the Transformers.js/WebGPU provider. In parallel, the Rust
+binding now carries a `burn-webgpu` feature with the fail-closed tiny/tiny.en model, asset, PCM, and
+backend contract for its replacement. That feature compiles independently from the generic native
+transcription surface so browser validation cannot accidentally pull speaker, model-download, or
+native networking infrastructure into the WASM graph. It does not claim Rust/Burn inference until
+the real decoder and in-browser resource acceptance are implemented.
+
 For short files, use the Blob helper:
 
 ```js

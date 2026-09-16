@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { beatOverlayEvents, overlayStatusText, rhythmCoverage } from "../../site/waveform-overlay.js";
+
+const overlaySource = readFileSync(new URL("../../site/waveform-overlay.js", import.meta.url), "utf8");
 
 describe("waveform beat overlay", () => {
   test("projects center-window beat timestamps onto the full-file waveform", () => {
@@ -52,5 +55,12 @@ describe("waveform beat overlay", () => {
     };
 
     expect(beatOverlayEvents(report).map((event) => event.timeSeconds)).toEqual([2]);
+  });
+
+  test("keeps annotations static instead of adding a second playback renderer", () => {
+    expect(overlaySource).not.toContain("requestAnimationFrame");
+    expect(overlaySource).not.toContain("waveform-presentation");
+    expect(overlaySource).not.toContain("getContext(");
+    expect(overlaySource).toContain("waveform-overlay-layer");
   });
 });

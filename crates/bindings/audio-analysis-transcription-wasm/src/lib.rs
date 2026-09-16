@@ -1,14 +1,21 @@
 //! WASM bindings for `audio-analysis-transcription`.
 
+#[cfg(feature = "burn-webgpu")]
+pub mod burn_whisper_webgpu;
+
+#[cfg(feature = "surface")]
 use runtime_core::SurfaceRequest;
+#[cfg(feature = "surface")]
 use wasm_bindgen::prelude::*;
 
+#[cfg(feature = "surface")]
 #[wasm_bindgen(js_name = packageSurface)]
 pub fn package_surface() -> Result<JsValue, JsValue> {
     serde_wasm_bindgen::to_value(&audio_analysis_transcription::surface::package_surface())
         .map_err(into_js_error)
 }
 
+#[cfg(feature = "surface")]
 #[wasm_bindgen(js_name = runOperation)]
 pub fn run_operation(request: JsValue) -> Result<JsValue, JsValue> {
     let request: SurfaceRequest = serde_wasm_bindgen::from_value(request).map_err(into_js_error)?;
@@ -17,11 +24,12 @@ pub fn run_operation(request: JsValue) -> Result<JsValue, JsValue> {
     serde_wasm_bindgen::to_value(&response).map_err(into_js_error)
 }
 
+#[cfg(feature = "surface")]
 fn into_js_error(error: impl std::fmt::Display) -> JsValue {
     js_sys::Error::new(&error.to_string()).into()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "surface"))]
 mod tests {
     #[test]
     fn wrapped_surface_has_operations() {

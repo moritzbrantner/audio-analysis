@@ -111,7 +111,12 @@ function setupWaveformOverlay() {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         if (generation !== stable.snapshotGeneration) return;
-        stable.baseCanvas = captureCanvas(waveform);
+        const duration = finite(stable.report?.source?.durationSeconds) ?? finite(player.duration);
+        stable.baseCanvas = captureCanvas(waveform, {
+          duration,
+          logicalWidth: stage.getBoundingClientRect().width,
+          cursorTimes: [finite(player.currentTime), stable.hoverTime],
+        });
         if (stable.baseCanvas) stage.setAttribute(SNAPSHOT_READY_ATTRIBUTE, "ready");
         drawPresentation();
       });
@@ -197,21 +202,44 @@ function setupWaveformOverlay() {
   player.addEventListener("play", startPlaybackAnimation);
   player.addEventListener("pause", stopPlaybackAnimation);
   player.addEventListener("ended", stopPlaybackAnimation);
-  window.addEventListener("resize", drawPresentation);
+  window.addEventListener("resize", queueSnapshotCapture);
 
   const reportObserver = new MutationObserver(refreshReport);
   reportObserver.observe(rawJson, { childList: true, characterData: true, subtree: true });
   if (rawJson.textContent.trim()) refreshReport();
 }
 
-function captureCanvas(source) {
+function captureCanvas(source, { duration, logicalWidth, cursorTimes }) {
   if (!source.width || !source.height) return null;
   const snapshot = document.createElement("canvas");
   snapshot.width = source.width;
   snapshot.height = source.height;
   const context = snapshot.getContext("2d");
   context.drawImage(source, 0, 0);
+
+  if (duration !== null && duration > 0 && logicalWidth > 0) {
+    for (const time of cursorTimes) {
+      if (time !== null && Number.isFinite(time)) removeSnapshotCursor(snapshot, time, duration, logicalWidth);
+    }
+  }
   return snapshot;
+}
+
+function removeSnapshotCursor(snapshot, time, duration, logicalWidth) {
+  const context = snapshot.getContext("2d");
+  const backingScale = snapshot.width / logicalWidth;
+  const center = Math.round((clamp(time, 0, duration) / duration) * snapshot.width);
+  const radius = Math.max(2, Math.ceil(backingScale * 2));
+  const targetStart = Math.max(0, center - radius);
+  const targetEnd = Math.min(snapshot.width, center + radius + 1);
+  const targetWidth = targetEnd - targetStart;
+  if (targetWidth <= 0) return;
+
+  const sourceOffset = Math.max(radius * 2 + 1, Math.ceil(backingScale * 5));
+  let sourceX = targetEnd + sourceOffset;
+  if (sourceX >= snapshot.width) sourceX = targetStart - sourceOffset;
+  sourceX = Math.max(0, Math.min(snapshot.width - 1, sourceX));
+  context.drawImage(snapshot, sourceX, 0, 1, snapshot.height, targetStart, 0, targetWidth, snapshot.height);
 }
 
 function drawRhythmCoverage(context, width, height, duration, coverage) {
@@ -255,6 +283,7 @@ function parseReport(value) {
 }
 
 function finite(value) {
+  if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }

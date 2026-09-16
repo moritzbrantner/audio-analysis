@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  CODING_TOOLING_REV: c9e071995abf65d2326930efb05e47e585af0efd
+
 jobs:
   refresh:
     if: github.actor != 'github-actions[bot]'
@@ -24,6 +27,11 @@ jobs:
         with:
           toolchain: 1.95.0
           targets: wasm32-unknown-unknown
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.0
 
       - name: Transplant the current-safe Burn contract
         shell: bash
@@ -85,14 +93,12 @@ jobs:
 
           readme = Path("packages/audio-analysis-transcription-wasm/README.md")
           text = readme.read_text()
-          anchor = (
-              'browser and no server, Python, or CPU fallback is used.\n\n'
-          )
+          anchor = 'browser and no server, Python, or CPU fallback is used.\n\n'
           note = (
               'browser and no server, Python, or CPU fallback is used.\n\n'
               '> The production browser executor currently remains the proven Transformers.js/WebGPU adapter. '
               'The Rust/Burn provider is being introduced behind an explicit `burn-webgpu` feature and reports '
-              'itself as pending until real tiny/tiny.en inference is proven in-browser. There is no hidden fallback '\
+              'itself as pending until real tiny/tiny.en inference is proven in-browser. There is no hidden fallback '
               'from that Rust provider contract.\n\n'
           )
           if anchor not in text:
@@ -113,6 +119,37 @@ jobs:
       - name: Format Rust
         run: cargo fmt --all
 
+      - name: Prepare pinned source workspaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init ../coding-tooling
+          git -C ../coding-tooling fetch --depth=1 https://github.com/moritzbrantner/coding-tooling.git "$CODING_TOOLING_REV"
+          git -C ../coding-tooling checkout --detach FETCH_HEAD
+          (cd ../coding-tooling && bun install --frozen-lockfile)
+
+          FOUNDATION_REV="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path('.coding-tooling.source-deps.json').read_text())
+          revisions = {
+              patch['rev']
+              for patch in manifest['cargo']['patches']
+              if patch['git'] == 'https://github.com/moritzbrantner/moenarch-foundation'
+          }
+          if len(revisions) != 1:
+              raise SystemExit(f'expected one Foundation revision, found {sorted(revisions)}')
+          print(revisions.pop())
+          PY
+          )"
+          git init ../moenarch-foundation
+          git -C ../moenarch-foundation fetch --depth=1 https://github.com/moritzbrantner/moenarch-foundation.git "$FOUNDATION_REV"
+          git -C ../moenarch-foundation checkout --detach FETCH_HEAD
+
+      - name: Activate pinned source dependencies
+        run: bash scripts/source-deps activate
+
       - name: Verify refreshed browser contract
         shell: bash
         run: |
@@ -120,6 +157,9 @@ jobs:
           cargo test --locked -p moenarch-audio-analysis-transcription --features burn-webgpu
           bash scripts/check-wasm.sh
           cargo metadata --locked --format-version 1 --no-deps >/dev/null
+
+      - name: Deactivate source dependencies
+        run: bash scripts/source-deps deactivate
 
       - name: Commit refreshed slice
         shell: bash

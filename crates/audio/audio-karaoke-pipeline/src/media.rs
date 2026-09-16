@@ -69,7 +69,8 @@ pub type KaraokeMediaPipelineResult<T> = std::result::Result<T, KaraokeMediaPipe
 /// adapter consumes only its shared `media-core` contract, preserving that
 /// authority boundary and avoiding a second transcription configuration surface.
 /// Segment-level timing is deliberately insufficient for karaoke generation:
-/// every retained word must have a complete, positive-duration time range.
+/// every retained word must have a complete, positive-duration time range that
+/// remains valid in the karaoke layer's `f32` timeline.
 pub fn aligned_lyrics_from_transcription(
     transcription: &TranscriptionContract,
 ) -> KaraokeMediaPipelineResult<Vec<TimedTextWordContract>> {
@@ -78,7 +79,7 @@ pub fn aligned_lyrics_from_transcription(
     })?;
 
     let mut lyrics = Vec::new();
-    let mut previous_end = None;
+    let mut previous_end_f32 = None;
     for segment in &transcription.segments {
         let words = segment.words();
         if words.is_empty() {
@@ -130,12 +131,21 @@ pub fn aligned_lyrics_from_transcription(
                     segment.index, word_index
                 )));
             }
-            if previous_end.is_some_and(|previous_end| start_seconds < previous_end) {
+
+            let start_seconds_f32 = start_seconds as f32;
+            let end_seconds_f32 = end_seconds as f32;
+            if end_seconds_f32 <= start_seconds_f32 {
+                return Err(invalid_transcription(format!(
+                    "transcription segment {} word {} loses positive duration when represented on the karaoke f32 timeline",
+                    segment.index, word_index
+                )));
+            }
+            if previous_end_f32.is_some_and(|previous_end| start_seconds_f32 < previous_end) {
                 return Err(invalid_transcription(
-                    "aligned transcription words must be chronological and non-overlapping",
+                    "aligned transcription words must remain chronological and non-overlapping on the karaoke f32 timeline",
                 ));
             }
-            previous_end = Some(end_seconds);
+            previous_end_f32 = Some(end_seconds_f32);
             lyrics.push(word.clone());
         }
     }
@@ -333,6 +343,30 @@ mod tests {
         let error = aligned_lyrics_from_transcription(&transcription)
             .expect_err("overlapping aligned words must fail before media decoding");
         assert!(error.to_string().contains("chronological and non-overlapping"));
+    }
+
+    #[test]
+    fn transcription_adapter_rejects_duration_lost_in_f32_timeline() {
+        let start_seconds = 16_777_216.0;
+        let end_seconds = start_seconds + 0.5;
+        let word = TimedTextWordContract::new("brief")
+            .with_time_range(Some(start_seconds), Some(end_seconds))
+            .expect("f64 word timing must be valid");
+        let mut segment = TimedTextSegmentContract::new(0, "brief")
+            .with_time_range(Some(start_seconds), Some(end_seconds))
+            .expect("f64 segment timing must be valid");
+        segment
+            .push_word(word)
+            .expect("word must fit its segment");
+        let transcription = TranscriptionContract {
+            text: Some("brief".to_string()),
+            segments: vec![segment],
+            ..TranscriptionContract::default()
+        };
+
+        let error = aligned_lyrics_from_transcription(&transcription)
+            .expect_err("f32-collapsed word duration must fail before media decoding");
+        assert!(error.to_string().contains("loses positive duration"));
     }
 
     #[test]

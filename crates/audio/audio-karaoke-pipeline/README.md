@@ -128,6 +128,47 @@ let _ = (result.separation, result.vocal_path, result.karaoke);
 # Ok::<(), audio_karaoke_pipeline::media::separation::KaraokeSeparationPipelineError>(())
 ```
 
-Transcription/alignment remains a later, separate stage. Separation is explicit
-external-tool execution, while lyric timing remains canonical caller input; the
-pipeline still never invents lyrics or syllable boundaries.
+## Transcription/alignment contract adapter
+
+ASR and forced alignment remain owned by `audio-analysis-transcription`. The
+karaoke crate does not wrap provider/model configuration or create a second
+transcription orchestrator. Instead,
+`media::aligned_lyrics_from_transcription` consumes the canonical
+`media_core::TranscriptionContract` produced by that stage and requires strict,
+complete word-level timing.
+
+Segment-only timing is rejected rather than promoted to synthetic word timing.
+Empty words, missing endpoints, non-positive intervals, and transcripts with no
+aligned words fail closed. Accepted `TimedTextWordContract` values are preserved
+as canonical lyric input, including their confidence, speaker, and attributes.
+
+`media::build_ultrastar_from_media_transcription` validates karaoke options,
+UltraStar metadata, and transcription timing before the first FFmpeg decode,
+then delegates to the existing media pipeline. It does not execute ASR,
+realignment, or syllabification.
+
+```rust,ignore
+use audio_analysis_io::SelectedMediaSource;
+use audio_karaoke_formats::UltraStarV1Metadata;
+use audio_karaoke_pipeline::{
+    media::build_ultrastar_from_media_transcription, KaraokePipelineOptions,
+};
+
+// `transcription_response` is produced by audio-analysis-transcription using
+// whichever ASR/alignment provider the caller selected.
+let result = build_ultrastar_from_media_transcription(
+    Some(SelectedMediaSource::new("song.flac")),
+    SelectedMediaSource::new("separated/vocals.wav"),
+    &transcription_response.transcript,
+    KaraokePipelineOptions::default(),
+    &UltraStarV1Metadata::new("Song", "Artist", "song.flac"),
+)?;
+
+let _ = (result.chart, result.ultrastar_text, result.evidence);
+# Ok::<(), audio_karaoke_pipeline::media::KaraokeMediaPipelineError>(())
+```
+
+The song-to-chart path is therefore composed from explicit authority stages:
+media decoding, optional vocal separation, caller-run transcription/alignment,
+pure rhythm/pitch/lyric fusion, and UltraStar export. No karaoke stage invents
+lyric timing or syllable boundaries.

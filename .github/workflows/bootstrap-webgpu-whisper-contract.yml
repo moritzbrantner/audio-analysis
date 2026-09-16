@@ -79,7 +79,8 @@ jobs:
               'audio-analysis-transcription.workspace = true\n\n'
               '# Browser-only Burn/WebGPU plumbing is opt-in and never changes native Candle behavior.\n'
               '[target.\'cfg(target_arch = "wasm32")\'.dependencies]\n'
-              'getrandom = { version = "0.2.17", features = ["js"] }\n\n'
+              'getrandom-02 = { package = "getrandom", version = "0.2.17", features = ["js"] }\n'
+              'getrandom-04 = { package = "getrandom", version = "0.4.3", features = ["wasm_js"] }\n\n'
               '[features]\n'
               'default = []\n'
               'burn-webgpu = ["audio-analysis-transcription/burn-webgpu"]\n',

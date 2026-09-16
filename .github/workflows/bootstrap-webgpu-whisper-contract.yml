@@ -164,6 +164,27 @@ jobs:
           git -C ../moenarch-foundation fetch --depth=1 https://github.com/moritzbrantner/moenarch-foundation.git "$FOUNDATION_REV"
           git -C ../moenarch-foundation checkout --detach FETCH_HEAD
 
+      - name: Refresh source lock baseline deliberately
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp Cargo.lock /tmp/registry-Cargo.lock
+          bun ../coding-tooling/src/cli.ts source-deps activate --json
+          cargo metadata --format-version 1 >/dev/null
+          python3 - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+
+          lock = Path("Cargo.lock").read_bytes()
+          Path(".coding-tooling.source-lock.sha256").write_text(f"{sha256(lock).hexdigest()}\n")
+          PY
+          bun ../coding-tooling/src/cli.ts source-deps deactivate --json
+          cp /tmp/registry-Cargo.lock Cargo.lock
+          rm -f /tmp/registry-Cargo.lock
+          git add .coding-tooling.source-lock.sha256 Cargo.lock
+          git diff --cached --check
+          git commit --amend --no-edit
+
       - name: Activate pinned source dependencies
         run: bash scripts/source-deps activate
 

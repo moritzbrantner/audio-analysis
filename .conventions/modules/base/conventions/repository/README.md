@@ -76,3 +76,25 @@ These are repository-layout defaults, not requirements that every repository cre
 - Prefer real static JSON endpoints when the operation is read-only metadata or committed evidence. Label browser-executed JSON views distinctly; do not present static hosting as a server-side API.
 - Keep limitations explicit, especially authentication, privacy, execution, mutation, CORS, rate-limit, or completeness boundaries.
 - This rule does not require private/internal repositories, ordinary libraries, or tools without a meaningful remote agent operation to become public or acquire a Pages façade.
+
+## REPO-015 — Prefer vertical growth before creating another repository
+
+- Before creating a new repository or lab, identify the capability, ownership boundary, runtime constraint, or validation need that cannot be expressed coherently in an existing repository.
+- Prefer a deeper slice in an existing repository when the proposed work reuses the same domain, teaching surface, runtime, or maintenance owner and does not need an independently versioned contract.
+- A new repository is justified when separation materially improves ownership, release cadence, security/privacy boundary, dependency isolation, platform/runtime isolation, or reusable public contract—not merely because the topic can be named separately.
+- For a new lab, require at least one demonstrable interaction, measurement, algorithm, or platform behavior that the existing labs do not already teach. A renamed collection of explanations or duplicate controls is insufficient.
+- Record the nearest existing repository considered and why extending it was rejected. Keep this rationale concise and reviewable; it is a scope decision, not a permanent architectural commitment.
+- Do not block small experiments from being tested locally or on a branch. The higher bar applies when promoting an experiment into a durable repository with its own maintenance, CI, Pages, dependency, and automation surface.
+
+## REPO-016 — Public repositories provide a useful GitHub Pages surface
+
+- Public repositories should expose a maintained GitHub Pages site unless the repository records an explicit reason to opt out.
+- Pages is a product surface, not a decorative README mirror. Prefer the smallest page that helps a visitor understand, evaluate, or directly experience what the repository does.
+- Applications and visual tools should publish a usable application, playground, or representative interactive slice when static hosting permits it.
+- Libraries should explain their public purpose, core concepts, examples, important trade-offs, and evidence such as benchmarks. When the real implementation can reasonably execute in a browser, prefer a live demo over a JavaScript reimplementation.
+- Rust libraries may use WebAssembly adapters to expose existing crate behavior. Keep algorithm and domain ownership in the normal Rust crates; the WASM layer should stay thin so browser and native behavior cannot silently drift.
+- Backend and service repositories should explain architecture, domain boundaries, API behavior, data flow, operational constraints, and representative workflows. A browser client, deterministic simulation, or fixture-driven demonstration is useful when it exercises real shared contracts, but do not distort server architecture merely to make it browser-runnable.
+- CLI and tooling repositories should show the workflow, commands, configuration, generated evidence, or representative reports; interactive visualization is optional when explanation is the more faithful interface.
+- Do not force WASM or browser compatibility through filesystem, networking, threading, database, GPU, or platform abstractions that would make the production code less coherent. A truthful static explanation is better than a fake demo.
+- Pages deployments should reuse the repository landscape's shared deployment workflow when applicable and publish the same validated build artifact or a deterministically derived static artifact.
+- Treat the Pages surface as part of the repository's public contract: keep examples accurate, responsive, accessible, and aligned with current capabilities rather than promising unimplemented behavior.

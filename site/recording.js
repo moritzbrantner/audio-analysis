@@ -1,3 +1,5 @@
+import "./waveform-overlay.js";
+
 const recordButton = document.querySelector("#record-audio");
 const recordingStatus = document.querySelector("#recording-status");
 const fileInput = document.querySelector("#file-input");

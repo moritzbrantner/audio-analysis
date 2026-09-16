@@ -119,6 +119,23 @@ jobs:
       - name: Format Rust
         run: cargo fmt --all
 
+      - name: Checkpoint registry-profile changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock \
+            crates/audio/audio-analysis-transcription/Cargo.toml \
+            crates/audio/audio-analysis-transcription/src/lib.rs \
+            crates/audio/audio-analysis-transcription/src/burn_whisper_webgpu.rs \
+            crates/bindings/audio-analysis-transcription-wasm/Cargo.toml \
+            crates/bindings/audio-analysis-transcription-wasm/src/lib.rs \
+            packages/audio-analysis-transcription-wasm/README.md \
+            scripts/check-wasm.sh scripts/check-preflight.sh
+          git diff --cached --check
+          git commit -m "chore: checkpoint WebGPU contract for source verification"
+
       - name: Prepare pinned source workspaces
         shell: bash
         run: |
@@ -159,22 +176,16 @@ jobs:
           cargo metadata --locked --format-version 1 --no-deps >/dev/null
 
       - name: Deactivate source dependencies
+        if: always()
         run: bash scripts/source-deps deactivate
 
-      - name: Commit refreshed slice
+      - name: Publish clean product commit
         shell: bash
         run: |
           set -euo pipefail
           git rm .github/workflows/bootstrap-webgpu-whisper-contract.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml Cargo.lock \
-            crates/audio/audio-analysis-transcription/Cargo.toml \
-            crates/audio/audio-analysis-transcription/src/lib.rs \
-            crates/audio/audio-analysis-transcription/src/burn_whisper_webgpu.rs \
-            crates/bindings/audio-analysis-transcription-wasm/Cargo.toml \
-            crates/bindings/audio-analysis-transcription-wasm/src/lib.rs \
-            packages/audio-analysis-transcription-wasm/README.md \
-            scripts/check-wasm.sh scripts/check-preflight.sh
+          git reset --soft origin/main
+          git add -A
+          git diff --cached --check
           git commit -m "feat: refresh Burn WebGPU transcription contract"
-          git push origin HEAD:feat/webgpu-whisper-contract-refresh
+          git push --force-with-lease origin HEAD:feat/webgpu-whisper-contract-refresh

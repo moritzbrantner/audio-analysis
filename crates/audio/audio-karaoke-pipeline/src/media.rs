@@ -78,6 +78,7 @@ pub fn aligned_lyrics_from_transcription(
     })?;
 
     let mut lyrics = Vec::new();
+    let mut previous_end = None;
     for segment in &transcription.segments {
         let words = segment.words();
         if words.is_empty() {
@@ -97,6 +98,16 @@ pub fn aligned_lyrics_from_transcription(
                     segment.index, word_index
                 )));
             }
+            if word
+                .text
+                .chars()
+                .any(|character| matches!(character, '\r' | '\n'))
+            {
+                return Err(invalid_transcription(format!(
+                    "transcription segment {} word {} contains a line break",
+                    segment.index, word_index
+                )));
+            }
             let start_seconds = word.start_seconds().ok_or_else(|| {
                 invalid_transcription(format!(
                     "transcription segment {} word {} is missing a start time",
@@ -109,12 +120,22 @@ pub fn aligned_lyrics_from_transcription(
                     segment.index, word_index
                 ))
             })?;
-            if end_seconds <= start_seconds {
+            if start_seconds < 0.0
+                || end_seconds <= start_seconds
+                || start_seconds > f64::from(f32::MAX)
+                || end_seconds > f64::from(f32::MAX)
+            {
                 return Err(invalid_transcription(format!(
-                    "transcription segment {} word {} must have positive duration",
+                    "transcription segment {} word {} must have a finite, non-negative, positive-duration time range representable as f32",
                     segment.index, word_index
                 )));
             }
+            if previous_end.is_some_and(|previous_end| start_seconds < previous_end) {
+                return Err(invalid_transcription(
+                    "aligned transcription words must be chronological and non-overlapping",
+                ));
+            }
+            previous_end = Some(end_seconds);
             lyrics.push(word.clone());
         }
     }
@@ -279,6 +300,39 @@ mod tests {
         let error = aligned_lyrics_from_transcription(&transcription)
             .expect_err("segment timing must not be promoted to word timing");
         assert!(error.to_string().contains("word-level alignment"));
+    }
+
+    #[test]
+    fn transcription_adapter_rejects_cross_segment_word_overlap() {
+        let first_word = TimedTextWordContract::new("first")
+            .with_time_range(Some(0.0), Some(1.5))
+            .expect("first word timing must be valid");
+        let mut first_segment = TimedTextSegmentContract::new(0, "first")
+            .with_time_range(Some(0.0), Some(2.0))
+            .expect("first segment timing must be valid");
+        first_segment
+            .push_word(first_word)
+            .expect("first word must fit its segment");
+
+        let second_word = TimedTextWordContract::new("second")
+            .with_time_range(Some(1.0), Some(2.0))
+            .expect("second word timing must be valid");
+        let mut second_segment = TimedTextSegmentContract::new(1, "second")
+            .with_time_range(Some(1.0), Some(2.0))
+            .expect("second segment timing must be valid");
+        second_segment
+            .push_word(second_word)
+            .expect("second word must fit its segment");
+
+        let transcription = TranscriptionContract {
+            text: Some("first second".to_string()),
+            segments: vec![first_segment, second_segment],
+            ..TranscriptionContract::default()
+        };
+
+        let error = aligned_lyrics_from_transcription(&transcription)
+            .expect_err("overlapping aligned words must fail before media decoding");
+        assert!(error.to_string().contains("chronological and non-overlapping"));
     }
 
     #[test]

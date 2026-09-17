@@ -59,20 +59,76 @@
   outline: none;
 }
 
-.waveform-overlay-layer {
+.waveform-overlay-layer,
+.waveform-section-layer,
+.waveform-beat-layer {
   position: absolute;
-  z-index: 1;
   inset: 0;
+  pointer-events: none;
+}
+
+.waveform-overlay-layer {
+  z-index: 1;
   overflow: hidden;
   border-radius: 12px;
-  pointer-events: none;
+}
+
+.waveform-section-layer {
+  z-index: 1;
+}
+
+.waveform-beat-layer {
+  z-index: 2;
 }
 
 .waveform-rhythm-coverage {
   position: absolute;
   top: 0;
   bottom: 0;
-  background: rgba(129, 140, 248, 0.08);
+  background: rgba(129, 140, 248, 0.06);
+}
+
+.waveform-section-segment {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 1px;
+  border-left: 1px solid rgba(226, 232, 240, 0.58);
+  border-right: 1px solid rgba(15, 23, 42, 0.18);
+  overflow: hidden;
+}
+
+.waveform-section-tone-0 {
+  background: rgba(45, 212, 191, 0.11);
+}
+
+.waveform-section-tone-1 {
+  background: rgba(96, 165, 250, 0.10);
+}
+
+.waveform-section-tone-2 {
+  background: rgba(192, 132, 252, 0.10);
+}
+
+.waveform-section-tone-3 {
+  background: rgba(251, 191, 36, 0.09);
+}
+
+.waveform-section-label {
+  position: absolute;
+  top: 8px;
+  left: 6px;
+  max-width: calc(100% - 12px);
+  overflow: hidden;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72);
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 0.66rem;
+  font-weight: 800;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .waveform-beat-marker {
@@ -95,5 +151,12 @@
   .waveform-heading-actions {
     width: 100%;
     justify-content: flex-start;
+  }
+
+  .waveform-section-label {
+    top: 5px;
+    left: 4px;
+    max-width: calc(100% - 8px);
+    font-size: 0.62rem;
   }
 }

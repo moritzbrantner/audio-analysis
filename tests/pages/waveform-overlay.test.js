@@ -1,10 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { beatOverlayEvents, overlayStatusText, rhythmCoverage } from "../../site/waveform-overlay.js";
+import {
+  beatOverlayEvents,
+  beatOverlayStatusText,
+  rhythmCoverage,
+  sectionOverlaySegments,
+  sectionOverlayStatusText,
+} from "../../site/waveform-overlay.js";
 
 const overlaySource = readFileSync(new URL("../../site/waveform-overlay.js", import.meta.url), "utf8");
 
-describe("waveform beat overlay", () => {
+describe("waveform rhythm overlays", () => {
   test("projects center-window beat timestamps onto the full-file waveform", () => {
     const report = {
       source: { durationSeconds: 168 },
@@ -23,7 +29,55 @@ describe("waveform beat overlay", () => {
       { index: 2, timeSeconds: 75, strength: 0.5, downbeat: false },
     ]);
     expect(rhythmCoverage(report)).toEqual({ startSeconds: 74, endSeconds: 94 });
-    expect(overlayStatusText(report)).toBe("2 detected beats from the 20.0 s rhythm window");
+    expect(beatOverlayStatusText(report)).toBe("2 detected beats from the 20.0 s rhythm window");
+  });
+
+  test("projects structural sections from the bounded rhythm window", () => {
+    const report = {
+      source: { durationSeconds: 168 },
+      coverage: { rhythm: { startSeconds: 74, sourceDurationSeconds: 20 } },
+      rhythm: {
+        analysisStartSeconds: 0,
+        sections: [
+          {
+            index: 1,
+            label: "section-1",
+            identity: "A",
+            startSeconds: 0,
+            endSeconds: 8,
+            startBoundaryConfidence: 1,
+          },
+          {
+            index: 2,
+            label: "section-2",
+            identity: "B",
+            startSeconds: 8,
+            endSeconds: 20,
+            startBoundaryConfidence: 0.72,
+          },
+        ],
+      },
+    };
+
+    expect(sectionOverlaySegments(report)).toEqual([
+      {
+        index: 1,
+        startSeconds: 74,
+        endSeconds: 82,
+        identity: "A",
+        label: "section-1",
+        boundaryConfidence: 1,
+      },
+      {
+        index: 2,
+        startSeconds: 82,
+        endSeconds: 94,
+        identity: "B",
+        label: "section-2",
+        boundaryConfidence: 0.72,
+      },
+    ]);
+    expect(sectionOverlayStatusText(report)).toBe("2 detected sections in the 20.0 s rhythm window");
   });
 
   test("does not double-offset absolute rhythm timestamps", () => {
@@ -33,13 +87,15 @@ describe("waveform beat overlay", () => {
       rhythm: {
         analysisStartSeconds: 74,
         beats: [{ timestampSeconds: 74.5, downbeat: false }],
+        sections: [{ index: 1, startSeconds: 74, endSeconds: 82, identity: "A" }],
       },
     };
 
     expect(beatOverlayEvents(report)[0].timeSeconds).toBe(74.5);
+    expect(sectionOverlaySegments(report)[0]).toMatchObject({ startSeconds: 74, endSeconds: 82, identity: "A" });
   });
 
-  test("filters unusable or out-of-file beat timestamps", () => {
+  test("filters unusable or out-of-file rhythm annotations", () => {
     const report = {
       source: { durationSeconds: 10 },
       coverage: { rhythm: { startSeconds: 0, sourceDurationSeconds: 10 } },
@@ -51,10 +107,21 @@ describe("waveform beat overlay", () => {
           { timestampSeconds: 11 },
           { timestampSeconds: "not-a-number" },
         ],
+        sections: [
+          { startSeconds: -3, endSeconds: 2, identity: "A" },
+          { startSeconds: 2, endSeconds: 7, identity: "B" },
+          { startSeconds: 9, endSeconds: 12, identity: "C" },
+          { startSeconds: 8, endSeconds: 8, identity: "ignored" },
+        ],
       },
     };
 
     expect(beatOverlayEvents(report).map((event) => event.timeSeconds)).toEqual([2]);
+    expect(sectionOverlaySegments(report).map(({ startSeconds, endSeconds, identity }) => ({ startSeconds, endSeconds, identity }))).toEqual([
+      { startSeconds: 0, endSeconds: 2, identity: "A" },
+      { startSeconds: 2, endSeconds: 7, identity: "B" },
+      { startSeconds: 9, endSeconds: 10, identity: "C" },
+    ]);
   });
 
   test("keeps annotations static instead of adding a second playback renderer", () => {
@@ -62,5 +129,7 @@ describe("waveform beat overlay", () => {
     expect(overlaySource).not.toContain("waveform-presentation");
     expect(overlaySource).not.toContain("getContext(");
     expect(overlaySource).toContain("waveform-overlay-layer");
+    expect(overlaySource).toContain("waveform-section-layer");
+    expect(overlaySource).toContain("waveform-beat-layer");
   });
 });

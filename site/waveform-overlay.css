@@ -105,13 +105,16 @@
   position: absolute;
   top: 0;
   bottom: 0;
+  box-sizing: border-box;
   min-width: 2px;
   overflow: hidden;
+  margin: 0;
   padding: 0 4px;
   border: 0;
   border-left: 1px solid rgba(255, 255, 255, 0.26);
   color: rgba(255, 255, 255, 0.96);
   cursor: pointer;
+  font: inherit;
   pointer-events: auto;
   transition: filter 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
 }

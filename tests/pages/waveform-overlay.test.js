@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import {
   beatOverlayEvents,
   beatOverlayStatusText,
+  formatMusicalContext,
+  musicalContextAtTime,
   rhythmCoverage,
   sectionOverlaySegments,
   sectionOverlayStatusText,
@@ -80,6 +82,59 @@ describe("waveform rhythm overlays", () => {
     expect(sectionOverlayStatusText(report)).toBe("2 detected sections in the 20.0 s rhythm window");
   });
 
+  test("builds musical context from section, bar, beat, and local tempo metadata", () => {
+    const report = {
+      source: { durationSeconds: 30 },
+      coverage: { rhythm: { startSeconds: 5, sourceDurationSeconds: 20 } },
+      rhythm: {
+        analysisStartSeconds: 0,
+        bpm: 128,
+        beatsPerBar: 4,
+        beats: [
+          {
+            index: 1,
+            timestampSeconds: 4,
+            localBpm: 127.8,
+            beatInBar: 3,
+            barIndex: 17,
+            sectionIndex: 2,
+            sectionIdentity: "B",
+          },
+          {
+            index: 2,
+            timestampSeconds: 4.5,
+            localBpm: 128.2,
+            beatInBar: 4,
+            barIndex: 17,
+            sectionIndex: 2,
+            sectionIdentity: "B",
+          },
+        ],
+        sections: [
+          { index: 1, startSeconds: 0, endSeconds: 2, identity: "A" },
+          { index: 2, startSeconds: 2, endSeconds: 8, identity: "B" },
+        ],
+      },
+    };
+
+    const context = musicalContextAtTime(report, 9.2);
+    expect(context).toMatchObject({
+      timeSeconds: 9.2,
+      inCoverage: true,
+      sectionIndex: 2,
+      sectionIdentity: "B",
+      barIndex: 17,
+      beatInBar: 3,
+      beatsPerBar: 4,
+      bpm: 127.8,
+    });
+    expect(formatMusicalContext(context)).toBe("0:09.2 · Section B · Bar 17 · Beat 3/4 · 127.8 BPM");
+
+    const outside = musicalContextAtTime(report, 2);
+    expect(outside?.inCoverage).toBe(false);
+    expect(formatMusicalContext(outside)).toBe("0:02.0 · Outside analyzed rhythm window");
+  });
+
   test("does not double-offset absolute rhythm timestamps", () => {
     const report = {
       source: { durationSeconds: 168 },
@@ -131,5 +186,7 @@ describe("waveform rhythm overlays", () => {
     expect(overlaySource).toContain("waveform-overlay-layer");
     expect(overlaySource).toContain("waveform-section-layer");
     expect(overlaySource).toContain("waveform-beat-layer");
+    expect(overlaySource).toContain("waveform-structure-rail");
+    expect(overlaySource).toContain("waveform-context-hud");
   });
 });

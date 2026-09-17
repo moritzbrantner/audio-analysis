@@ -234,6 +234,7 @@ function setupWaveformOverlay() {
 
     renderBeatLayer(beatLayer, state.report, state.beats);
     renderSectionBoundaries(sectionLayer, state.report, state.sections);
+    state.activeSectionIndex = null;
     renderStructureRail(structureRail, state.report, state.sections, {
       inspect: (timeSeconds) => {
         state.railInspecting = true;

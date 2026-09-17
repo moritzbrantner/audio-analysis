@@ -83,52 +83,107 @@
 
 .waveform-rhythm-coverage {
   position: absolute;
-  top: 0;
+  top: 30px;
   bottom: 0;
-  background: rgba(129, 140, 248, 0.06);
+  background: rgba(129, 140, 248, 0.05);
+}
+
+.waveform-structure-rail {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 30px;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(15, 23, 42, 0.88);
+  pointer-events: none;
 }
 
 .waveform-section-segment {
   position: absolute;
   top: 0;
   bottom: 0;
-  min-width: 1px;
-  border-left: 1px solid rgba(226, 232, 240, 0.58);
-  border-right: 1px solid rgba(15, 23, 42, 0.18);
+  min-width: 2px;
   overflow: hidden;
+  padding: 0 4px;
+  border: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.26);
+  color: rgba(255, 255, 255, 0.96);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: filter 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+}
+
+.waveform-section-segment:hover,
+.waveform-section-segment:focus-visible {
+  z-index: 1;
+  filter: brightness(1.22) saturate(1.08);
+  outline: none;
+  box-shadow: inset 0 -3px 0 rgba(255, 255, 255, 0.72);
+}
+
+.waveform-section-segment.is-active {
+  z-index: 2;
+  filter: brightness(1.34) saturate(1.14);
+  box-shadow: inset 0 -4px 0 rgba(255, 255, 255, 0.94), 0 0 12px rgba(255, 255, 255, 0.16);
 }
 
 .waveform-section-tone-0 {
-  background: rgba(45, 212, 191, 0.11);
+  background: rgba(13, 148, 136, 0.82);
 }
 
 .waveform-section-tone-1 {
-  background: rgba(96, 165, 250, 0.10);
+  background: rgba(37, 99, 235, 0.78);
 }
 
 .waveform-section-tone-2 {
-  background: rgba(192, 132, 252, 0.10);
+  background: rgba(147, 51, 234, 0.76);
 }
 
 .waveform-section-tone-3 {
-  background: rgba(251, 191, 36, 0.09);
+  background: rgba(202, 138, 4, 0.80);
 }
 
 .waveform-section-label {
-  position: absolute;
-  top: 8px;
-  left: 6px;
-  max-width: calc(100% - 12px);
+  display: block;
   overflow: hidden;
-  padding: 2px 5px;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.72);
-  color: rgba(255, 255, 255, 0.94);
-  font-size: 0.66rem;
-  font-weight: 800;
-  line-height: 1.2;
+  color: inherit;
+  font-size: 0.7rem;
+  font-weight: 850;
+  line-height: 30px;
+  text-align: center;
   text-overflow: ellipsis;
+  text-shadow: 0 1px 2px rgba(15, 23, 42, 0.65);
   white-space: nowrap;
+}
+
+.waveform-section-boundary {
+  position: absolute;
+  top: 30px;
+  bottom: 0;
+  width: 0;
+  transform: translateX(-0.5px);
+  border-left: 1px solid rgba(226, 232, 240, 0.38);
+}
+
+.waveform-section-boundary-strong {
+  border-left-width: 2px;
+  border-left-color: rgba(248, 250, 252, 0.78);
+}
+
+.waveform-section-boundary-medium {
+  border-left-color: rgba(226, 232, 240, 0.52);
+}
+
+.waveform-section-boundary-soft {
+  border-left-style: dashed;
+  border-left-color: rgba(226, 232, 240, 0.34);
+}
+
+.waveform-section-boundary-unknown {
+  border-left-color: rgba(226, 232, 240, 0.28);
 }
 
 .waveform-beat-marker {
@@ -136,15 +191,49 @@
   top: 18%;
   bottom: 0;
   width: 1px;
-  background: rgba(129, 140, 248, 0.72);
+  background: rgba(129, 140, 248, 0.68);
   transform: translateX(-0.5px);
 }
 
 .waveform-beat-marker-downbeat {
-  top: 0;
+  top: 30px;
   width: 2px;
   background: rgba(251, 191, 36, 0.92);
   transform: translateX(-1px);
+}
+
+.waveform-context-hud {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-height: 38px;
+  margin-top: 8px;
+  padding: 8px 11px;
+  border: 1px solid #dce3e6;
+  border-radius: 10px;
+  background: rgba(248, 250, 252, 0.94);
+  color: #33434a;
+}
+
+.waveform-context-time {
+  flex: 0 0 auto;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.waveform-context-detail {
+  overflow: hidden;
+  font-size: 0.78rem;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.waveform-context-detail.is-outside {
+  color: #6b7b83;
+  font-weight: 650;
 }
 
 @media (max-width: 680px) {
@@ -154,9 +243,18 @@
   }
 
   .waveform-section-label {
-    top: 5px;
-    left: 4px;
-    max-width: calc(100% - 8px);
-    font-size: 0.62rem;
+    padding: 0 2px;
+    font-size: 0.64rem;
+  }
+
+  .waveform-context-hud {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .waveform-context-detail {
+    width: 100%;
+    white-space: normal;
   }
 }

@@ -14,14 +14,20 @@ export function beatOverlayEvents(report) {
     if (timestamp === null) return [];
     const timeSeconds = timestamp + timestampOffset;
     if (timeSeconds < 0 || timeSeconds > duration) return [];
-    return [
-      {
-        index: Number.isInteger(beat?.index) ? beat.index : index + 1,
-        timeSeconds,
-        downbeat: Boolean(beat?.downbeat),
-        strength: finite(beat?.strength),
-      },
-    ];
+
+    const event = {
+      index: Number.isInteger(beat?.index) ? beat.index : index + 1,
+      timeSeconds,
+      downbeat: Boolean(beat?.downbeat),
+      strength: finite(beat?.strength),
+    };
+    addOptionalNumber(event, "localBpm", beat?.localBpm);
+    addOptionalInteger(event, "beatInBar", beat?.beatInBar);
+    addOptionalInteger(event, "barIndex", beat?.barIndex);
+    addOptionalInteger(event, "sectionIndex", beat?.sectionIndex);
+    const sectionIdentity = nonemptyString(beat?.sectionIdentity);
+    if (sectionIdentity !== null) event.sectionIdentity = sectionIdentity;
+    return [event];
   });
 }
 
@@ -65,6 +71,54 @@ export function rhythmCoverage(report) {
   return boundedEnd > boundedStart ? { startSeconds: boundedStart, endSeconds: boundedEnd } : null;
 }
 
+export function musicalContextAtTime(
+  report,
+  requestedTimeSeconds,
+  beats = beatOverlayEvents(report),
+  sections = sectionOverlaySegments(report),
+) {
+  const duration = finite(report?.source?.durationSeconds);
+  const requested = finite(requestedTimeSeconds);
+  if (duration === null || duration <= 0 || requested === null) return null;
+
+  const timeSeconds = clamp(requested, 0, duration);
+  const coverage = rhythmCoverage(report);
+  const inCoverage =
+    coverage === null ||
+    (timeSeconds >= coverage.startSeconds - TIME_EPSILON_SECONDS &&
+      timeSeconds <= coverage.endSeconds + TIME_EPSILON_SECONDS);
+  const section = inCoverage ? sectionAtTime(sections, timeSeconds) : null;
+  const beat = inCoverage ? beatAtOrBefore(beats, timeSeconds) : null;
+  const beatsPerBar = positiveInteger(report?.rhythm?.beatsPerBar) ?? 4;
+  const bpm = finite(beat?.localBpm) ?? finite(report?.rhythm?.bpm);
+
+  return {
+    timeSeconds,
+    inCoverage,
+    sectionIndex: section?.index ?? null,
+    sectionIdentity: section?.identity ?? null,
+    sectionLabel: section?.label ?? null,
+    barIndex: positiveInteger(beat?.barIndex),
+    beatInBar: positiveInteger(beat?.beatInBar),
+    beatsPerBar,
+    bpm,
+  };
+}
+
+export function formatMusicalContext(context) {
+  if (!context) return "Musical context unavailable";
+  const time = formatTimelineTime(context.timeSeconds);
+  if (!context.inCoverage) return `${time} · Outside analyzed rhythm window`;
+
+  const parts = [];
+  const section = context.sectionIdentity ?? context.sectionLabel;
+  if (section) parts.push(`Section ${section}`);
+  if (context.barIndex !== null) parts.push(`Bar ${context.barIndex}`);
+  if (context.beatInBar !== null) parts.push(`Beat ${context.beatInBar}/${context.beatsPerBar}`);
+  if (context.bpm !== null) parts.push(`${context.bpm.toFixed(1)} BPM`);
+  return parts.length ? `${time} · ${parts.join(" · ")}` : `${time} · Rhythm analysis window`;
+}
+
 export function beatOverlayStatusText(report, events = beatOverlayEvents(report)) {
   if (!events.length) return "Beat overlay unavailable for this analysis";
   const coverage = rhythmCoverage(report);
@@ -81,11 +135,12 @@ export function sectionOverlayStatusText(report, sections = sectionOverlaySegmen
 
 function setupWaveformOverlay() {
   const waveform = document.querySelector("#waveform");
+  const player = document.querySelector("#audio-player");
   const rawJson = document.querySelector("#raw-json");
   const waveformSection = document.querySelector("#waveform-section");
   const heading = waveformSection?.querySelector(".section-heading");
   const coverageBadge = document.querySelector("#statistics-coverage");
-  if (!waveform || !rawJson || !waveformSection || !heading || !coverageBadge) return;
+  if (!waveform || !player || !rawJson || !waveformSection || !heading || !coverageBadge) return;
 
   const stage = document.createElement("div");
   stage.className = "waveform-stage";
@@ -105,6 +160,27 @@ function setupWaveformOverlay() {
   beatLayer.className = "waveform-beat-layer";
   overlayLayer.append(beatLayer);
 
+  const structureRail = document.createElement("div");
+  structureRail.className = "waveform-structure-rail";
+  structureRail.setAttribute("role", "group");
+  structureRail.setAttribute("aria-label", "Detected musical structure. Select a section to seek to its start.");
+  stage.append(structureRail);
+
+  const contextHud = document.createElement("div");
+  contextHud.id = "waveform-context-hud";
+  contextHud.className = "waveform-context-hud";
+  contextHud.setAttribute("aria-label", "Musical timeline context");
+  const contextTime = document.createElement("strong");
+  contextTime.className = "waveform-context-time";
+  const contextDetail = document.createElement("span");
+  contextDetail.className = "waveform-context-detail";
+  contextHud.append(contextTime, contextDetail);
+  stage.after(contextHud);
+
+  const describedBy = new Set((waveform.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean));
+  describedBy.add(contextHud.id);
+  waveform.setAttribute("aria-describedby", Array.from(describedBy).join(" "));
+
   const headingActions = document.createElement("div");
   headingActions.className = "waveform-heading-actions";
   coverageBadge.replaceWith(headingActions);
@@ -114,32 +190,80 @@ function setupWaveformOverlay() {
   const sectionToggle = createOverlayToggle(SECTION_TOGGLE_ID, "Section overlay");
   headingActions.append(beatToggle.label, sectionToggle.label);
 
-  const refreshReport = () => {
-    const report = parseReport(rawJson.textContent);
-    const beats = beatOverlayEvents(report);
-    const sections = sectionOverlaySegments(report);
+  const state = {
+    report: null,
+    beats: [],
+    sections: [],
+    activeSectionIndex: null,
+    pointerInspecting: false,
+    railInspecting: false,
+  };
 
-    renderBeatLayer(beatLayer, report, beats);
-    renderSectionLayer(sectionLayer, report, sections);
-    configureToggle(
-      beatToggle,
-      beats.length > 0,
-      beatOverlayStatusText(report, beats),
-      "Toggle beat and downbeat markers on the waveform.",
-    );
-    configureToggle(
-      sectionToggle,
-      sections.length > 0,
-      sectionOverlayStatusText(report, sections),
-      "Toggle detected structural sections on the waveform.",
-    );
-    syncVisibility();
+  const syncActiveSection = (sectionIndex) => {
+    if (state.activeSectionIndex === sectionIndex) return;
+    structureRail.querySelector(".waveform-section-segment.is-active")?.classList.remove("is-active");
+    state.activeSectionIndex = sectionIndex;
+    if (sectionIndex === null) return;
+    structureRail
+      .querySelector(`[data-section-index="${sectionIndex}"]`)
+      ?.classList.add("is-active");
+  };
+
+  const syncContext = (timeSeconds) => {
+    const context = musicalContextAtTime(state.report, timeSeconds, state.beats, state.sections);
+    renderContextHud(contextTime, contextDetail, context);
+    syncActiveSection(context?.sectionIndex ?? null);
+  };
+
+  const restorePlaybackContext = () => {
+    if (!state.pointerInspecting && !state.railInspecting) syncContext(Number(player.currentTime) || 0);
   };
 
   const syncVisibility = () => {
     beatLayer.hidden = beatToggle.input.disabled || !beatToggle.input.checked;
-    sectionLayer.hidden = sectionToggle.input.disabled || !sectionToggle.input.checked;
+    const sectionsHidden = sectionToggle.input.disabled || !sectionToggle.input.checked;
+    sectionLayer.hidden = sectionsHidden;
+    structureRail.hidden = sectionsHidden;
     overlayLayer.hidden = beatLayer.hidden && sectionLayer.hidden;
+  };
+
+  const refreshReport = () => {
+    state.report = parseReport(rawJson.textContent);
+    state.beats = beatOverlayEvents(state.report);
+    state.sections = sectionOverlaySegments(state.report);
+
+    renderBeatLayer(beatLayer, state.report, state.beats);
+    renderSectionBoundaries(sectionLayer, state.report, state.sections);
+    renderStructureRail(structureRail, state.report, state.sections, {
+      inspect: (timeSeconds) => {
+        state.railInspecting = true;
+        syncContext(timeSeconds);
+      },
+      restore: () => {
+        state.railInspecting = false;
+        restorePlaybackContext();
+      },
+      seek: (timeSeconds) => {
+        player.currentTime = timeSeconds;
+        state.railInspecting = false;
+        syncContext(timeSeconds);
+      },
+    });
+
+    configureToggle(
+      beatToggle,
+      state.beats.length > 0,
+      beatOverlayStatusText(state.report, state.beats),
+      "Toggle beat and downbeat markers on the waveform.",
+    );
+    configureToggle(
+      sectionToggle,
+      state.sections.length > 0,
+      sectionOverlayStatusText(state.report, state.sections),
+      "Toggle the musical structure rail and section boundaries.",
+    );
+    syncVisibility();
+    syncContext(Number(player.currentTime) || 0);
   };
 
   for (const control of [beatToggle, sectionToggle]) {
@@ -148,6 +272,24 @@ function setupWaveformOverlay() {
       syncVisibility();
     });
   }
+
+  waveform.addEventListener("pointermove", (event) => {
+    const duration = finite(state.report?.source?.durationSeconds);
+    const rect = waveform.getBoundingClientRect();
+    if (duration === null || duration <= 0 || rect.width <= 0) return;
+    const x = clamp((Number(event.clientX) || 0) - rect.left, 0, rect.width);
+    state.pointerInspecting = true;
+    syncContext((x / rect.width) * duration);
+  });
+
+  waveform.addEventListener("pointerleave", () => {
+    state.pointerInspecting = false;
+    restorePlaybackContext();
+  });
+  waveform.addEventListener("focus", restorePlaybackContext);
+  player.addEventListener("timeupdate", restorePlaybackContext);
+  player.addEventListener("seeked", restorePlaybackContext);
+  player.addEventListener("loadedmetadata", restorePlaybackContext);
 
   const reportObserver = new MutationObserver(refreshReport);
   reportObserver.observe(rawJson, { childList: true, characterData: true, subtree: true });
@@ -201,26 +343,85 @@ function renderBeatLayer(layer, report, events) {
   }
 }
 
-function renderSectionLayer(layer, report, sections) {
+function renderSectionBoundaries(layer, report, sections) {
   layer.replaceChildren();
   const duration = finite(report?.source?.durationSeconds);
   if (duration === null || duration <= 0 || !sections.length) return;
 
   for (const section of sections) {
-    const segment = document.createElement("span");
+    const boundary = document.createElement("span");
+    boundary.className = `waveform-section-boundary ${boundaryConfidenceClass(section.boundaryConfidence)}`;
+    boundary.style.left = `${percentage(section.startSeconds, duration)}%`;
+    boundary.dataset.sectionIndex = String(section.index);
+    if (section.boundaryConfidence !== null) {
+      boundary.dataset.boundaryConfidence = section.boundaryConfidence.toFixed(3);
+    }
+    layer.append(boundary);
+  }
+}
+
+function renderStructureRail(rail, report, sections, handlers) {
+  rail.replaceChildren();
+  const duration = finite(report?.source?.durationSeconds);
+  if (duration === null || duration <= 0 || !sections.length) return;
+
+  for (const section of sections) {
+    const segment = document.createElement("button");
     const tone = sectionTone(section.identity, section.index);
+    segment.type = "button";
     segment.className = `waveform-section-segment waveform-section-tone-${tone}`;
     segment.style.left = `${percentage(section.startSeconds, duration)}%`;
     segment.style.width = `${percentage(section.endSeconds - section.startSeconds, duration)}%`;
     segment.dataset.sectionIndex = String(section.index);
     segment.dataset.sectionIdentity = section.identity ?? "";
+    segment.dataset.sectionStartSeconds = String(section.startSeconds);
+    segment.dataset.sectionEndSeconds = String(section.endSeconds);
+
+    const labelText = section.identity ?? section.label;
+    const confidenceText =
+      section.boundaryConfidence === null ? "" : ` Boundary confidence ${Math.round(section.boundaryConfidence * 100)}%.`;
+    const accessibleLabel = `${labelText}, ${formatTimelineTime(section.startSeconds)} to ${formatTimelineTime(section.endSeconds)}.${confidenceText} Seek to section start.`;
+    segment.setAttribute("aria-label", accessibleLabel);
+    segment.title = accessibleLabel;
 
     const label = document.createElement("span");
     label.className = "waveform-section-label";
-    label.textContent = section.identity ?? section.label;
+    label.textContent = labelText;
     segment.append(label);
-    layer.append(segment);
+
+    const inspectTime = Math.min(section.endSeconds, section.startSeconds + TIME_EPSILON_SECONDS);
+    segment.addEventListener("pointerenter", () => handlers.inspect(inspectTime));
+    segment.addEventListener("pointerleave", handlers.restore);
+    segment.addEventListener("focus", () => handlers.inspect(inspectTime));
+    segment.addEventListener("blur", handlers.restore);
+    segment.addEventListener("click", () => handlers.seek(section.startSeconds));
+    rail.append(segment);
   }
+}
+
+function renderContextHud(timeNode, detailNode, context) {
+  if (!context) {
+    timeNode.textContent = "—";
+    detailNode.textContent = "Musical context unavailable";
+    detailNode.classList.remove("is-outside");
+    return;
+  }
+
+  timeNode.textContent = formatTimelineTime(context.timeSeconds);
+  if (!context.inCoverage) {
+    detailNode.textContent = "Outside analyzed rhythm window";
+    detailNode.classList.add("is-outside");
+    return;
+  }
+
+  const parts = [];
+  const section = context.sectionIdentity ?? context.sectionLabel;
+  if (section) parts.push(`Section ${section}`);
+  if (context.barIndex !== null) parts.push(`Bar ${context.barIndex}`);
+  if (context.beatInBar !== null) parts.push(`Beat ${context.beatInBar}/${context.beatsPerBar}`);
+  if (context.bpm !== null) parts.push(`${context.bpm.toFixed(1)} BPM`);
+  detailNode.textContent = parts.join(" · ") || "Rhythm analysis window";
+  detailNode.classList.remove("is-outside");
 }
 
 function rhythmTimestampOffset(report) {
@@ -229,6 +430,35 @@ function rhythmTimestampOffset(report) {
   const timestampsAlreadyAbsolute =
     analysisStart !== null && Math.abs(analysisStart - coverageStart) <= TIME_EPSILON_SECONDS;
   return timestampsAlreadyAbsolute || (analysisStart !== null && analysisStart > 0) ? 0 : coverageStart;
+}
+
+function sectionAtTime(sections, timeSeconds) {
+  return (
+    sections.find((section, index) => {
+      const finalSection = index === sections.length - 1;
+      return (
+        timeSeconds >= section.startSeconds - TIME_EPSILON_SECONDS &&
+        (timeSeconds < section.endSeconds - TIME_EPSILON_SECONDS ||
+          (finalSection && timeSeconds <= section.endSeconds + TIME_EPSILON_SECONDS))
+      );
+    }) ?? null
+  );
+}
+
+function beatAtOrBefore(beats, timeSeconds) {
+  let candidate = null;
+  for (const beat of beats) {
+    if (beat.timeSeconds > timeSeconds + TIME_EPSILON_SECONDS) break;
+    candidate = beat;
+  }
+  return candidate;
+}
+
+function boundaryConfidenceClass(confidence) {
+  if (confidence === null) return "waveform-section-boundary-unknown";
+  if (confidence >= 0.75) return "waveform-section-boundary-strong";
+  if (confidence >= 0.45) return "waveform-section-boundary-medium";
+  return "waveform-section-boundary-soft";
 }
 
 function sectionTone(identity, index) {
@@ -253,10 +483,25 @@ function parseReport(value) {
   }
 }
 
+function addOptionalNumber(target, key, value) {
+  const number = finite(value);
+  if (number !== null) target[key] = number;
+}
+
+function addOptionalInteger(target, key, value) {
+  const number = positiveInteger(value);
+  if (number !== null) target[key] = number;
+}
+
 function finite(value) {
   if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function positiveInteger(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : null;
 }
 
 function nonemptyString(value) {
@@ -271,6 +516,13 @@ function clamp(value, minimum, maximum) {
 
 function formatSeconds(value) {
   return `${value.toFixed(value >= 10 ? 1 : 2)} s`;
+}
+
+function formatTimelineTime(value) {
+  const total = Math.max(0, finite(value) ?? 0);
+  const minutes = Math.floor(total / 60);
+  const seconds = total - minutes * 60;
+  return `${minutes}:${seconds.toFixed(1).padStart(4, "0")}`;
 }
 
 if (typeof document !== "undefined" && typeof window !== "undefined") setupWaveformOverlay();

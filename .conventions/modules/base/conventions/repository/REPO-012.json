@@ -1,8 +1,0 @@
-{
-  "schemaVersion": 1,
-  "ruleId": "REPO-012",
-  "enforcement": {
-    "kind": "builtin",
-    "check": "symlink-boundaries"
-  }
-}

@@ -18,7 +18,6 @@ name = "audio_analysis_recognition"
 [dependencies]
 runtime-core.workspace = true
 audio-analysis-core.workspace = true
-audio-analysis-fourier.workspace = true
 model-runtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true

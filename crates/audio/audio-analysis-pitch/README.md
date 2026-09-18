@@ -21,7 +21,7 @@ let estimate = detector.estimate_samples(&samples, 48_000)?;
 
 `key::estimate_musical_key` is the music/DJ path. It does not reuse the monophonic fundamental detector. Instead it:
 
-1. computes Hann-window STFT frames through `audio-analysis-fourier`;
+1. computes Hann-window STFT frames through `audio-analysis-core::spectral`;
 2. extracts significant local spectral peaks between the configured frequency bounds;
 3. estimates the track's global tuning offset relative to A440 and corrects it before pitch-class folding;
 4. accumulates a normalized 12-bin HPCP-like chroma vector across frames; and

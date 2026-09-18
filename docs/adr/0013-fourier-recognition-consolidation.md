@@ -2,9 +2,11 @@
 
 ## Status
 
-Accepted as a compatibility plan. This decision does not move implementation,
-change a package version, deprecate a published artifact, or authorize a
-release or package-surface removal.
+Accepted. The Fourier computational portion is implemented source-first:
+reusable FFT/STFT/spectral primitives are owned by `audio-analysis-core::spectral`,
+while the Fourier package remains a compatibility/runtime surface. Recognition
+consolidation, published deprecation, releases, and package-surface removal
+remain separately gated.
 
 ## Context
 
@@ -48,7 +50,8 @@ public associated methods travel with the named type.
 
 All computational Fourier symbols have one owner because pitch, rhythm, and
 speaker recognition use the same pure in-process transform and feature
-implementation. Keeping separate copies in pitch and rhythm would spread the
+implementation. The core implementation also reuses FFT planning and scratch
+storage across each STFT frame sequence rather than rebuilding them per frame. Keeping separate copies in pitch and rhythm would spread the
 same implementation across callers. The package-specific runtime surface does
 not pass that deletion test: its only purpose is compatibility for the
 existing Fourier adapters.

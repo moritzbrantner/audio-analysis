@@ -6,7 +6,7 @@
 //! tempo seeds a locally varying tempo trajectory which then drives beat tracking,
 //! so recorded/live material is not forced onto one global period.
 
-use audio_analysis_fourier::{spectrogram, surface::complex_spectral_difference, StftConfig};
+use audio_analysis_core::spectral::{complex_spectral_difference, spectrogram, StftConfig};
 use audio_contracts::{DetectError, Result};
 
 /// Configuration for whole-track rhythm analysis.

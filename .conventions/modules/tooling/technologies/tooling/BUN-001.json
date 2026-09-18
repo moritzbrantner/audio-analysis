@@ -1,8 +1,0 @@
-{
-  "schemaVersion": 1,
-  "ruleId": "BUN-001",
-  "enforcement": {
-    "kind": "builtin",
-    "check": "bun-default"
-  }
-}

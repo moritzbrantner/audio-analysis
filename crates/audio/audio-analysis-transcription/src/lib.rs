@@ -4318,9 +4318,8 @@ fn run_whisperx_command(
         None
     };
 
-    let args = whisperx_args(source_path, &output_dir, &options, hf_token.as_deref());
-    let child = Command::new(&options.command)
-        .args(&args)
+    let mut command = whisperx_command(source_path, &output_dir, &options, hf_token.as_deref());
+    let child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -4394,11 +4393,24 @@ fn run_whisperx_command(
     })
 }
 
-fn whisperx_args(
+fn whisperx_command(
     source_path: &Path,
     output_dir: &Path,
     options: &WhisperXCommandOptions,
     hf_token: Option<&str>,
+) -> Command {
+    let mut command = Command::new(&options.command);
+    command.args(whisperx_args(source_path, output_dir, options));
+    if let Some(hf_token) = hf_token {
+        command.env("HF_TOKEN", hf_token);
+    }
+    command
+}
+
+fn whisperx_args(
+    source_path: &Path,
+    output_dir: &Path,
+    options: &WhisperXCommandOptions,
 ) -> Vec<String> {
     let mut args = vec![
         source_path.to_string_lossy().into_owned(),
@@ -4451,9 +4463,6 @@ fn whisperx_args(
         }
         if let Some(max_speakers) = options.max_speakers {
             args.extend(["--max_speakers".to_string(), max_speakers.to_string()]);
-        }
-        if let Some(hf_token) = hf_token {
-            args.extend(["--hf_token".to_string(), hf_token.to_string()]);
         }
     }
     args.extend(options.extra_args.clone());
@@ -8041,7 +8050,6 @@ mod tests {
                 return_char_alignments: true,
                 ..WhisperXCommandOptions::default()
             },
-            None,
         );
 
         assert!(args.iter().any(|arg| arg == "--no_align"));
@@ -8059,6 +8067,29 @@ mod tests {
     }
 
     #[test]
+    fn whisperx_args_keep_hugging_face_credentials_out_of_process_arguments() {
+        let command = whisperx_command(
+            Path::new("speech.wav"),
+            Path::new("out"),
+            &WhisperXCommandOptions {
+                diarize: true,
+                ..WhisperXCommandOptions::default()
+            },
+            Some("secret-token"),
+        );
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert!(!args.iter().any(|arg| arg == "--hf_token"));
+        assert!(!args.iter().any(|arg| arg == "secret-token"));
+        assert!(command.get_envs().any(|(name, value)| {
+            name == "HF_TOKEN" && value.is_some_and(|value| value == "secret-token")
+        }));
+    }
+
+    #[test]
     fn whisperx_args_include_task_translate() {
         let args = whisperx_args(
             Path::new("speech.wav"),
@@ -8067,7 +8098,6 @@ mod tests {
                 task: TranscriptionTask::Translate,
                 ..WhisperXCommandOptions::default()
             },
-            None,
         );
 
         assert!(args

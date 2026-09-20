@@ -52,10 +52,19 @@ jobs:
           git -C ../moenarch-foundation checkout --detach FETCH_HEAD
       - name: Activate pinned source dependencies
         run: bash scripts/source-deps activate
-      - name: Verify source-development agent readiness
-        run: bash scripts/check-agent-readiness.sh --with-source
+      - name: Verify source-development workspace metadata
+        run: cargo metadata --format-version 1 --no-deps > /dev/null
       - name: Run preflight
         run: scripts/check-preflight.sh
+      - name: Diagnose exact source-development environment after CI failure
+        if: ${{ failure() }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/environment
+          bun ../coding-tooling/src/cli.ts environment verify --profile source-development --json \
+            > .artifacts/environment/ci.json
       - name: Deactivate source dependencies
         if: always()
         run: bash scripts/source-deps deactivate

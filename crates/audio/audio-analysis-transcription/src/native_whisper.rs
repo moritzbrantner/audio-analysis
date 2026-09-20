@@ -764,6 +764,13 @@ fn candle_dtype_name(dtype: DType) -> &'static str {
     }
 }
 
+fn prepare_whisper_encoder_input(
+    input: Tensor,
+    model_weight_dtype: DType,
+) -> candle_core::Result<Tensor> {
+    input.to_dtype(model_weight_dtype)
+}
+
 #[allow(dead_code)]
 fn resolve_whisper_model(
     options: &CandleWhisperOptions,
@@ -1478,7 +1485,8 @@ impl CachedWhisperEncoder {
         let n_head = cfg.encoder_attention_heads;
         let conv1 = conv1d(cfg.num_mel_bins, n_state, 3, cfg1, vb.pp("conv1"))?;
         let conv2 = conv1d(n_state, n_state, 3, cfg2, vb.pp("conv2"))?;
-        let positional_embedding = sinusoids(cfg.max_source_positions, n_state, vb.device())?;
+        let positional_embedding =
+            sinusoids(cfg.max_source_positions, n_state, vb.device(), vb.dtype())?;
         let blocks = (0..cfg.encoder_layers)
             .map(|index| {
                 CachedWhisperBlock::load(n_state, n_head, false, vb.pp(format!("layers.{index}")))
@@ -1568,6 +1576,7 @@ impl CachedWhisperDecoder {
             position_offset + token_count,
             position_offset,
             x.device(),
+            x.dtype(),
         )?;
         let mut stats = CachedWhisperDecoderStats::default();
         for block in self.blocks.iter_mut() {
@@ -1715,7 +1724,12 @@ fn layer_norm(size: usize, vb: VarBuilder) -> candle_core::Result<LayerNorm> {
     Ok(LayerNorm::new(weight, bias, 1e-5))
 }
 
-fn sinusoids(length: usize, channels: usize, device: &Device) -> candle_core::Result<Tensor> {
+fn sinusoids(
+    length: usize,
+    channels: usize,
+    device: &Device,
+    dtype: DType,
+) -> candle_core::Result<Tensor> {
     let max_timescale = 10000f32;
     let log_timescale_increment = max_timescale.ln() / (channels / 2 - 1) as f32;
     let inv_timescales: Vec<_> = (0..channels / 2)
@@ -1727,7 +1741,7 @@ fn sinusoids(length: usize, channels: usize, device: &Device) -> candle_core::Re
         .unsqueeze(1)?;
     let shape = (length, channels / 2);
     let scaled_time = (arange.broadcast_as(shape)? * inv_timescales.broadcast_as(shape)?)?;
-    Tensor::cat(&[scaled_time.sin()?, scaled_time.cos()?], 1)
+    Tensor::cat(&[scaled_time.sin()?, scaled_time.cos()?], 1)?.to_dtype(dtype)
 }
 
 fn decoder_causal_mask(
@@ -1735,6 +1749,7 @@ fn decoder_causal_mask(
     key_len: usize,
     position_offset: usize,
     device: &Device,
+    dtype: DType,
 ) -> candle_core::Result<Tensor> {
     let values = (0..query_len)
         .flat_map(|query_index| {
@@ -1748,7 +1763,7 @@ fn decoder_causal_mask(
             })
         })
         .collect::<Vec<_>>();
-    Tensor::from_vec(values, (query_len, key_len), device)
+    Tensor::from_vec(values, (query_len, key_len), device)?.to_dtype(dtype)
 }
 
 struct CandleWhisperSession {
@@ -2574,12 +2589,18 @@ impl CandleWhisperSession {
                 }
             }
         }
-        Tensor::from_vec(
+        let mel = Tensor::from_vec(
             features,
             (windows.len(), n_mel, whisper::N_FRAMES),
             &self.device,
         )
-        .map_err(|error| model_output_mismatch(format!("failed to build mel tensor: {error}")))
+        .map_err(|error| model_output_mismatch(format!("failed to build mel tensor: {error}")))?;
+        prepare_whisper_encoder_input(mel, self.setup.model_weight_dtype).map_err(|error| {
+            model_output_mismatch(format!(
+                "failed to convert mel tensor to {} for Whisper encoder: {error}",
+                candle_dtype_name(self.setup.model_weight_dtype)
+            ))
+        })
     }
 
     fn tokens_to_decode_output(
@@ -5615,6 +5636,33 @@ mod tests {
             ),
             DType::F32
         );
+    }
+
+    #[test]
+    fn whisper_encoder_input_matches_fp16_model_weights() {
+        let mel = Tensor::zeros((1, 80, whisper::N_FRAMES), DType::F32, &Device::Cpu)
+            .expect("f32 mel tensor");
+
+        let prepared = prepare_whisper_encoder_input(mel, DType::F16)
+            .expect("encoder input should convert to the model weight dtype");
+
+        assert_eq!(prepared.dtype(), DType::F16);
+    }
+
+    #[test]
+    fn whisper_encoder_positional_embedding_matches_fp16_model_weights() {
+        let positional_embedding =
+            sinusoids(4, 4, &Device::Cpu, DType::F16).expect("fp16 positional embedding");
+
+        assert_eq!(positional_embedding.dtype(), DType::F16);
+    }
+
+    #[test]
+    fn whisper_decoder_causal_mask_matches_fp16_model_weights() {
+        let mask = decoder_causal_mask(2, 2, 0, &Device::Cpu, DType::F16)
+            .expect("fp16 decoder causal mask");
+
+        assert_eq!(mask.dtype(), DType::F16);
     }
 
     #[test]

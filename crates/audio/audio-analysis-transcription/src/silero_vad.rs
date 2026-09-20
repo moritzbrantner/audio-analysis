@@ -33,6 +33,12 @@ const PYANNOTE_SAMPLE_RATE: u32 = 16_000;
 const PYANNOTE_DEFAULT_WINDOW_SECONDS: f64 = 10.0;
 #[cfg(feature = "pyannote-vad")]
 const PYANNOTE_DEFAULT_STEP_RATIO: f64 = 0.1;
+// Pinned pyannote/segmentation-3.0 receptive field. The converted 10-second
+// model emits 589 frames with the same placement used by pyannote.audio.
+#[cfg(feature = "pyannote-vad")]
+const PYANNOTE_SEGMENTATION_FRAME_DURATION_SECONDS: f64 = 0.061_937_5;
+#[cfg(feature = "pyannote-vad")]
+const PYANNOTE_SEGMENTATION_FRAME_STEP_SECONDS: f64 = 0.016_875;
 #[cfg_attr(not(feature = "silero-vad"), allow(dead_code))]
 const SILERO_CONTEXT_SAMPLES: usize = 64;
 #[cfg_attr(not(feature = "silero-vad"), allow(dead_code))]
@@ -204,7 +210,8 @@ impl TranscriptionVadProvider for PyannoteVadTranscriptionProvider {
         let batch = self
             .runner
             .speech_frames(&request.audio.samples, request.audio.sample_rate)?;
-        let raw_segments = pyannote_frames_to_segments(&batch.frames, self.onset, self.offset)?;
+        let raw_segments =
+            pyannote_frames_to_segments(&batch.frames, self.onset, self.offset, self.chunk_size)?;
         let segments = merge_whisperx_vad_chunks(raw_segments, self.chunk_size)?;
         let mut diagnostics = vec![
             format!("pyannoteVadWindows={}", batch.windows),
@@ -491,6 +498,7 @@ fn pyannote_frames_to_segments(
     frames: &[PyannoteVadFrame],
     onset: f32,
     offset: f32,
+    max_duration: f64,
 ) -> Result<Vec<SpeechActivitySegment>> {
     if frames.iter().any(|frame| {
         !frame.start_seconds.is_finite()
@@ -515,30 +523,106 @@ fn pyannote_frames_to_segments(
             })
     });
 
+    let Some(first) = sorted.first().copied() else {
+        return Ok(Vec::new());
+    };
     let mut segments = Vec::new();
-    let mut active: Option<(f64, f64, f32)> = None;
-    for frame in sorted {
-        if active.is_none() {
-            if frame.score >= onset {
-                active = Some((frame.start_seconds, frame.end_seconds, frame.score));
+    let mut start = first.start_seconds;
+    let mut is_active = first.score > onset;
+    let mut active_frames = is_active.then_some(vec![first]).unwrap_or_default();
+    let mut last_timestamp = first.start_seconds;
+    for frame in sorted.into_iter().skip(1) {
+        let timestamp = frame.start_seconds;
+        if is_active {
+            if timestamp - start > max_duration {
+                let search_after = active_frames.len() / 2;
+                let cut_index = active_frames
+                    .iter()
+                    .enumerate()
+                    .skip(search_after)
+                    .min_by(|(_, left), (_, right)| left.score.total_cmp(&right.score))
+                    .map(|(index, _)| index)
+                    .unwrap_or(search_after);
+                let cut_timestamp = active_frames[cut_index].start_seconds;
+                push_pyannote_segment(
+                    &mut segments,
+                    start,
+                    cut_timestamp,
+                    &active_frames[..=cut_index],
+                )?;
+                start = cut_timestamp;
+                active_frames = active_frames.into_iter().skip(cut_index + 1).collect();
+            } else if frame.score < offset {
+                push_pyannote_segment(&mut segments, start, timestamp, &active_frames)?;
+                start = timestamp;
+                is_active = false;
+                active_frames.clear();
             }
-            continue;
+            active_frames.push(frame);
+        } else if frame.score > onset {
+            start = timestamp;
+            is_active = true;
+            active_frames.push(frame);
         }
-
-        let (start, end, score) = active.as_mut().expect("active segment");
-        if frame.score < offset {
-            segments.push(SpeechActivitySegment::new(*start, *end, *score)?);
-            active = None;
-        } else {
-            *end = (*end).max(frame.end_seconds);
-            *score = (*score).max(frame.score);
-        }
+        last_timestamp = timestamp;
     }
 
-    if let Some((start, end, score)) = active {
-        segments.push(SpeechActivitySegment::new(start, end, score)?);
+    if is_active {
+        push_pyannote_segment(&mut segments, start, last_timestamp, &active_frames)?;
     }
     Ok(segments)
+}
+
+#[cfg(any(feature = "pyannote-vad", test))]
+fn push_pyannote_segment(
+    segments: &mut Vec<SpeechActivitySegment>,
+    start: f64,
+    end: f64,
+    frames: &[PyannoteVadFrame],
+) -> Result<()> {
+    if end <= start {
+        return Ok(());
+    }
+    let score = frames.iter().map(|frame| frame.score).fold(0.0, f32::max);
+    segments.push(SpeechActivitySegment::new(start, end, score)?);
+    Ok(())
+}
+
+#[cfg(any(feature = "pyannote-vad", test))]
+fn aggregate_pyannote_scores(
+    windows: &[(usize, Vec<f32>)],
+    minimum_frame_count: usize,
+) -> Vec<f32> {
+    let frame_count = windows
+        .iter()
+        .map(|(start, scores)| start + scores.len())
+        .max()
+        .unwrap_or(0)
+        .max(minimum_frame_count);
+    let mut sums = vec![0.0_f64; frame_count];
+    let mut weights = vec![0.0_f64; frame_count];
+    for (start, scores) in windows {
+        for (index, score) in scores.iter().copied().enumerate() {
+            let weight = if scores.len() <= 1 {
+                1.0
+            } else {
+                0.54 - 0.46
+                    * (std::f64::consts::TAU * index as f64 / (scores.len() - 1) as f64).cos()
+            };
+            sums[start + index] += f64::from(score) * weight;
+            weights[start + index] += weight;
+        }
+    }
+    sums.into_iter()
+        .zip(weights)
+        .map(|(sum, weight)| {
+            if weight <= f64::EPSILON {
+                0.0
+            } else {
+                (sum / weight) as f32
+            }
+        })
+        .collect()
 }
 
 #[cfg(feature = "silero-vad")]
@@ -643,10 +727,11 @@ struct PyannoteVadModelShape {
     output_name: Option<String>,
     input_shape: Vec<usize>,
     window_samples: usize,
-    window_seconds: f64,
     step_samples: usize,
     frames: Option<usize>,
     speakers: Option<usize>,
+    frame_duration_seconds: f64,
+    frame_step_seconds: f64,
 }
 
 #[cfg(feature = "pyannote-vad")]
@@ -769,7 +854,7 @@ impl PyannoteFrameRunner for OnnxPyannoteRunner {
             )));
         }
 
-        let mut by_start = BTreeMap::<i64, PyannoteVadFrame>::new();
+        let mut score_windows = Vec::new();
         let mut windows = 0usize;
         let mut start = 0usize;
         loop {
@@ -794,16 +879,12 @@ impl PyannoteFrameRunner for OnnxPyannoteRunner {
                 runtime_onnx::first_f32_output(&outputs).map_err(pyannote_onnx_invalid)?
             };
             let window_start_seconds = start as f64 / PYANNOTE_SAMPLE_RATE as f64;
-            for frame in pyannote_output_frames(output, &self.model, window_start_seconds)? {
-                let key = (frame.start_seconds * 1_000_000.0).round() as i64;
-                by_start
-                    .entry(key)
-                    .and_modify(|existing| {
-                        existing.end_seconds = existing.end_seconds.max(frame.end_seconds);
-                        existing.score = existing.score.max(frame.score);
-                    })
-                    .or_insert(frame);
-            }
+            let global_start_frame =
+                (window_start_seconds / self.model.frame_step_seconds).round() as usize;
+            score_windows.push((
+                global_start_frame,
+                pyannote_output_scores(output, &self.model)?,
+            ));
             windows += 1;
             if end >= samples.len() {
                 break;
@@ -811,10 +892,27 @@ impl PyannoteFrameRunner for OnnxPyannoteRunner {
             start += self.model.step_samples;
         }
 
-        Ok(PyannoteFrameBatch {
-            frames: by_start.into_values().collect(),
-            windows,
-        })
+        let audio_duration_seconds = samples.len() as f64 / PYANNOTE_SAMPLE_RATE as f64;
+        let frame_offset_seconds = 0.5 * self.model.frame_duration_seconds;
+        let loose_frame_count =
+            (audio_duration_seconds / self.model.frame_step_seconds).ceil() as usize;
+        let frames = aggregate_pyannote_scores(&score_windows, loose_frame_count)
+            .into_iter()
+            .enumerate()
+            .take_while(|(frame, _)| {
+                *frame as f64 * self.model.frame_step_seconds < audio_duration_seconds
+            })
+            .map(|(frame, score)| {
+                let timestamp = frame_offset_seconds + frame as f64 * self.model.frame_step_seconds;
+                PyannoteVadFrame {
+                    start_seconds: timestamp,
+                    end_seconds: timestamp + self.model.frame_step_seconds,
+                    score,
+                }
+            })
+            .collect();
+
+        Ok(PyannoteFrameBatch { frames, windows })
     }
 }
 
@@ -1051,19 +1149,38 @@ fn pyannote_model_shape(
         .filter(|ratio| ratio.is_finite() && *ratio > 0.0)
         .unwrap_or(PYANNOTE_DEFAULT_STEP_RATIO);
     let step_samples = ((window_samples as f64 * step_ratio).round() as usize).max(1);
+    let frames = manifest_segmentation
+        .and_then(|segmentation| segmentation.frames)
+        .or_else(|| tensor_contract.and_then(|contract| contract.frame_count));
+    let canonical_segmentation = manifest
+        .and_then(|manifest| manifest.source.as_ref())
+        .is_some_and(|source| {
+            matches!(
+                source.model_id.as_str(),
+                "pyannote/segmentation-3.0" | "pyannote/speaker-diarization-community-1"
+            )
+        });
+    let fallback_frame_seconds = window_seconds / frames.unwrap_or(1).max(1) as f64;
+    let (frame_duration_seconds, frame_step_seconds) = if canonical_segmentation {
+        (
+            PYANNOTE_SEGMENTATION_FRAME_DURATION_SECONDS,
+            PYANNOTE_SEGMENTATION_FRAME_STEP_SECONDS,
+        )
+    } else {
+        (fallback_frame_seconds, fallback_frame_seconds)
+    };
     Ok(PyannoteVadModelShape {
         input_name,
         output_name,
         input_shape,
         window_samples,
-        window_seconds,
         step_samples,
-        frames: manifest_segmentation
-            .and_then(|segmentation| segmentation.frames)
-            .or_else(|| tensor_contract.and_then(|contract| contract.frame_count)),
+        frames,
         speakers: manifest_segmentation
             .and_then(|segmentation| segmentation.local_speakers)
             .or_else(|| tensor_contract.and_then(|contract| contract.local_speaker_count)),
+        frame_duration_seconds,
+        frame_step_seconds,
     })
 }
 
@@ -1084,17 +1201,39 @@ fn fixed_audio_samples(input: &runtime_onnx::OnnxIoInfo) -> Option<usize> {
     fixed_input_shape(input).and_then(|shape| shape.into_iter().rfind(|value| *value > 1))
 }
 
-#[cfg(feature = "pyannote-vad")]
+#[cfg(all(feature = "pyannote-vad", test))]
 fn pyannote_output_frames(
     output: &runtime_onnx::OnnxF32Tensor,
     model: &PyannoteVadModelShape,
     window_start_seconds: f64,
 ) -> Result<Vec<PyannoteVadFrame>> {
+    let scores = pyannote_output_scores(output, model)?;
+    let frame_offset_seconds = 0.5 * model.frame_duration_seconds;
+    Ok(scores
+        .into_iter()
+        .enumerate()
+        .map(|(frame, score)| {
+            let timestamp = window_start_seconds
+                + frame_offset_seconds
+                + frame as f64 * model.frame_step_seconds;
+            PyannoteVadFrame {
+                start_seconds: timestamp,
+                end_seconds: timestamp + model.frame_step_seconds,
+                score,
+            }
+        })
+        .collect())
+}
+
+#[cfg(feature = "pyannote-vad")]
+fn pyannote_output_scores(
+    output: &runtime_onnx::OnnxF32Tensor,
+    model: &PyannoteVadModelShape,
+) -> Result<Vec<f32>> {
     let (frames, output_classes) = pyannote_output_shape(output, model)?;
     let powerset = model
         .speakers
         .is_some_and(|speakers| is_powerset_output(speakers, output_classes));
-    let frame_seconds = model.window_seconds / frames as f64;
     let mut result = Vec::with_capacity(frames);
     for frame in 0..frames {
         let values = &output.values[frame * output_classes..(frame + 1) * output_classes];
@@ -1120,11 +1259,7 @@ fn pyannote_output_frames(
         } else {
             values.iter().copied().fold(0.0_f32, f32::max)
         };
-        result.push(PyannoteVadFrame {
-            start_seconds: window_start_seconds + frame as f64 * frame_seconds,
-            end_seconds: window_start_seconds + (frame + 1) as f64 * frame_seconds,
-            score,
-        });
+        result.push(score);
     }
     Ok(result)
 }
@@ -1560,6 +1695,100 @@ mod tests {
     }
 
     #[test]
+    fn pyannote_overlap_add_uses_hamming_weights() {
+        let scores =
+            aggregate_pyannote_scores(&[(0, vec![1.0, 1.0, 1.0]), (1, vec![0.0, 0.0, 0.0])], 4);
+
+        assert_eq!(scores.len(), 4);
+        assert!((scores[0] - 1.0).abs() < 1.0e-6);
+        assert!((scores[1] - (1.0 / 1.08)).abs() < 1.0e-6);
+        assert!((scores[2] - (0.08 / 1.08)).abs() < 1.0e-6);
+        assert!(scores[3].abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn pyannote_overlap_add_fills_uncovered_loose_crop_frames_with_zero() {
+        let scores = aggregate_pyannote_scores(&[(0, vec![1.0, 1.0])], 4);
+
+        assert_eq!(scores, vec![1.0, 1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn pyannote_binarization_min_cuts_long_speech_at_second_half_minimum() {
+        let frames = vec![
+            pyannote_frame(0.0, 1.0, 0.8),
+            pyannote_frame(1.0, 2.0, 0.7),
+            pyannote_frame(2.0, 3.0, 0.6),
+            pyannote_frame(3.0, 4.0, 0.2),
+            pyannote_frame(4.0, 5.0, 0.9),
+        ];
+
+        let segments =
+            pyannote_frames_to_segments(&frames, 0.5, 0.1, 2.5).expect("pyannote segments");
+
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0].start_seconds, 0.0);
+        assert_eq!(segments[0].end_seconds, 2.0);
+        assert_eq!(segments[1].start_seconds, 2.0);
+        assert_eq!(segments[1].end_seconds, 4.0);
+    }
+
+    #[cfg(feature = "pyannote-vad")]
+    #[test]
+    #[ignore = "requires caller-owned pyannote model and WAV fixtures"]
+    fn pyannote_real_fixture_reports_reproducible_segments() {
+        let model_path = std::env::var_os("PYANNOTE_VAD_MODEL")
+            .map(PathBuf::from)
+            .expect("PYANNOTE_VAD_MODEL");
+        let audio_path = std::env::var_os("PYANNOTE_VAD_AUDIO")
+            .map(PathBuf::from)
+            .expect("PYANNOTE_VAD_AUDIO");
+        let expected_segments = std::env::var("PYANNOTE_VAD_EXPECTED_SEGMENTS")
+            .expect("PYANNOTE_VAD_EXPECTED_SEGMENTS")
+            .parse::<usize>()
+            .expect("numeric expected segment count");
+        let mut reader = hound::WavReader::open(audio_path).expect("WAV fixture");
+        let spec = reader.spec();
+        assert_eq!(spec.sample_rate, PYANNOTE_SAMPLE_RATE);
+        assert_eq!(spec.channels, 1);
+        assert_eq!(spec.sample_format, hound::SampleFormat::Int);
+        assert_eq!(spec.bits_per_sample, 16);
+        let samples = reader
+            .samples::<i16>()
+            .map(|sample| f32::from(sample.expect("PCM sample")) / f32::from(i16::MAX))
+            .collect::<Vec<_>>();
+        eprintln!("loaded {} pyannote VAD samples", samples.len());
+        let mut provider = PyannoteVadTranscriptionProvider::from_options(
+            PyannoteVadOptions {
+                model_path,
+                input_name: None,
+                output_name: None,
+                onset: 0.5,
+                offset: 0.363,
+                chunk_size: 5.0,
+            },
+            Vec::new(),
+        )
+        .expect("pyannote provider");
+        eprintln!("loaded pyannote VAD provider");
+
+        let response = provider
+            .detect_speech(VadRequest {
+                audio: LoadedAudio {
+                    samples,
+                    sample_rate: spec.sample_rate,
+                    channels: spec.channels,
+                    source: None,
+                },
+                options: VadOptions::default(),
+            })
+            .expect("pyannote VAD");
+        eprintln!("detected {} pyannote VAD segments", response.segments.len());
+
+        assert_eq!(response.segments.len(), expected_segments);
+    }
+
+    #[test]
     fn pyannote_provider_rejects_non_finite_frames() {
         let mut provider = PyannoteVadTranscriptionProvider::new_for_runner(
             0.5,
@@ -1608,21 +1837,22 @@ mod tests {
             output_name: Some("scores".to_string()),
             input_shape: vec![1, 16_000],
             window_samples: 16_000,
-            window_seconds: 1.0,
             step_samples: 1_600,
             frames: Some(2),
             speakers: Some(2),
+            frame_duration_seconds: 0.5,
+            frame_step_seconds: 0.5,
         };
         let output = runtime_onnx::OnnxF32Tensor::new(vec![1, 2, 2], vec![0.1, 0.8, 0.4, 0.2])
             .expect("tensor");
         let frames = pyannote_output_frames(&output, &model, 3.0).expect("frames");
 
         assert_eq!(frames.len(), 2);
-        assert_eq!(frames[0].start_seconds, 3.0);
-        assert_eq!(frames[0].end_seconds, 3.5);
+        assert_eq!(frames[0].start_seconds, 3.25);
+        assert_eq!(frames[0].end_seconds, 3.75);
         assert_eq!(frames[0].score, 0.8);
-        assert_eq!(frames[1].start_seconds, 3.5);
-        assert_eq!(frames[1].end_seconds, 4.0);
+        assert_eq!(frames[1].start_seconds, 3.75);
+        assert_eq!(frames[1].end_seconds, 4.25);
         assert_eq!(frames[1].score, 0.4);
     }
 
@@ -1634,10 +1864,11 @@ mod tests {
             output_name: Some("scores".to_string()),
             input_shape: vec![1, 1, 160_000],
             window_samples: 160_000,
-            window_seconds: 10.0,
             step_samples: 16_000,
             frames: Some(2),
             speakers: Some(3),
+            frame_duration_seconds: 5.0,
+            frame_step_seconds: 5.0,
         };
         let output = runtime_onnx::OnnxF32Tensor::new(
             vec![1, 2, 7],
@@ -1715,6 +1946,8 @@ mod tests {
         assert_eq!(shape.step_samples, 12_000);
         assert_eq!(shape.frames, Some(12));
         assert_eq!(shape.speakers, Some(3));
+        assert_eq!(shape.frame_duration_seconds, 0.25);
+        assert_eq!(shape.frame_step_seconds, 0.25);
     }
 
     #[cfg(feature = "pyannote-vad")]
@@ -1730,6 +1963,10 @@ mod tests {
             Some(runtime_onnx::OnnxTensorElementType::F32),
         );
         let manifest: PyannoteVadManifest = serde_json::from_value(serde_json::json!({
+            "source": {
+                "modelId": "pyannote/segmentation-3.0",
+                "revision": "pinned"
+            },
             "tensorContract": {
                 "frameCount": 589,
                 "inputName": "waveform",
@@ -1752,6 +1989,14 @@ mod tests {
         assert_eq!(shape.step_samples, 16_000);
         assert_eq!(shape.frames, Some(589));
         assert_eq!(shape.speakers, Some(3));
+        assert_eq!(
+            shape.frame_duration_seconds,
+            PYANNOTE_SEGMENTATION_FRAME_DURATION_SECONDS
+        );
+        assert_eq!(
+            shape.frame_step_seconds,
+            PYANNOTE_SEGMENTATION_FRAME_STEP_SECONDS
+        );
     }
 
     #[cfg(feature = "pyannote-vad")]

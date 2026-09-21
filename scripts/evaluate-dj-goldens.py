@@ -38,6 +38,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 CACHE = ROOT / "target" / "dj-goldens"
 CORPUS_MANIFEST = ROOT / "tests" / "fixtures" / "dj" / "real-music-corpus.v1.json"
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+SHA1_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 BEAT_TOLERANCE_SECONDS = 0.07
 
@@ -53,6 +54,8 @@ class Fixture:
     focus: tuple[str, ...]
     source_url: str | None = None
     provenance_url: str | None = None
+    source_bytes: int | None = None
+    source_sha1: str | None = None
     reference_key: str | None = None
     reference_key_source: str | None = None
     assert_key: bool = False
@@ -153,6 +156,8 @@ def load_corpus() -> Corpus:
         provenance_url = optional_https_url(
             item.get("provenanceUrl"), f"{label}.provenanceUrl"
         )
+        source_bytes = item.get("sourceBytes")
+        source_sha1 = item.get("sourceSha1")
         reference_key = item.get("referenceKey")
         reference_key_source = item.get("referenceKeySource")
         assert_key = item.get("assertKey", False)
@@ -181,10 +186,25 @@ def load_corpus() -> Corpus:
             raise RuntimeError(f"{label}.license must be a non-empty string")
         if not isinstance(category, str) or not category.strip():
             raise RuntimeError(f"{label}.category must be a non-empty string")
-        if (source_url is None) != (provenance_url is None):
+        external_metadata = (source_url, provenance_url, source_bytes, source_sha1)
+        if any(value is not None for value in external_metadata) and any(
+            value is None for value in external_metadata
+        ):
             raise RuntimeError(
-                f"{label}.sourceUrl and {label}.provenanceUrl must be declared together"
+                f"{label} external source metadata requires sourceUrl, provenanceUrl, "
+                "sourceBytes, and sourceSha1"
             )
+        if source_bytes is not None and (
+            not isinstance(source_bytes, int)
+            or isinstance(source_bytes, bool)
+            or source_bytes <= 0
+        ):
+            raise RuntimeError(f"{label}.sourceBytes must be a positive integer")
+        if source_sha1 is not None and (
+            not isinstance(source_sha1, str)
+            or SHA1_PATTERN.fullmatch(source_sha1) is None
+        ):
+            raise RuntimeError(f"{label}.sourceSha1 must be a lowercase SHA-1 digest")
         if reference_key is not None and (
             not isinstance(reference_key, str) or not reference_key.strip()
         ):
@@ -225,6 +245,8 @@ def load_corpus() -> Corpus:
                 focus=focus,
                 source_url=source_url,
                 provenance_url=provenance_url,
+                source_bytes=source_bytes,
+                source_sha1=source_sha1,
                 reference_key=reference_key,
                 reference_key_source=reference_key_source,
                 assert_key=assert_key,
@@ -271,9 +293,9 @@ def fixture_source_url(corpus: Corpus, fixture: Fixture) -> str:
 def download_fixture(corpus: Corpus, fixture: Fixture) -> pathlib.Path:
     CACHE.mkdir(parents=True, exist_ok=True)
     path = CACHE / fixture.filename
-    if path.exists() and sha256(path) == fixture.sha256:
-        return path
     if path.exists():
+        if fixture_file_matches(path, fixture):
+            return path
         path.unlink()
     print(
         f"downloading {fixture.name} ({fixture.category}, {fixture.license})",
@@ -291,13 +313,34 @@ def download_fixture(corpus: Corpus, fixture: Fixture) -> pathlib.Path:
     with urllib.request.urlopen(request, timeout=120) as response, path.open("wb") as stream:
         while chunk := response.read(1024 * 1024):
             stream.write(chunk)
-    digest = sha256(path)
-    if digest != fixture.sha256:
+    if not fixture_file_matches(path, fixture):
+        actual_sha256 = sha256(path)
+        actual_bytes = path.stat().st_size
+        actual_sha1 = sha1(path) if fixture.source_sha1 is not None else None
         path.unlink(missing_ok=True)
         raise RuntimeError(
-            f"fixture checksum mismatch for {fixture.name}: {digest} != {fixture.sha256}"
+            f"fixture source mismatch for {fixture.name}: "
+            f"sha256={actual_sha256}, bytes={actual_bytes}, sha1={actual_sha1}"
         )
     return path
+
+
+def fixture_file_matches(path: pathlib.Path, fixture: Fixture) -> bool:
+    if sha256(path) != fixture.sha256:
+        return False
+    if fixture.source_bytes is not None and path.stat().st_size != fixture.source_bytes:
+        return False
+    if fixture.source_sha1 is not None and sha1(path) != fixture.source_sha1:
+        return False
+    return True
+
+
+def sha1(path: pathlib.Path) -> str:
+    digest = hashlib.sha1()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def sha256(path: pathlib.Path) -> str:
@@ -553,6 +596,8 @@ def main() -> int:
                             "fixture": fixture.name,
                             "sourceUrl": fixture.source_url,
                             "provenanceUrl": fixture.provenance_url,
+                            "sourceBytes": fixture.source_bytes,
+                            "sourceSha1": fixture.source_sha1,
                         }
                         for fixture in corpus.fixtures
                         if fixture.source_url is not None
@@ -582,6 +627,8 @@ def main() -> int:
             "sha256": fixture.sha256,
             "sourceUrl": fixture_source_url(corpus, fixture),
             "provenanceUrl": fixture.provenance_url,
+            "sourceBytes": fixture.source_bytes,
+            "sourceSha1": fixture.source_sha1,
             "referenceKey": fixture.reference_key,
             "referenceKeySource": fixture.reference_key_source,
             "assertKey": fixture.assert_key,

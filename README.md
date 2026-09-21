@@ -37,7 +37,7 @@ python3 -m pip install librosa==1.0.0
 python3 scripts/evaluate-dj-goldens.py
 ```
 
-Analyzer disagreement remains evidence rather than ground truth. Coverage completeness means the declared scenario families are represented; it does not by itself establish Mixxx-class accuracy.
+Analyzer disagreement remains evidence rather than ground truth. Analyzer-derived key references declare their source and remain non-gating unless a fixture explicitly enables `assertKey` against an independently justified reference. Coverage completeness means the declared scenario families are represented; it does not by itself establish Mixxx-class accuracy.
 
 ## Development surface
 

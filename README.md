@@ -30,11 +30,12 @@ The cheap metadata gate does not download audio:
 bun run check:dj-corpus
 ```
 
-The full evaluator downloads the checksum-pinned corpus and compares the Rust whole-track analysis with librosa, and with Essentia when it is installed:
+The full evaluator downloads the checksum-pinned corpus and compares the Rust whole-track analysis with librosa, and with Essentia when it is installed. It supports focused diagnosis with `--fixture <name>`; the `DJ Real Music Evidence` workflow exposes the same optional fixture input and otherwise runs the complete corpus manually rather than on every PR.
 
 ```text
 python3 -m pip install librosa==1.0.0
 python3 scripts/evaluate-dj-goldens.py
+python3 scripts/evaluate-dj-goldens.py --fixture beethoven-pathetique-adagio-modulation
 ```
 
 Analyzer disagreement remains evidence rather than ground truth. Analyzer-derived key references declare their source and remain non-gating unless a fixture explicitly enables `assertKey` against an independently justified reference. Coverage completeness means the declared scenario families are represented; it does not by itself establish Mixxx-class accuracy.

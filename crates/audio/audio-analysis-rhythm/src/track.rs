@@ -252,6 +252,7 @@ pub fn analyze_rhythm_track(
         &features.novelty,
         &tempo_path,
     );
+    let representative_bpm = summarize_tempo_map_bpm(&tempo_map, selected.bpm);
     let (phase, downbeat_confidence) = infer_downbeat_phase(
         &beat_frames,
         &features.novelty,
@@ -293,7 +294,7 @@ pub fn analyze_rhythm_track(
         .clamp(0.0, 1.0);
 
     Ok(TrackRhythmAnalysis {
-        bpm: Some(selected.bpm),
+        bpm: Some(representative_bpm),
         confidence,
         tempo_candidates: candidates,
         beats,
@@ -1050,6 +1051,41 @@ fn build_tempo_map(
         .collect()
 }
 
+fn summarize_tempo_map_bpm(tempo_map: &[TempoPoint], fallback_bpm: f32) -> f32 {
+    const MIN_DRIFT_POINTS: usize = 8;
+    const MIN_DRIFT_RATIO: f32 = 1.15;
+
+    if tempo_map.len() < MIN_DRIFT_POINTS {
+        return fallback_bpm;
+    }
+
+    let mut bpms = tempo_map
+        .iter()
+        .filter_map(|point| {
+            (point.bpm.is_finite() && point.bpm > 0.0).then_some(point.bpm)
+        })
+        .collect::<Vec<_>>();
+    if bpms.len() < MIN_DRIFT_POINTS {
+        return fallback_bpm;
+    }
+
+    bpms.sort_by(f32::total_cmp);
+    let trim = (bpms.len() / 10).min((bpms.len() - 1) / 2);
+    let trimmed = &bpms[trim..bpms.len() - trim];
+    let low = trimmed[0];
+    let high = trimmed[trimmed.len() - 1];
+    if high / low < MIN_DRIFT_RATIO {
+        return fallback_bpm;
+    }
+
+    let middle = trimmed.len() / 2;
+    if trimmed.len() % 2 == 0 {
+        (trimmed[middle - 1] + trimmed[middle]) * 0.5
+    } else {
+        trimmed[middle]
+    }
+}
+
 fn mean_at_frames(values: &[f32], frames: &[usize]) -> f32 {
     if frames.is_empty() {
         return 0.0;
@@ -1348,6 +1384,39 @@ mod tests {
         let map = build_tempo_map(&frames, &timestamps, &novelty);
         assert_eq!(map.len(), frames.len());
         assert!(map.last().unwrap().bpm > map.first().unwrap().bpm + 20.0);
+    }
+
+    #[test]
+    fn stable_tempo_summary_preserves_global_candidate() {
+        let tempo_map = (0..16)
+            .map(|index| TempoPoint {
+                timestamp_seconds: index as f64 * 0.5,
+                bpm: 120.0 + (index % 3) as f32 - 1.0,
+                confidence: 0.8,
+            })
+            .collect::<Vec<_>>();
+
+        let summary = summarize_tempo_map_bpm(&tempo_map, 120.0);
+        assert!((summary - 120.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn drifting_tempo_summary_uses_robust_trajectory_median() {
+        let mut tempo_map = (0..21)
+            .map(|index| TempoPoint {
+                timestamp_seconds: index as f64 * 0.5,
+                bpm: 80.0 + index as f32 * 2.0,
+                confidence: 0.8,
+            })
+            .collect::<Vec<_>>();
+        tempo_map.push(TempoPoint {
+            timestamp_seconds: 11.0,
+            bpm: 220.0,
+            confidence: 0.1,
+        });
+
+        let summary = summarize_tempo_map_bpm(&tempo_map, 72.0);
+        assert!(summary > 96.0 && summary < 105.0, "summary={summary}");
     }
 
     #[test]

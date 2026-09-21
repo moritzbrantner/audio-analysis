@@ -205,6 +205,7 @@ def coverage_summary(corpus: Corpus) -> dict[str, Any]:
         "complete": not missing,
     }
 
+
 def download_fixture(corpus: Corpus, fixture: Fixture) -> pathlib.Path:
     CACHE.mkdir(parents=True, exist_ok=True)
     path = CACHE / fixture.filename

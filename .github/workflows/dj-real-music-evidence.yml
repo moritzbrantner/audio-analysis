@@ -2,6 +2,11 @@ name: DJ Real Music Evidence
 
 on:
   workflow_dispatch:
+    inputs:
+      fixture:
+        description: Optional single fixture name for focused diagnosis
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -27,9 +32,15 @@ jobs:
       - name: Install pinned reference analyzer
         run: python3 -m pip install --disable-pip-version-check librosa==1.0.0
       - name: Evaluate real-music DJ corpus
+        env:
+          DJ_FIXTURE: ${{ inputs.fixture }}
         run: |
           mkdir -p target/dj-goldens/real-music
-          python3 scripts/evaluate-dj-goldens.py > target/dj-goldens/real-music/report.json
+          args=()
+          if test -n "$DJ_FIXTURE"; then
+            args+=(--fixture "$DJ_FIXTURE")
+          fi
+          python3 scripts/evaluate-dj-goldens.py "${args[@]}" > target/dj-goldens/real-music/report.json
       - name: Summarize failed evidence
         if: failure()
         run: |

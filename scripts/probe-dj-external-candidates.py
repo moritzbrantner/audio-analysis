@@ -26,6 +26,13 @@ CANDIDATES = (
         "expectedSha1": "db4b96c98b402749712adf5b138899f7761b30da",
         "expectedSize": 8_397_939,
     },
+    {
+        "name": "beethoven-pathetique-adagio",
+        "sourceUrl": "https://upload.wikimedia.org/wikipedia/commons/6/63/Beethoven%2C_Sonata_No._8_in_C_Minor_Pathetique%2C_Op._13_-_II._Adagio_cantabile.ogg",
+        "provenanceUrl": "https://commons.wikimedia.org/wiki/File:Beethoven,_Sonata_No._8_in_C_Minor_Pathetique,_Op._13_-_II._Adagio_cantabile.ogg",
+        "expectedSha1": "d3f818a65106beef18368a64c3fdbbb3ee3df2c3",
+        "expectedSize": 7_450_009,
+    },
 )
 
 

@@ -241,6 +241,17 @@ def load_corpus() -> Corpus:
     )
 
 
+def select_fixtures(corpus: Corpus, names: list[str]) -> tuple[Fixture, ...]:
+    if not names:
+        return corpus.fixtures
+    requested = set(names)
+    known = {fixture.name for fixture in corpus.fixtures}
+    unknown = sorted(requested - known)
+    if unknown:
+        raise RuntimeError(f"unknown DJ corpus fixtures: {unknown}")
+    return tuple(fixture for fixture in corpus.fixtures if fixture.name in requested)
+
+
 def coverage_summary(corpus: Corpus) -> dict[str, Any]:
     covered_set = {tag for fixture in corpus.fixtures for tag in fixture.coverage}
     covered = [tag for tag in corpus.required_coverage if tag in covered_set]
@@ -510,9 +521,16 @@ def main() -> int:
         action="store_true",
         help="validate corpus metadata and report coverage without downloading audio",
     )
+    parser.add_argument(
+        "--fixture",
+        action="append",
+        default=[],
+        help="evaluate only the named fixture; may be repeated",
+    )
     args = parser.parse_args()
     corpus = load_corpus()
     coverage = coverage_summary(corpus)
+    selected_fixtures = select_fixtures(corpus, args.fixture)
 
     if args.check_manifest:
         print(
@@ -526,6 +544,7 @@ def main() -> int:
                         "audioRoot": corpus.audio_root,
                     },
                     "fixtureCount": len(corpus.fixtures),
+                    "selectedFixtureCount": len(selected_fixtures),
                     "externalFixtureCount": sum(
                         fixture.source_url is not None for fixture in corpus.fixtures
                     ),
@@ -547,7 +566,7 @@ def main() -> int:
 
     reports: list[dict[str, Any]] = []
     failures: list[str] = []
-    for fixture in corpus.fixtures:
+    for fixture in selected_fixtures:
         path = download_fixture(corpus, fixture)
         rust = rust_analysis(path)
         librosa = librosa_analysis(path)
@@ -608,6 +627,7 @@ def main() -> int:
             "manifest": str(CORPUS_MANIFEST.relative_to(ROOT)),
             "sourceRepository": corpus.source_repository,
             "sourceRevision": corpus.source_revision,
+            "selectedFixtures": [fixture.name for fixture in selected_fixtures],
         },
         "aggregate": aggregate_metrics(reports, coverage),
         "fixtures": reports,

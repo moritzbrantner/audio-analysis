@@ -30,6 +30,7 @@ import subprocess
 import sys
 import urllib.request
 from dataclasses import dataclass
+from urllib.parse import urlparse
 from typing import Any
 
 
@@ -50,6 +51,8 @@ class Fixture:
     category: str
     coverage: tuple[str, ...]
     focus: tuple[str, ...]
+    source_url: str | None = None
+    provenance_url: str | None = None
     reference_key: str | None = None
     assert_tempo: bool = False
 
@@ -85,6 +88,17 @@ def string_list(
     if len(set(value)) != len(value):
         raise RuntimeError(f"{label} must not contain duplicates")
     return tuple(value)
+
+
+def optional_https_url(value: Any, label: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError(f"{label} must be null or a non-empty HTTPS URL")
+    parsed = urlparse(value)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise RuntimeError(f"{label} must use an absolute HTTPS URL")
+    return value
 
 
 def load_corpus() -> Corpus:
@@ -133,6 +147,10 @@ def load_corpus() -> Corpus:
         checksum = item.get("sha256")
         license_name = item.get("license")
         category = item.get("category")
+        source_url = optional_https_url(item.get("sourceUrl"), f"{label}.sourceUrl")
+        provenance_url = optional_https_url(
+            item.get("provenanceUrl"), f"{label}.provenanceUrl"
+        )
         reference_key = item.get("referenceKey")
         assert_tempo = item.get("assertTempo", False)
 
@@ -159,6 +177,10 @@ def load_corpus() -> Corpus:
             raise RuntimeError(f"{label}.license must be a non-empty string")
         if not isinstance(category, str) or not category.strip():
             raise RuntimeError(f"{label}.category must be a non-empty string")
+        if (source_url is None) != (provenance_url is None):
+            raise RuntimeError(
+                f"{label}.sourceUrl and {label}.provenanceUrl must be declared together"
+            )
         if reference_key is not None and (
             not isinstance(reference_key, str) or not reference_key.strip()
         ):
@@ -183,6 +205,8 @@ def load_corpus() -> Corpus:
                 category=category,
                 coverage=coverage,
                 focus=focus,
+                source_url=source_url,
+                provenance_url=provenance_url,
                 reference_key=reference_key,
                 assert_tempo=assert_tempo,
             )
@@ -209,6 +233,10 @@ def coverage_summary(corpus: Corpus) -> dict[str, Any]:
     }
 
 
+def fixture_source_url(corpus: Corpus, fixture: Fixture) -> str:
+    return fixture.source_url or f"{corpus.raw_audio_root}/{fixture.filename}"
+
+
 def download_fixture(corpus: Corpus, fixture: Fixture) -> pathlib.Path:
     CACHE.mkdir(parents=True, exist_ok=True)
     path = CACHE / fixture.filename
@@ -220,7 +248,18 @@ def download_fixture(corpus: Corpus, fixture: Fixture) -> pathlib.Path:
         f"downloading {fixture.name} ({fixture.category}, {fixture.license})",
         file=sys.stderr,
     )
-    urllib.request.urlretrieve(f"{corpus.raw_audio_root}/{fixture.filename}", path)
+    request = urllib.request.Request(
+        fixture_source_url(corpus, fixture),
+        headers={
+            "User-Agent": (
+                "audio-analysis-dj-corpus/1.0 "
+                "(+https://github.com/moritzbrantner/audio-analysis)"
+            )
+        },
+    )
+    with urllib.request.urlopen(request, timeout=120) as response, path.open("wb") as stream:
+        while chunk := response.read(1024 * 1024):
+            stream.write(chunk)
     digest = sha256(path)
     if digest != fixture.sha256:
         path.unlink(missing_ok=True)
@@ -425,6 +464,18 @@ def main() -> int:
                         "audioRoot": corpus.audio_root,
                     },
                     "fixtureCount": len(corpus.fixtures),
+                    "externalFixtureCount": sum(
+                        fixture.source_url is not None for fixture in corpus.fixtures
+                    ),
+                    "externalSources": [
+                        {
+                            "fixture": fixture.name,
+                            "sourceUrl": fixture.source_url,
+                            "provenanceUrl": fixture.provenance_url,
+                        }
+                        for fixture in corpus.fixtures
+                        if fixture.source_url is not None
+                    ],
                     "coverage": coverage,
                 },
                 indent=2,
@@ -447,6 +498,8 @@ def main() -> int:
             "focus": fixture.focus,
             "license": fixture.license,
             "sha256": fixture.sha256,
+            "sourceUrl": fixture_source_url(corpus, fixture),
+            "provenanceUrl": fixture.provenance_url,
             "referenceKey": fixture.reference_key,
             "metrics": metrics,
             "rust": rust,

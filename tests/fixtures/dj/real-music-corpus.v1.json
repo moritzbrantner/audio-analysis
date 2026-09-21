@@ -33,7 +33,9 @@
         "half-double-time"
       ],
       "referenceKey": "G major",
-      "assertTempo": true
+      "assertTempo": true,
+      "referenceKeySource": "Essentia 2.1b6.dev1389",
+      "assertKey": false
     },
     {
       "name": "brahms-hungarian-dance-5",
@@ -51,7 +53,9 @@
         "weak-percussion"
       ],
       "referenceKey": "G minor",
-      "assertTempo": true
+      "assertTempo": true,
+      "referenceKeySource": "Essentia 2.1b6.dev1389",
+      "assertKey": false
     },
     {
       "name": "sweet-waltz",

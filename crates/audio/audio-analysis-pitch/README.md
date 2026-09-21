@@ -71,7 +71,7 @@ external-tool execution.
 
 ## Golden evaluation
 
-`scripts/evaluate-dj-goldens.py` cross-checks the full-file Rust path against librosa and, when installed, Essentia. The pinned key references are captured from Essentia 2.1b6.dev1389 on the exact reusable fixture bytes (Choice: G major; the Brahms fixture: G minor), so the real-music evaluation does not depend on filename metadata or only on synthesized tones.
+`scripts/evaluate-dj-goldens.py` cross-checks the full-file Rust path against librosa and, when installed, Essentia. The stored Essentia 2.1b6.dev1389 key outputs (Choice: G major; Brahms: G minor) are comparison evidence on exact reusable fixture bytes, not independent ground truth. They remain non-gating unless a fixture explicitly opts into an authoritative key assertion.
 
 ## Related crates
 

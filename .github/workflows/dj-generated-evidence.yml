@@ -45,21 +45,11 @@ jobs:
           import hashlib
           import json
           import pathlib
+          import time
+          import urllib.error
           import urllib.request
 
           candidates = [
-              (
-                  "MJ-PIA_-_Solarity_(Acid-Techno).ogg",
-                  "https://upload.wikimedia.org/wikipedia/commons/8/8c/MJ-PIA_-_Solarity_%28Acid-Techno%29.ogg",
-                  12384633,
-                  "d5c8e8c04940d529c3660eb050fafd49536b1fbc",
-              ),
-              (
-                  "CrookedCop.ogg",
-                  "https://upload.wikimedia.org/wikipedia/commons/0/09/CrookedCop.ogg",
-                  2199445,
-                  "0bb18ce8e794ce3bc85283f65b8768e0339b707b",
-              ),
               (
                   "Mini_light_trance_mix_by_Dream_Vilanculos.ogg",
                   "https://upload.wikimedia.org/wikipedia/commons/b/bb/Mini_light_trance_mix_by_Dream_Vilanculos.ogg",
@@ -75,15 +65,25 @@ jobs:
           ]
           root = pathlib.Path("target/dj-goldens/wikimedia-probe")
           root.mkdir(parents=True, exist_ok=True)
-          for filename, url, expected_bytes, expected_sha1 in candidates:
+          for candidate_index, (filename, url, expected_bytes, expected_sha1) in enumerate(candidates):
               target = root / filename
-              request = urllib.request.Request(
-                  url,
-                  headers={"User-Agent": "audio-analysis-dj-corpus/1.0"},
-              )
-              with urllib.request.urlopen(request, timeout=120) as response, target.open("wb") as stream:
-                  while chunk := response.read(1024 * 1024):
-                      stream.write(chunk)
+              for attempt in range(5):
+                  try:
+                      request = urllib.request.Request(
+                          url,
+                          headers={
+                              "User-Agent": "audio-analysis-dj-corpus/1.0 (+https://github.com/moritzbrantner/audio-analysis)"
+                          },
+                      )
+                      with urllib.request.urlopen(request, timeout=120) as response, target.open("wb") as stream:
+                          while chunk := response.read(1024 * 1024):
+                              stream.write(chunk)
+                      break
+                  except urllib.error.HTTPError as error:
+                      if error.code != 429 or attempt == 4:
+                          raise
+                      target.unlink(missing_ok=True)
+                      time.sleep(3 * (attempt + 1))
               payload = target.read_bytes()
               actual = {
                   "filename": filename,
@@ -94,6 +94,8 @@ jobs:
               print("WIKIMEDIA_PROBE " + json.dumps(actual, sort_keys=True))
               if actual["bytes"] != expected_bytes or actual["sha1"] != expected_sha1:
                   raise SystemExit(f"published Wikimedia identity mismatch for {filename}: {actual}")
+              if candidate_index + 1 < len(candidates):
+                  time.sleep(3)
           PY
       - name: Prepare pinned asset-tooling source
         run: |

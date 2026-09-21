@@ -383,6 +383,36 @@ def beat_f1(
     return 2.0 * precision * recall / (precision + recall)
 
 
+def key_timeline_metrics(rust: dict[str, Any]) -> dict[str, Any]:
+    timeline = rust.get("keyTimeline")
+    timeline = timeline if isinstance(timeline, list) else []
+    segments = rust.get("keySegments")
+    segments = segments if isinstance(segments, list) else []
+    labels = sorted(
+        {
+            label
+            for segment in segments
+            if isinstance(segment, dict)
+            for key in [segment.get("key")]
+            if isinstance(key, dict)
+            for label in [key.get("label")]
+            if isinstance(label, str) and label
+        }
+    )
+    known_windows = sum(
+        isinstance(window, dict) and isinstance(window.get("key"), dict)
+        for window in timeline
+    )
+    return {
+        "keyTimelineWindowCount": len(timeline),
+        "keyTimelineKnownWindowCount": known_windows,
+        "keySegmentCount": len(segments),
+        "distinctStableKeys": labels,
+        "keyBoundaryAligned": rust.get("keyBoundaryAligned") is True,
+        "keyTimelineComplete": rust.get("keyTimelineComplete") is True,
+    }
+
+
 def fixture_metrics(
     rust: dict[str, Any],
     librosa: dict[str, Any],
@@ -398,6 +428,7 @@ def fixture_metrics(
         "tempoEquivalentEssentia": None,
         "tempoErrorEssentiaPercent": None,
         "beatF1Essentia": None,
+        **key_timeline_metrics(rust),
     }
     if rust_bpm is not None:
         error = tempo_relative_error(float(rust_bpm), librosa["tempo"])
@@ -427,10 +458,19 @@ def aggregate_metrics(
         (report["rust"].get("key") or {}).get("label") == report["referenceKey"]
         for report in pinned_key_reports
     )
+    modulation_reports = [
+        report for report in reports if "modulation" in report.get("coverage", ())
+    ]
+    modulation_multi_key = sum(
+        len(report["metrics"]["distinctStableKeys"]) > 1
+        for report in modulation_reports
+    )
     return {
         "fixtureCount": len(reports),
         "categories": sorted({report["category"] for report in reports}),
         "coverage": coverage,
+        "modulationFixtureCount": len(modulation_reports),
+        "modulationFixturesWithMultipleStableKeys": modulation_multi_key,
         "tempoEquivalentLibrosa": sum(item["tempoEquivalentLibrosa"] is True for item in metrics),
         "tempoEquivalentEssentia": sum(item["tempoEquivalentEssentia"] is True for item in metrics),
         "essentiaFixtureCount": sum(report["essentia"] is not None for report in reports),

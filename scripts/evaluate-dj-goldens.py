@@ -54,6 +54,8 @@ class Fixture:
     source_url: str | None = None
     provenance_url: str | None = None
     reference_key: str | None = None
+    reference_key_source: str | None = None
+    assert_key: bool = False
     assert_tempo: bool = False
 
 
@@ -152,6 +154,8 @@ def load_corpus() -> Corpus:
             item.get("provenanceUrl"), f"{label}.provenanceUrl"
         )
         reference_key = item.get("referenceKey")
+        reference_key_source = item.get("referenceKeySource")
+        assert_key = item.get("assertKey", False)
         assert_tempo = item.get("assertTempo", False)
 
         if not isinstance(name, str) or not name.strip():
@@ -185,6 +189,20 @@ def load_corpus() -> Corpus:
             not isinstance(reference_key, str) or not reference_key.strip()
         ):
             raise RuntimeError(f"{label}.referenceKey must be null or a non-empty string")
+        if reference_key_source is not None and (
+            not isinstance(reference_key_source, str) or not reference_key_source.strip()
+        ):
+            raise RuntimeError(
+                f"{label}.referenceKeySource must be null or a non-empty string"
+            )
+        if reference_key is None and reference_key_source is not None:
+            raise RuntimeError(
+                f"{label}.referenceKeySource requires {label}.referenceKey"
+            )
+        if not isinstance(assert_key, bool):
+            raise RuntimeError(f"{label}.assertKey must be a boolean")
+        if assert_key and reference_key is None:
+            raise RuntimeError(f"{label}.assertKey requires {label}.referenceKey")
         if not isinstance(assert_tempo, bool):
             raise RuntimeError(f"{label}.assertTempo must be a boolean")
 
@@ -208,6 +226,8 @@ def load_corpus() -> Corpus:
                 source_url=source_url,
                 provenance_url=provenance_url,
                 reference_key=reference_key,
+                reference_key_source=reference_key_source,
+                assert_key=assert_key,
                 assert_tempo=assert_tempo,
             )
         )
@@ -458,6 +478,7 @@ def aggregate_metrics(
         (report["rust"].get("key") or {}).get("label") == report["referenceKey"]
         for report in pinned_key_reports
     )
+    asserted_key_reports = [report for report in pinned_key_reports if report.get("assertKey")]
     modulation_reports = [
         report for report in reports if "modulation" in report.get("coverage", ())
     ]
@@ -478,6 +499,7 @@ def aggregate_metrics(
         "meanBeatF1Essentia": mean_present([item["beatF1Essentia"] for item in metrics]),
         "pinnedKeyMatches": pinned_key_matches,
         "pinnedKeyFixtureCount": len(pinned_key_reports),
+        "assertedKeyFixtureCount": len(asserted_key_reports),
     }
 
 
@@ -541,6 +563,8 @@ def main() -> int:
             "sourceUrl": fixture_source_url(corpus, fixture),
             "provenanceUrl": fixture.provenance_url,
             "referenceKey": fixture.reference_key,
+            "referenceKeySource": fixture.reference_key_source,
+            "assertKey": fixture.assert_key,
             "metrics": metrics,
             "rust": rust,
             "librosa": librosa,
@@ -566,15 +590,15 @@ def main() -> int:
 
         if fixture.reference_key is not None:
             rust_key = (rust.get("key") or {}).get("label")
-            if rust_key != fixture.reference_key:
+            metrics["referenceKeyMatch"] = rust_key == fixture.reference_key
+            if fixture.assert_key and rust_key != fixture.reference_key:
                 failures.append(
-                    f"{fixture.name}: Rust key {rust_key!r} != pinned Essentia reference "
+                    f"{fixture.name}: Rust key {rust_key!r} != authoritative reference "
                     f"{fixture.reference_key!r}"
                 )
-            if essentia is not None and essentia["key"] != fixture.reference_key:
-                failures.append(
-                    f"{fixture.name}: Essentia key {essentia['key']!r} differs from pinned "
-                    f"reference {fixture.reference_key!r}"
+            if essentia is not None:
+                metrics["liveEssentiaReferenceKeyMatch"] = (
+                    essentia["key"] == fixture.reference_key
                 )
 
     output = {

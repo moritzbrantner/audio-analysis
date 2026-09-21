@@ -20,4 +20,5 @@ jobs:
         with:
           bun-version: 1.4.0
       - run: bun run check:structure
+      - run: bun run check:dj-corpus
       - run: cargo metadata --locked --format-version 1 --no-deps

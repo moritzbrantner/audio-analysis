@@ -9,7 +9,7 @@ on:
       - "crates/audio/audio-analysis-rhythm/**"
       - "scripts/evaluate-dj-generated-fixture.py"
       - "scripts/generate-dj-asset-tooling-fixture.mjs"
-      - "scripts/probe-dj-external-candidates.py"
+      - "scripts/evaluate-dj-goldens.py"
       - "tests/fixtures/dj/**"
   workflow_dispatch:
 
@@ -22,7 +22,7 @@ env:
 jobs:
   evidence:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Check out audio-analysis
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -40,8 +40,6 @@ jobs:
           sudo apt-get install --yes ffmpeg
           ffmpeg -version | head -n 1
           ffprobe -version | head -n 1
-      - name: Probe external DJ corpus candidates
-        run: python3 scripts/probe-dj-external-candidates.py
       - name: Prepare pinned asset-tooling source
         run: |
           git init ../asset-tooling
@@ -52,6 +50,12 @@ jobs:
           python3 scripts/evaluate-dj-generated-fixture.py
           --asset-tooling ../asset-tooling
           --report target/dj-goldens/generated/report.json
+      - name: Install pinned librosa analyzer
+        run: python3 -m pip install --disable-pip-version-check librosa==1.0.0
+      - name: Evaluate real-music DJ corpus
+        run: |
+          mkdir -p target/dj-goldens/real-music
+          python3 scripts/evaluate-dj-goldens.py > target/dj-goldens/real-music/report.json
       - name: Diagnose Rust analyzer failure
         if: failure()
         run: >-
@@ -69,5 +73,5 @@ jobs:
             target/dj-goldens/generated/asset-tooling-half-time-song-a.wav
             target/dj-goldens/generated/asset-tooling-half-time-song-a.json
             target/dj-goldens/generated/asset-tooling-half-time-song-b.json
-            target/dj-goldens/external-probe/report.json
+            target/dj-goldens/real-music/report.json
           if-no-files-found: error

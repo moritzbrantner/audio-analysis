@@ -1,0 +1,133 @@
+{
+  "schemaVersion": "audio-analysis-dj-corpus/v1",
+  "source": {
+    "repository": "librosa/data",
+    "revision": "38f4b06556fa0ff1acda5e677d8ba05d1bc0fff0",
+    "audioRoot": "audio"
+  },
+  "requiredCoverage": [
+    "electronic-dance",
+    "pop-rock",
+    "hip-hop",
+    "acoustic",
+    "classical",
+    "half-double-time",
+    "weak-intro",
+    "tempo-drift",
+    "modulation"
+  ],
+  "fixtures": [
+    {
+      "name": "choice-drum-bass",
+      "filename": "admiralbob77_-_Choice_-_Drum-bass.ogg",
+      "sha256": "ac644f9645e7c15174e4a4f8561e4d1448d7f6e59ff6b0556b310ebbced879bc",
+      "license": "CC-BY-NC-4.0",
+      "category": "electronic-dance",
+      "coverage": [
+        "electronic-dance",
+        "half-double-time"
+      ],
+      "focus": [
+        "steady-tempo",
+        "bass-heavy",
+        "half-double-time"
+      ],
+      "referenceKey": "G major",
+      "assertTempo": true
+    },
+    {
+      "name": "brahms-hungarian-dance-5",
+      "filename": "Hungarian_Dance_number_5_-_Allegro_in_F_sharp_minor_(string_orchestra).ogg",
+      "sha256": "919b48aa4cc66a0357d2cd5728664c5ab8f15c4b3469460df4b59470d35d3e49",
+      "license": "CC-PDM-1.0",
+      "category": "classical-live-tempo",
+      "coverage": [
+        "classical",
+        "tempo-drift"
+      ],
+      "focus": [
+        "tempo-drift",
+        "orchestral",
+        "weak-percussion"
+      ],
+      "referenceKey": "G minor",
+      "assertTempo": true
+    },
+    {
+      "name": "sweet-waltz",
+      "filename": "147793__setuniman__sweet-waltz-0i-22mi.ogg",
+      "sha256": "4baff8ebf1771c33618b58aa12ac3fbac1e0462894ae74247f2fb8e649d1c63b",
+      "license": "CC-BY-NC-4.0",
+      "category": "synth-waltz",
+      "coverage": [],
+      "focus": [
+        "three-beat-feel",
+        "layered-arrangement",
+        "structure-change"
+      ],
+      "assertTempo": true
+    },
+    {
+      "name": "pistachio-ragtime",
+      "filename": "442789__lena-orsa__happy-music-pistachio-ice-cream-ragtime.ogg",
+      "sha256": "9617c9be55c128177b13c20fbc52178ed482e3545094517efb30a7db2798991e",
+      "license": "CC-BY-NC-4.0",
+      "category": "acoustic-piano",
+      "coverage": [
+        "acoustic"
+      ],
+      "focus": [
+        "syncopation",
+        "weak-kick",
+        "harmonic-motion"
+      ],
+      "assertTempo": true
+    },
+    {
+      "name": "sugar-plum-fairy",
+      "filename": "Kevin_MacLeod_-_P_I_Tchaikovsky_Dance_of_the_Sugar_Plum_Fairy.ogg",
+      "sha256": "b5c1a3e26310e6618d3c124f458654cd235650fcb9db7d711302644566600484",
+      "license": "CC-BY-4.0",
+      "category": "orchestral-arrangement",
+      "coverage": [
+        "classical",
+        "weak-intro"
+      ],
+      "focus": [
+        "sparse-intro",
+        "dynamic-range",
+        "structural-contrast"
+      ],
+      "assertTempo": true
+    },
+    {
+      "name": "vibe-ace",
+      "filename": "Kevin_MacLeod_-_Vibe_Ace.ogg",
+      "sha256": "6c23aed3dd5aa57f2b1652ecab68d15d9b82ad257f54e639eb2880ca09bc118a",
+      "license": "CC-BY-4.0",
+      "category": "jazz-electronic",
+      "coverage": [],
+      "focus": [
+        "instrumentation-change",
+        "syncopation",
+        "structure-change"
+      ],
+      "assertTempo": true
+    },
+    {
+      "name": "accelerating-snare",
+      "filename": "snare-accelerate.ogg",
+      "sha256": "c4b237c784504cec7896e5c4b4e99e0774cf249129b627da94bbbea9e2c6605a",
+      "license": "CC-BY-4.0",
+      "category": "tempo-drift-stress",
+      "coverage": [
+        "tempo-drift"
+      ],
+      "focus": [
+        "tempo-drift",
+        "variable-beat-map"
+      ],
+      "assertTempo": false
+    }
+  ]
+}

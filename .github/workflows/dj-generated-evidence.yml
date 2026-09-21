@@ -49,6 +49,36 @@ jobs:
           python3 scripts/evaluate-dj-generated-fixture.py
           --asset-tooling ../asset-tooling
           --report target/dj-goldens/generated/report.json
+      - name: Probe Beethoven modulation evidence
+        run: |
+          mkdir -p target/dj-goldens/modulation
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import pathlib
+          import urllib.request
+
+          manifest = json.loads(pathlib.Path("tests/fixtures/dj/real-music-corpus.v1.json").read_text())
+          fixture = next(
+              item
+              for item in manifest["fixtures"]
+              if item["name"] == "beethoven-pathetique-adagio-modulation"
+          )
+          target = pathlib.Path("target/dj-goldens/modulation") / fixture["filename"]
+          request = urllib.request.Request(
+              fixture["sourceUrl"],
+              headers={"User-Agent": "audio-analysis-dj-corpus/1.0"},
+          )
+          with urllib.request.urlopen(request, timeout=120) as response, target.open("wb") as stream:
+              while chunk := response.read(1024 * 1024):
+                  stream.write(chunk)
+          digest = hashlib.sha256(target.read_bytes()).hexdigest()
+          if digest != fixture["sha256"]:
+              raise SystemExit(f"SHA-256 mismatch: {digest}")
+          PY
+          cargo run --locked --quiet -p moenarch-audio-analysis-rhythm --example dj_analyze -- \
+            target/dj-goldens/modulation/Beethoven_Pathetique_Adagio_cantabile.ogg \
+            > target/dj-goldens/modulation/beethoven-analysis.json
       - name: Diagnose Rust analyzer failure
         if: failure()
         run: >-
@@ -66,4 +96,5 @@ jobs:
             target/dj-goldens/generated/asset-tooling-half-time-song-a.wav
             target/dj-goldens/generated/asset-tooling-half-time-song-a.json
             target/dj-goldens/generated/asset-tooling-half-time-song-b.json
+            target/dj-goldens/modulation/beethoven-analysis.json
           if-no-files-found: error

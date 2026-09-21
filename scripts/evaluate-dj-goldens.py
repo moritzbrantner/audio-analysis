@@ -144,6 +144,7 @@ def load_corpus() -> Corpus:
 
         if (
             not isinstance(filename, str)
+            or not filename.strip()
             or pathlib.PurePosixPath(filename).name != filename
             or filename in {".", ".."}
         ):

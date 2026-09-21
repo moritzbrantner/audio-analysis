@@ -352,23 +352,34 @@ def sha256(path: pathlib.Path) -> str:
 
 
 def rust_analysis(path: pathlib.Path) -> dict[str, Any]:
+    command = [
+        "cargo",
+        "run",
+        "--locked",
+        "--quiet",
+        "-p",
+        "moenarch-audio-analysis-rhythm",
+        "--example",
+        "dj_analyze",
+        "--",
+        str(path),
+    ]
     completed = subprocess.run(
-        [
-            "cargo",
-            "run",
-            "--quiet",
-            "-p",
-            "moenarch-audio-analysis-rhythm",
-            "--example",
-            "dj_analyze",
-            "--",
-            str(path),
-        ],
+        command,
         cwd=ROOT,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
     )
+    if completed.returncode != 0:
+        if completed.stdout:
+            print(completed.stdout, file=sys.stderr, end="")
+        if completed.stderr:
+            print(completed.stderr, file=sys.stderr, end="")
+        raise RuntimeError(
+            f"Rust DJ analyzer failed for {path.name} with exit code "
+            f"{completed.returncode}"
+        )
     return json.loads(completed.stdout)
 
 

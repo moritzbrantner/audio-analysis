@@ -128,6 +128,63 @@
         "variable-beat-map"
       ],
       "assertTempo": false
+    },
+    {
+      "name": "friendly-evil-gangsta-synth-hip-hop",
+      "filename": "Friendly_Evil_Gangsta_Synth_Hip_Hop.ogg",
+      "sha256": "0a85df3432989ac391808580c5bc22af28f956bf7c365bf5b963d79cd02ac457",
+      "license": "CC0-1.0",
+      "category": "hip-hop",
+      "coverage": [
+        "hip-hop"
+      ],
+      "focus": [
+        "slow-tempo",
+        "beat-driven",
+        "dissonant-synth",
+        "instrumental"
+      ],
+      "sourceUrl": "https://upload.wikimedia.org/wikipedia/commons/1/10/Friendly_Evil_Gangsta_Synth_Hip_Hop.ogg",
+      "provenanceUrl": "https://commons.wikimedia.org/wiki/File:Friendly_Evil_Gangsta_Synth_Hip_Hop.ogg",
+      "assertTempo": false
+    },
+    {
+      "name": "pop-rock-wikiservicio",
+      "filename": "Pop_rock.ogg",
+      "sha256": "9d1df18122bea9ae56e9812ab92d7a020c899952ef970e8e881b8d4bb6c2adf6",
+      "license": "CC-BY-SA-4.0",
+      "category": "pop-rock",
+      "coverage": [
+        "pop-rock"
+      ],
+      "focus": [
+        "rock-arrangement",
+        "full-track",
+        "structure-change"
+      ],
+      "sourceUrl": "https://upload.wikimedia.org/wikipedia/commons/4/41/Pop_rock.ogg",
+      "provenanceUrl": "https://commons.wikimedia.org/wiki/File:Pop_rock.ogg",
+      "assertTempo": false
+    },
+    {
+      "name": "beethoven-pathetique-adagio-modulation",
+      "filename": "Beethoven_Pathetique_Adagio_cantabile.ogg",
+      "sha256": "96868eb250651f50522de6277528625172c8af78e238ff3b59dfc31004eb466a",
+      "license": "CC0-1.0",
+      "category": "classical-modulation",
+      "coverage": [
+        "classical",
+        "modulation"
+      ],
+      "focus": [
+        "modulation",
+        "multi-key",
+        "expressive-timing",
+        "weak-percussion"
+      ],
+      "sourceUrl": "https://upload.wikimedia.org/wikipedia/commons/6/63/Beethoven%2C_Sonata_No._8_in_C_Minor_Pathetique%2C_Op._13_-_II._Adagio_cantabile.ogg",
+      "provenanceUrl": "https://commons.wikimedia.org/wiki/File:Beethoven,_Sonata_No._8_in_C_Minor_Pathetique,_Op._13_-_II._Adagio_cantabile.ogg",
+      "assertTempo": false
     }
   ]
 }

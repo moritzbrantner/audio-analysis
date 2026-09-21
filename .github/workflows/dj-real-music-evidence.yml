@@ -1,6 +1,8 @@
 name: DJ Real Music Evidence
 
 on:
+  pull_request:
+    types: [labeled, synchronize]
   workflow_dispatch:
     inputs:
       fixture:
@@ -13,11 +15,16 @@ permissions:
 
 jobs:
   evidence:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'dj-real-music-evidence')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - name: Check out audio-analysis
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
@@ -63,6 +70,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: dj-real-music-evidence-${{ github.sha }}
+          name: dj-real-music-evidence-${{ github.event.pull_request.head.sha || github.sha }}
           path: target/dj-goldens/real-music/report.json
           if-no-files-found: error

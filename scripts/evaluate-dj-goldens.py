@@ -566,6 +566,7 @@ def main() -> int:
 
     reports: list[dict[str, Any]] = []
     failures: list[str] = []
+    disagreements: list[str] = []
     for fixture in selected_fixtures:
         path = download_fixture(corpus, fixture)
         rust = rust_analysis(path)
@@ -591,30 +592,39 @@ def main() -> int:
         }
         reports.append(report)
 
-        if fixture.assert_tempo:
-            rust_bpm = rust.get("rhythm", {}).get("bpm")
-            if rust_bpm is None or not tempo_equivalent(float(rust_bpm), librosa["tempo"]):
-                failures.append(
-                    f"{fixture.name}: Rust BPM {rust_bpm} is not equivalent to "
-                    f"librosa BPM {librosa['tempo']:.3f}"
-                )
-            if essentia is not None and (
-                rust_bpm is None
-                or not tempo_equivalent(float(rust_bpm), essentia["tempo"])
-            ):
-                failures.append(
-                    f"{fixture.name}: Rust BPM {rust_bpm} is not equivalent to "
-                    f"Essentia BPM {essentia['tempo']:.3f}"
-                )
+        rust_bpm = rust.get("rhythm", {}).get("bpm")
+        if metrics["tempoEquivalentLibrosa"] is False:
+            message = (
+                f"{fixture.name}: Rust BPM {rust_bpm} differs from "
+                f"librosa BPM {librosa['tempo']:.3f} beyond octave-equivalent tolerance"
+            )
+            if fixture.assert_tempo:
+                failures.append(message)
+            else:
+                disagreements.append(message)
+        if essentia is not None and metrics["tempoEquivalentEssentia"] is False:
+            message = (
+                f"{fixture.name}: Rust BPM {rust_bpm} differs from "
+                f"Essentia BPM {essentia['tempo']:.3f} beyond octave-equivalent tolerance"
+            )
+            if fixture.assert_tempo:
+                failures.append(message)
+            else:
+                disagreements.append(message)
 
         if fixture.reference_key is not None:
             rust_key = (rust.get("key") or {}).get("label")
             metrics["referenceKeyMatch"] = rust_key == fixture.reference_key
-            if fixture.assert_key and rust_key != fixture.reference_key:
-                failures.append(
-                    f"{fixture.name}: Rust key {rust_key!r} != authoritative reference "
+            if rust_key != fixture.reference_key:
+                message = (
+                    f"{fixture.name}: Rust key {rust_key!r} differs from "
+                    f"{fixture.reference_key_source or 'stored'} reference "
                     f"{fixture.reference_key!r}"
                 )
+                if fixture.assert_key:
+                    failures.append(message)
+                else:
+                    disagreements.append(message)
             if essentia is not None:
                 metrics["liveEssentiaReferenceKeyMatch"] = (
                     essentia["key"] == fixture.reference_key
@@ -631,6 +641,7 @@ def main() -> int:
         },
         "aggregate": aggregate_metrics(reports, coverage),
         "fixtures": reports,
+        "disagreements": disagreements,
         "failures": failures,
     }
     print(json.dumps(output, indent=2))

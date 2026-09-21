@@ -22,7 +22,7 @@ The script builds the core, Fourier, pitch, and rhythm WASM adapters and assembl
 
 ## DJ acceptance evidence
 
-The DJ acceptance corpus is declared in `tests/fixtures/dj/real-music-corpus.v1.json`. The repository-level pinned `librosa/data` source remains the default for existing fixtures; external fixtures may override the audio `sourceUrl`, but must also declare a human-auditable `provenanceUrl`. Every downloaded file is accepted only when its SHA-256 matches the manifest.
+The DJ acceptance corpus is declared in `tests/fixtures/dj/real-music-corpus.v1.json`. The repository-level pinned `librosa/data` source remains the default for existing fixtures; external fixtures may override the audio `sourceUrl`, but must also declare a human-auditable, revision-pinned `provenanceUrl` plus the source-published byte length and SHA-1. Every downloaded file is accepted only when its SHA-256 and, for external fixtures, those independent source metadata pins all match the manifest.
 
 The cheap metadata gate does not download audio:
 

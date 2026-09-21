@@ -20,6 +20,25 @@ bash scripts/build-pages.sh
 
 The script builds the core, Fourier, pitch, and rhythm WASM adapters and assembles the static artifact under `_site/`.
 
+## DJ acceptance evidence
+
+The DJ acceptance corpus is declared in `tests/fixtures/dj/real-music-corpus.v1.json`. The repository-level pinned `librosa/data` source remains the default for existing fixtures; external fixtures may override the audio `sourceUrl`, but must also declare a human-auditable `provenanceUrl`. Every downloaded file is accepted only when its SHA-256 matches the manifest.
+
+The cheap metadata gate does not download audio:
+
+```text
+bun run check:dj-corpus
+```
+
+The full evaluator downloads the checksum-pinned corpus and compares the Rust whole-track analysis with librosa, and with Essentia when it is installed:
+
+```text
+python3 -m pip install librosa==1.0.0
+python3 scripts/evaluate-dj-goldens.py
+```
+
+Analyzer disagreement remains evidence rather than ground truth. Coverage completeness means the declared scenario families are represented; it does not by itself establish Mixxx-class accuracy.
+
 ## Development surface
 
 The repository still retains the reviewed historical package inventory for compatibility, but ordinary development is intentionally smaller. The capability library crates are the Cargo workspace `default-members`; per-capability CLI, server, WASM, and app packages are compatibility shells and are not the default feature-development surface.

@@ -18,9 +18,11 @@ as evidence rather than manufacturing ground truth from filenames or titles.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import pathlib
+import re
 import statistics
 import subprocess
 import sys
@@ -31,8 +33,9 @@ from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CACHE = ROOT / "target" / "dj-goldens"
-DATA_REVISION = "38f4b06556fa0ff1acda5e677d8ba05d1bc0fff0"
-RAW_AUDIO_ROOT = f"https://raw.githubusercontent.com/librosa/data/{DATA_REVISION}/audio"
+CORPUS_MANIFEST = ROOT / "tests" / "fixtures" / "dj" / "real-music-corpus.v1.json"
+SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 BEAT_TOLERANCE_SECONDS = 0.07
 
 
@@ -43,85 +46,166 @@ class Fixture:
     sha256: str
     license: str
     category: str
+    coverage: tuple[str, ...]
     focus: tuple[str, ...]
     reference_key: str | None = None
     assert_tempo: bool = False
 
+
+@dataclass(frozen=True)
+class Corpus:
+    source_repository: str
+    source_revision: str
+    audio_root: str
+    required_coverage: tuple[str, ...]
+    fixtures: tuple[Fixture, ...]
+
     @property
-    def url(self) -> str:
-        return f"{RAW_AUDIO_ROOT}/{self.filename}"
+    def raw_audio_root(self) -> str:
+        return (
+            f"https://raw.githubusercontent.com/{self.source_repository}/"
+            f"{self.source_revision}/{self.audio_root}"
+        )
 
 
-FIXTURES = (
-    Fixture(
-        name="choice-drum-bass",
-        filename="admiralbob77_-_Choice_-_Drum-bass.ogg",
-        sha256="ac644f9645e7c15174e4a4f8561e4d1448d7f6e59ff6b0556b310ebbced879bc",
-        license="CC-BY-NC-4.0",
-        category="electronic-dance",
-        focus=("steady-tempo", "bass-heavy", "half-double-time"),
-        reference_key="G major",
-        assert_tempo=True,
-    ),
-    Fixture(
-        name="brahms-hungarian-dance-5",
-        filename="Hungarian_Dance_number_5_-_Allegro_in_F_sharp_minor_(string_orchestra).ogg",
-        sha256="919b48aa4cc66a0357d2cd5728664c5ab8f15c4b3469460df4b59470d35d3e49",
-        license="CC-PDM-1.0",
-        category="classical-live-tempo",
-        focus=("tempo-drift", "orchestral", "weak-percussion"),
-        reference_key="G minor",
-        assert_tempo=True,
-    ),
-    Fixture(
-        name="sweet-waltz",
-        filename="147793__setuniman__sweet-waltz-0i-22mi.ogg",
-        sha256="4baff8ebf1771c33618b58aa12ac3fbac1e0462894ae74247f2fb8e649d1c63b",
-        license="CC-BY-NC-4.0",
-        category="synth-waltz",
-        focus=("three-beat-feel", "layered-arrangement", "structure-change"),
-        assert_tempo=True,
-    ),
-    Fixture(
-        name="pistachio-ragtime",
-        filename="442789__lena-orsa__happy-music-pistachio-ice-cream-ragtime.ogg",
-        sha256="9617c9be55c128177b13c20fbc52178ed482e3545094517efb30a7db2798991e",
-        license="CC-BY-NC-4.0",
-        category="acoustic-piano",
-        focus=("syncopation", "weak-kick", "harmonic-motion"),
-        assert_tempo=True,
-    ),
-    Fixture(
-        name="sugar-plum-fairy",
-        filename="Kevin_MacLeod_-_P_I_Tchaikovsky_Dance_of_the_Sugar_Plum_Fairy.ogg",
-        sha256="b5c1a3e26310e6618d3c124f458654cd235650fcb9db7d711302644566600484",
-        license="CC-BY-4.0",
-        category="orchestral-arrangement",
-        focus=("sparse-intro", "dynamic-range", "structural-contrast"),
-        assert_tempo=True,
-    ),
-    Fixture(
-        name="vibe-ace",
-        filename="Kevin_MacLeod_-_Vibe_Ace.ogg",
-        sha256="6c23aed3dd5aa57f2b1652ecab68d15d9b82ad257f54e639eb2880ca09bc118a",
-        license="CC-BY-4.0",
-        category="jazz-electronic",
-        focus=("instrumentation-change", "syncopation", "structure-change"),
-        assert_tempo=True,
-    ),
-    Fixture(
-        name="accelerating-snare",
-        filename="snare-accelerate.ogg",
-        sha256="c4b237c784504cec7896e5c4b4e99e0774cf249129b627da94bbbea9e2c6605a",
-        license="CC-BY-4.0",
-        category="tempo-drift-stress",
-        focus=("tempo-drift", "variable-beat-map"),
-        assert_tempo=False,
-    ),
-)
+def string_list(
+    value: Any,
+    label: str,
+    *,
+    allow_empty: bool = False,
+) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise RuntimeError(f"{label} must be a JSON array")
+    if not allow_empty and not value:
+        raise RuntimeError(f"{label} must not be empty")
+    if any(not isinstance(item, str) or not item.strip() for item in value):
+        raise RuntimeError(f"{label} must contain only non-empty strings")
+    if len(set(value)) != len(value):
+        raise RuntimeError(f"{label} must not contain duplicates")
+    return tuple(value)
 
 
-def download_fixture(fixture: Fixture) -> pathlib.Path:
+def load_corpus() -> Corpus:
+    payload = json.loads(CORPUS_MANIFEST.read_text(encoding="utf-8"))
+    if payload.get("schemaVersion") != "audio-analysis-dj-corpus/v1":
+        raise RuntimeError("unsupported DJ corpus manifest schema")
+
+    source = payload.get("source")
+    if not isinstance(source, dict):
+        raise RuntimeError("DJ corpus manifest source must be an object")
+    repository = source.get("repository")
+    revision = source.get("revision")
+    audio_root = source.get("audioRoot")
+    if (
+        not isinstance(repository, str)
+        or repository.count("/") != 1
+        or not all(repository.split("/"))
+    ):
+        raise RuntimeError("DJ corpus source repository must use owner/repository form")
+    if not isinstance(revision, str) or REVISION_PATTERN.fullmatch(revision) is None:
+        raise RuntimeError("DJ corpus source revision must be a full 40-character commit SHA")
+    if (
+        not isinstance(audio_root, str)
+        or not audio_root.strip("/")
+        or pathlib.PurePosixPath(audio_root).is_absolute()
+        or ".." in pathlib.PurePosixPath(audio_root).parts
+    ):
+        raise RuntimeError("DJ corpus audioRoot must be a safe relative repository path")
+
+    required_coverage = string_list(payload.get("requiredCoverage"), "requiredCoverage")
+    required_set = set(required_coverage)
+    raw_fixtures = payload.get("fixtures")
+    if not isinstance(raw_fixtures, list) or not raw_fixtures:
+        raise RuntimeError("DJ corpus manifest must contain fixtures")
+
+    fixtures: list[Fixture] = []
+    names: set[str] = set()
+    filenames: set[str] = set()
+    for index, item in enumerate(raw_fixtures):
+        label = f"fixtures[{index}]"
+        if not isinstance(item, dict):
+            raise RuntimeError(f"{label} must be an object")
+
+        name = item.get("name")
+        filename = item.get("filename")
+        checksum = item.get("sha256")
+        license_name = item.get("license")
+        category = item.get("category")
+        reference_key = item.get("referenceKey")
+        assert_tempo = item.get("assertTempo", False)
+
+        if not isinstance(name, str) or not name.strip():
+            raise RuntimeError(f"{label}.name must be a non-empty string")
+        if name in names:
+            raise RuntimeError(f"duplicate DJ corpus fixture name: {name}")
+        names.add(name)
+
+        if (
+            not isinstance(filename, str)
+            or pathlib.PurePosixPath(filename).name != filename
+            or filename in {".", ".."}
+        ):
+            raise RuntimeError(f"{label}.filename must be a plain filename")
+        if filename in filenames:
+            raise RuntimeError(f"duplicate DJ corpus filename: {filename}")
+        filenames.add(filename)
+
+        if not isinstance(checksum, str) or SHA256_PATTERN.fullmatch(checksum) is None:
+            raise RuntimeError(f"{label}.sha256 must be a lowercase SHA-256 digest")
+        if not isinstance(license_name, str) or not license_name.strip():
+            raise RuntimeError(f"{label}.license must be a non-empty string")
+        if not isinstance(category, str) or not category.strip():
+            raise RuntimeError(f"{label}.category must be a non-empty string")
+        if reference_key is not None and (
+            not isinstance(reference_key, str) or not reference_key.strip()
+        ):
+            raise RuntimeError(f"{label}.referenceKey must be null or a non-empty string")
+        if not isinstance(assert_tempo, bool):
+            raise RuntimeError(f"{label}.assertTempo must be a boolean")
+
+        coverage = string_list(item.get("coverage", []), f"{label}.coverage", allow_empty=True)
+        unknown_coverage = sorted(set(coverage) - required_set)
+        if unknown_coverage:
+            raise RuntimeError(
+                f"{label}.coverage contains undeclared requirements: {unknown_coverage}"
+            )
+        focus = string_list(item.get("focus"), f"{label}.focus")
+
+        fixtures.append(
+            Fixture(
+                name=name,
+                filename=filename,
+                sha256=checksum,
+                license=license_name,
+                category=category,
+                coverage=coverage,
+                focus=focus,
+                reference_key=reference_key,
+                assert_tempo=assert_tempo,
+            )
+        )
+
+    return Corpus(
+        source_repository=repository,
+        source_revision=revision,
+        audio_root=audio_root.strip("/"),
+        required_coverage=required_coverage,
+        fixtures=tuple(fixtures),
+    )
+
+
+def coverage_summary(corpus: Corpus) -> dict[str, Any]:
+    covered_set = {tag for fixture in corpus.fixtures for tag in fixture.coverage}
+    covered = [tag for tag in corpus.required_coverage if tag in covered_set]
+    missing = [tag for tag in corpus.required_coverage if tag not in covered_set]
+    return {
+        "required": list(corpus.required_coverage),
+        "covered": covered,
+        "missing": missing,
+        "complete": not missing,
+    }
+
+def download_fixture(corpus: Corpus, fixture: Fixture) -> pathlib.Path:
     CACHE.mkdir(parents=True, exist_ok=True)
     path = CACHE / fixture.filename
     if path.exists() and sha256(path) == fixture.sha256:
@@ -132,7 +216,7 @@ def download_fixture(fixture: Fixture) -> pathlib.Path:
         f"downloading {fixture.name} ({fixture.category}, {fixture.license})",
         file=sys.stderr,
     )
-    urllib.request.urlretrieve(fixture.url, path)
+    urllib.request.urlretrieve(f"{corpus.raw_audio_root}/{fixture.filename}", path)
     digest = sha256(path)
     if digest != fixture.sha256:
         path.unlink(missing_ok=True)
@@ -290,7 +374,10 @@ def mean_present(values: list[float | None]) -> float | None:
     return statistics.fmean(present) if present else None
 
 
-def aggregate_metrics(reports: list[dict[str, Any]]) -> dict[str, Any]:
+def aggregate_metrics(
+    reports: list[dict[str, Any]],
+    coverage: dict[str, Any],
+) -> dict[str, Any]:
     metrics = [report["metrics"] for report in reports]
     pinned_key_reports = [report for report in reports if report["referenceKey"] is not None]
     pinned_key_matches = sum(
@@ -300,6 +387,7 @@ def aggregate_metrics(reports: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "fixtureCount": len(reports),
         "categories": sorted({report["category"] for report in reports}),
+        "coverage": coverage,
         "tempoEquivalentLibrosa": sum(item["tempoEquivalentLibrosa"] is True for item in metrics),
         "tempoEquivalentEssentia": sum(item["tempoEquivalentEssentia"] is True for item in metrics),
         "essentiaFixtureCount": sum(report["essentia"] is not None for report in reports),
@@ -311,10 +399,39 @@ def aggregate_metrics(reports: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--check-manifest",
+        action="store_true",
+        help="validate corpus metadata and report coverage without downloading audio",
+    )
+    args = parser.parse_args()
+    corpus = load_corpus()
+    coverage = coverage_summary(corpus)
+
+    if args.check_manifest:
+        print(
+            json.dumps(
+                {
+                    "schemaVersion": "audio-analysis-dj-corpus-check/v1",
+                    "manifest": str(CORPUS_MANIFEST.relative_to(ROOT)),
+                    "source": {
+                        "repository": corpus.source_repository,
+                        "revision": corpus.source_revision,
+                        "audioRoot": corpus.audio_root,
+                    },
+                    "fixtureCount": len(corpus.fixtures),
+                    "coverage": coverage,
+                },
+                indent=2,
+            )
+        )
+        return 0
+
     reports: list[dict[str, Any]] = []
     failures: list[str] = []
-    for fixture in FIXTURES:
-        path = download_fixture(fixture)
+    for fixture in corpus.fixtures:
+        path = download_fixture(corpus, fixture)
         rust = rust_analysis(path)
         librosa = librosa_analysis(path)
         essentia = essentia_analysis(path)
@@ -322,6 +439,7 @@ def main() -> int:
         report = {
             "fixture": fixture.name,
             "category": fixture.category,
+            "coverage": fixture.coverage,
             "focus": fixture.focus,
             "license": fixture.license,
             "sha256": fixture.sha256,
@@ -363,13 +481,24 @@ def main() -> int:
                 )
 
     output = {
-        "schemaVersion": "audio-analysis-dj-goldens/v2",
+        "schemaVersion": "audio-analysis-dj-goldens/v3",
         "beatToleranceSeconds": BEAT_TOLERANCE_SECONDS,
-        "aggregate": aggregate_metrics(reports),
+        "corpus": {
+            "manifest": str(CORPUS_MANIFEST.relative_to(ROOT)),
+            "sourceRepository": corpus.source_repository,
+            "sourceRevision": corpus.source_revision,
+        },
+        "aggregate": aggregate_metrics(reports, coverage),
         "fixtures": reports,
         "failures": failures,
     }
     print(json.dumps(output, indent=2))
+    if coverage["missing"]:
+        print(
+            "note: DJ acceptance coverage is incomplete; missing "
+            + ", ".join(coverage["missing"]),
+            file=sys.stderr,
+        )
     if failures:
         for failure in failures:
             print(f"golden failure: {failure}", file=sys.stderr)

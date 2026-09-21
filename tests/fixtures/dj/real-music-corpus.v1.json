@@ -149,8 +149,10 @@
         "instrumental"
       ],
       "sourceUrl": "https://upload.wikimedia.org/wikipedia/commons/1/10/Friendly_Evil_Gangsta_Synth_Hip_Hop.ogg",
-      "provenanceUrl": "https://commons.wikimedia.org/wiki/File:Friendly_Evil_Gangsta_Synth_Hip_Hop.ogg",
-      "assertTempo": false
+      "provenanceUrl": "https://commons.wikimedia.org/w/index.php?title=File:Friendly_Evil_Gangsta_Synth_Hip_Hop.ogg&oldid=1261864752",
+      "assertTempo": false,
+      "sourceBytes": 8987157,
+      "sourceSha1": "4927325282f73c64855042153cfd15bb0ccab976"
     },
     {
       "name": "pop-rock-wikiservicio",
@@ -167,8 +169,10 @@
         "structure-change"
       ],
       "sourceUrl": "https://upload.wikimedia.org/wikipedia/commons/4/41/Pop_rock.ogg",
-      "provenanceUrl": "https://commons.wikimedia.org/wiki/File:Pop_rock.ogg",
-      "assertTempo": false
+      "provenanceUrl": "https://commons.wikimedia.org/w/index.php?title=File:Pop_rock.ogg&oldid=911373800",
+      "assertTempo": false,
+      "sourceBytes": 8397939,
+      "sourceSha1": "db4b96c98b402749712adf5b138899f7761b30da"
     },
     {
       "name": "beethoven-pathetique-adagio-modulation",
@@ -187,8 +191,10 @@
         "weak-percussion"
       ],
       "sourceUrl": "https://upload.wikimedia.org/wikipedia/commons/6/63/Beethoven%2C_Sonata_No._8_in_C_Minor_Pathetique%2C_Op._13_-_II._Adagio_cantabile.ogg",
-      "provenanceUrl": "https://commons.wikimedia.org/wiki/File:Beethoven,_Sonata_No._8_in_C_Minor_Pathetique,_Op._13_-_II._Adagio_cantabile.ogg",
-      "assertTempo": false
+      "provenanceUrl": "https://commons.wikimedia.org/w/index.php?title=File:Beethoven,_Sonata_No._8_in_C_Minor_Pathetique,_Op._13_-_II._Adagio_cantabile.ogg&oldid=1194461364",
+      "assertTempo": false,
+      "sourceBytes": 7450009,
+      "sourceSha1": "d3f818a65106beef18368a64c3fdbbb3ee3df2c3"
     }
   ]
 }

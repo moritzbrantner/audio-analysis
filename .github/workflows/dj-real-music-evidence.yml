@@ -29,8 +29,11 @@ jobs:
           ffmpeg -version | head -n 1
       - name: Validate corpus manifest
         run: python3 scripts/evaluate-dj-goldens.py --check-manifest
-      - name: Install pinned reference analyzer
-        run: python3 -m pip install --disable-pip-version-check librosa==1.0.0
+      - name: Install pinned reference analyzers
+        run: >-
+          python3 -m pip install --disable-pip-version-check
+          librosa==1.0.0
+          essentia==2.1b6.dev1389
       - name: Evaluate real-music DJ corpus
         env:
           DJ_FIXTURE: ${{ inputs.fixture }}

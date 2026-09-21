@@ -9,6 +9,7 @@ on:
       - "crates/audio/audio-analysis-rhythm/**"
       - "scripts/evaluate-dj-generated-fixture.py"
       - "scripts/generate-dj-asset-tooling-fixture.mjs"
+      - "scripts/probe-dj-external-candidates.py"
       - "tests/fixtures/dj/**"
   workflow_dispatch:
 
@@ -39,6 +40,8 @@ jobs:
           sudo apt-get install --yes ffmpeg
           ffmpeg -version | head -n 1
           ffprobe -version | head -n 1
+      - name: Probe external DJ corpus candidates
+        run: python3 scripts/probe-dj-external-candidates.py
       - name: Prepare pinned asset-tooling source
         run: |
           git init ../asset-tooling
@@ -66,4 +69,5 @@ jobs:
             target/dj-goldens/generated/asset-tooling-half-time-song-a.wav
             target/dj-goldens/generated/asset-tooling-half-time-song-a.json
             target/dj-goldens/generated/asset-tooling-half-time-song-b.json
+            target/dj-goldens/external-probe/report.json
           if-no-files-found: error

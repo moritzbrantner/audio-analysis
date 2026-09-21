@@ -10,8 +10,10 @@ Python requirements:
 Optional stronger cross-check:
     python -m pip install essentia
 
-The downloaded audio is stored under target/dj-goldens and never committed.
-Pinned key references were captured from Essentia 2.1b6.dev1389 against the
+Corpus metadata and coverage requirements live in the versioned DJ fixture manifest.
+Use --check-manifest for the cheap offline validation path. Downloaded audio is
+stored under target/dj-goldens and never committed. Pinned key references were
+captured from Essentia 2.1b6.dev1389 against the
 exact fixture bytes. Other fixtures deliberately retain analyzer disagreement
 as evidence rather than manufacturing ground truth from filenames or titles.
 """

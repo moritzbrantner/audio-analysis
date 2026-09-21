@@ -54,17 +54,24 @@ jobs:
       - name: Summarize failed evidence
         if: failure()
         run: |
-          if test -f target/dj-goldens/real-music/report.json; then
+          if test -s target/dj-goldens/real-music/report.json; then
             python3 - <<'PY'
           import json
           from pathlib import Path
 
-          report = json.loads(Path("target/dj-goldens/real-music/report.json").read_text())
-          print(json.dumps({
-              "aggregate": report.get("aggregate"),
-              "failures": report.get("failures"),
-          }, indent=2))
+          path = Path("target/dj-goldens/real-music/report.json")
+          try:
+              report = json.loads(path.read_text())
+          except json.JSONDecodeError as error:
+              print(f"real-music report is not valid JSON: {error}")
+          else:
+              print(json.dumps({
+                  "aggregate": report.get("aggregate"),
+                  "failures": report.get("failures"),
+              }, indent=2))
           PY
+          else
+            echo "No completed real-music JSON report was produced; inspect evaluator stderr above."
           fi
       - name: Upload real-music DJ evidence
         if: always()

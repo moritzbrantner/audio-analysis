@@ -33,7 +33,7 @@ bun run check:dj-corpus
 The full evaluator downloads the checksum-pinned corpus and compares the Rust whole-track analysis with librosa, and with Essentia when it is installed. It supports focused diagnosis with `--fixture <name>`; the `DJ Real Music Evidence` workflow exposes the same optional fixture input and otherwise runs the complete corpus manually rather than on every PR.
 
 ```text
-python3 -m pip install librosa==1.0.0
+python3 -m pip install librosa==1.0.0 essentia==2.1b6.dev1389
 python3 scripts/evaluate-dj-goldens.py
 python3 scripts/evaluate-dj-goldens.py --fixture beethoven-pathetique-adagio-modulation
 ```

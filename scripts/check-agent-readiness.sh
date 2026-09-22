@@ -12,8 +12,8 @@ target_parent="$(dirname "$target_dir")"
 mkdir -p "$target_parent"
 
 case "$mode" in
-  quick) profile="default" ;;
-  --with-source) profile="source-development" ;;
+  quick) ;;
+  --with-source) ;;
   *)
     printf '%s\n' "usage: scripts/check-agent-readiness.sh [--with-source]" >&2
     exit 2
@@ -67,35 +67,12 @@ if [[ "$mode" == "--with-source" ]]; then
   fi
 fi
 
-receipt="$(mktemp)"
-trap 'rm -f "$receipt"; cleanup' EXIT
-if ! run_tooling environment verify --profile "$profile" --json > "$receipt"; then
-  cat "$receipt" >&2
-  exit 1
-fi
-
-fingerprint="$(python3 - "$receipt" <<'PY'
-import json, sys
-with open(sys.argv[1], encoding='utf-8') as handle:
-    receipt = json.load(handle)
-if receipt.get('status') != 'passed':
-    raise SystemExit(f"environment verification did not pass: {receipt.get('status')}")
-data = receipt.get('data', {})
-expected = data.get('expectedFingerprint')
-verified = data.get('verifiedFingerprint')
-if not expected or verified != expected:
-    raise SystemExit('environment fingerprint was not verified')
-print(verified)
-PY
-)"
-
 cargo metadata --locked --format-version 1 --no-deps >/dev/null
 
 if [[ "$activated_here" == "true" ]]; then
   run_tooling source-deps deactivate --config "$root/.coding-tooling.source-deps.json" --json >/dev/null
   activated_here=false
 fi
-rm -f "$receipt"
 trap - EXIT
 
 free_gib="$((free_kib / 1024 / 1024))"

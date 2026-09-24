@@ -165,6 +165,7 @@ pub(crate) struct Wav2Vec2CtcEmission {
     pub chars: Vec<AlignedInputChar>,
     pub blank_id: usize,
     pub transcript_words: Vec<String>,
+    pub fallback_words: Vec<AlignedWord>,
     pub segment_start_seconds: f64,
     pub segment_end_seconds: f64,
     pub frame_seconds: f64,
@@ -244,16 +245,9 @@ fn align_wav2vec2_emission_segments(
     for segment in emission_segments {
         let trellis = build_ctc_trellis(&segment.emissions, &segment.token_ids, segment.blank_id)?;
         if segment.token_ids.len() > segment.emissions.len() {
-            let fallback_path = Vec::new();
-            aligned_words.extend(tokens_to_segment_words(
-                segment.segment_index,
-                &fallback_path,
-                &segment.transcript_words,
-                segment.segment_start_seconds,
-                segment.segment_end_seconds,
-                segment.frame_seconds,
-            )?);
+            aligned_words.extend(segment.fallback_words.iter().cloned());
             if return_char_alignments {
+                let fallback_path = Vec::new();
                 // The CTC evidence cannot support character timing for this segment. Preserve
                 // the characters, but keep their timing/confidence explicitly unavailable.
                 let segment_chars = tokens_to_segment_chars(
@@ -365,6 +359,8 @@ pub(crate) fn emit_wav2vec2_ctc_segments_with_load_observer(
         if transcript_words.is_empty() {
             continue;
         }
+        let fallback_words =
+            fallback_words_from_segment(segment, &transcript_words, segment_start, segment_end);
         let transcript_text = transcript_words.join(" ");
         let aligned_chars = normalize_text_to_aligned_chars(&transcript_text, &vocab)?;
         let token_ids = aligned_chars
@@ -399,6 +395,7 @@ pub(crate) fn emit_wav2vec2_ctc_segments_with_load_observer(
                 .collect(),
             blank_id: vocab.blank_id,
             transcript_words,
+            fallback_words,
             segment_start_seconds: segment_start,
             segment_end_seconds: segment_end,
             frame_seconds,
@@ -1048,6 +1045,49 @@ fn segment_words(segment: &media_core::TranscriptSegmentContract) -> Vec<String>
             .filter(|word| !word.is_empty())
             .collect()
     }
+}
+
+fn fallback_words_from_segment(
+    segment: &media_core::TranscriptSegmentContract,
+    transcript_words: &[String],
+    segment_start: f64,
+    segment_end: f64,
+) -> Vec<AlignedWord> {
+    if transcript_words.is_empty() {
+        return Vec::new();
+    }
+
+    let source_words = segment
+        .words()
+        .iter()
+        .filter(|word| !word.text.trim().is_empty())
+        .collect::<Vec<_>>();
+    let width = (segment_end - segment_start) / transcript_words.len() as f64;
+
+    transcript_words
+        .iter()
+        .enumerate()
+        .map(|(word_index, text)| {
+            let source_word = source_words.get(word_index).copied();
+            let synthetic_start = segment_start + word_index as f64 * width;
+            let start_seconds = source_word
+                .and_then(|word| word.start_seconds())
+                .unwrap_or(synthetic_start)
+                .clamp(segment_start, segment_end);
+            let end_seconds = source_word
+                .and_then(|word| word.end_seconds())
+                .unwrap_or((synthetic_start + width).min(segment_end))
+                .clamp(start_seconds, segment_end);
+            AlignedWord {
+                segment_index: segment.index,
+                word_index,
+                text: text.clone(),
+                start_seconds,
+                end_seconds,
+                confidence: source_word.and_then(|word| word.confidence()),
+            }
+        })
+        .collect()
 }
 
 fn slice_segment_samples(
@@ -1788,6 +1828,14 @@ mod tests {
             ],
             blank_id: 0,
             transcript_words: vec!["abc".to_string()],
+            fallback_words: vec![AlignedWord {
+                segment_index: 7,
+                word_index: 0,
+                text: "abc".to_string(),
+                start_seconds: 2.03,
+                end_seconds: 2.17,
+                confidence: Some(0.73),
+            }],
             segment_start_seconds: 2.0,
             segment_end_seconds: 2.2,
             frame_seconds: 0.1,
@@ -1803,9 +1851,9 @@ mod tests {
         assert_eq!(result.fallback_segment_indices, vec![7]);
         assert_eq!(result.words.len(), 1);
         assert_eq!(result.words[0].text, "abc");
-        assert_eq!(result.words[0].start_seconds, 2.0);
-        assert_eq!(result.words[0].end_seconds, 2.2);
-        assert_eq!(result.words[0].confidence, None);
+        assert_eq!(result.words[0].start_seconds, 2.03);
+        assert_eq!(result.words[0].end_seconds, 2.17);
+        assert_eq!(result.words[0].confidence, Some(0.73));
         assert_eq!(result.chars.len(), 4);
         assert_eq!(result.chars[0].character, " ");
         assert!(result
@@ -1814,6 +1862,42 @@ mod tests {
             .all(|character| character.start_seconds.is_none()
                 && character.end_seconds.is_none()
                 && character.confidence.is_none()));
+    }
+
+    #[test]
+    fn fallback_words_preserve_source_timing_and_only_fill_missing_ranges() {
+        use media_core::TranscriptWordContract;
+
+        let mut segment = TranscriptSegmentContract::new(9, "alpha beta")
+            .with_time_range(Some(3.0), Some(4.0))
+            .unwrap();
+        segment
+            .push_word(
+                TranscriptWordContract::new("alpha")
+                    .with_time_range(Some(3.10), Some(3.42))
+                    .unwrap()
+                    .with_confidence(Some(0.81))
+                    .unwrap(),
+            )
+            .unwrap();
+        segment
+            .push_word(TranscriptWordContract::new("beta"))
+            .unwrap();
+
+        let words = fallback_words_from_segment(
+            &segment,
+            &["alpha".to_string(), "beta".to_string()],
+            3.0,
+            4.0,
+        );
+
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0].start_seconds, 3.10);
+        assert_eq!(words[0].end_seconds, 3.42);
+        assert_eq!(words[0].confidence, Some(0.81));
+        assert_eq!(words[1].start_seconds, 3.5);
+        assert_eq!(words[1].end_seconds, 4.0);
+        assert_eq!(words[1].confidence, None);
     }
 
     #[test]

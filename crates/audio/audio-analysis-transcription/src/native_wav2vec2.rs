@@ -182,6 +182,7 @@ pub(crate) struct AlignedInputChar {
 pub(crate) struct NativeAlignmentResult {
     pub words: Vec<AlignedWord>,
     pub chars: Vec<AlignedChar>,
+    pub fallback_segment_indices: Vec<u64>,
 }
 
 #[allow(dead_code)]
@@ -225,10 +226,54 @@ pub(crate) fn align_wav2vec2_ctc_with_load_observer(
 ) -> Result<NativeAlignmentResult> {
     let emission_segments =
         emit_wav2vec2_ctc_segments_with_load_observer(bundle, request, device, observe_load)?;
+    align_wav2vec2_emission_segments(
+        emission_segments,
+        interpolate_method,
+        return_char_alignments,
+    )
+}
+
+fn align_wav2vec2_emission_segments(
+    emission_segments: Vec<Wav2Vec2CtcEmission>,
+    interpolate_method: AlignmentInterpolationMethod,
+    return_char_alignments: bool,
+) -> Result<NativeAlignmentResult> {
     let mut aligned_words = Vec::new();
     let mut aligned_chars = Vec::new();
+    let mut fallback_segment_indices = Vec::new();
     for segment in emission_segments {
         let trellis = build_ctc_trellis(&segment.emissions, &segment.token_ids, segment.blank_id)?;
+        if segment.token_ids.len() > segment.emissions.len() {
+            let fallback_path = Vec::new();
+            aligned_words.extend(tokens_to_segment_words(
+                segment.segment_index,
+                &fallback_path,
+                &segment.transcript_words,
+                segment.segment_start_seconds,
+                segment.segment_end_seconds,
+                segment.frame_seconds,
+            )?);
+            if return_char_alignments {
+                // The CTC evidence cannot support character timing for this segment. Preserve
+                // the characters, but keep their timing/confidence explicitly unavailable.
+                let segment_chars = tokens_to_segment_chars(
+                    segment.segment_index,
+                    &fallback_path,
+                    &segment.chars,
+                    segment.segment_start_seconds,
+                    segment.segment_end_seconds,
+                    segment.frame_seconds,
+                    AlignmentInterpolationMethod::Ignore,
+                )?;
+                aligned_chars.extend(whisperx_compatible_segment_chars(
+                    segment.segment_index,
+                    segment_chars,
+                ));
+            }
+            fallback_segment_indices.push(segment.segment_index);
+            continue;
+        }
+
         let path = backtrack_ctc(
             &trellis,
             &segment.emissions,
@@ -262,6 +307,7 @@ pub(crate) fn align_wav2vec2_ctc_with_load_observer(
     Ok(NativeAlignmentResult {
         words: aligned_words,
         chars: aligned_chars,
+        fallback_segment_indices,
     })
 }
 
@@ -1718,6 +1764,59 @@ mod tests {
     }
 
     #[test]
+    fn dense_segment_falls_back_to_segment_timing_without_failing_alignment() {
+        let segment = Wav2Vec2CtcEmission {
+            segment_index: 7,
+            emissions: vec![vec![-0.1, -5.0], vec![-0.1, -5.0]],
+            token_ids: vec![1, 1, 1],
+            chars: vec![
+                AlignedInputChar {
+                    char_index: 0,
+                    character: "a".to_string(),
+                    is_word_delimiter: false,
+                },
+                AlignedInputChar {
+                    char_index: 1,
+                    character: "b".to_string(),
+                    is_word_delimiter: false,
+                },
+                AlignedInputChar {
+                    char_index: 2,
+                    character: "c".to_string(),
+                    is_word_delimiter: false,
+                },
+            ],
+            blank_id: 0,
+            transcript_words: vec!["abc".to_string()],
+            segment_start_seconds: 2.0,
+            segment_end_seconds: 2.2,
+            frame_seconds: 0.1,
+        };
+
+        let result = align_wav2vec2_emission_segments(
+            vec![segment],
+            AlignmentInterpolationMethod::Nearest,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(result.fallback_segment_indices, vec![7]);
+        assert_eq!(result.words.len(), 1);
+        assert_eq!(result.words[0].text, "abc");
+        assert_eq!(result.words[0].start_seconds, 2.0);
+        assert_eq!(result.words[0].end_seconds, 2.2);
+        assert_eq!(result.words[0].confidence, None);
+        assert_eq!(result.chars.len(), 4);
+        assert_eq!(result.chars[0].character, " ");
+        assert!(result
+            .chars
+            .iter()
+            .all(|character| character.start_seconds.is_none()
+                && character.end_seconds.is_none()
+                && character.confidence.is_none()));
+    }
+
+    #[test]
     fn alignment_with_tiny_wav2vec2_bundle_returns_words() {
         let temp = tempfile::tempdir().unwrap();
         write_tiny_bundle(temp.path());
@@ -1736,6 +1835,7 @@ mod tests {
         assert!(result.words[0].end_seconds <= 1.0);
         assert!(result.words[0].end_seconds >= result.words[0].start_seconds);
         assert!(result.words[0].confidence.is_some());
+        assert!(result.fallback_segment_indices.is_empty());
         assert_eq!(result.chars.len(), 6);
         assert_eq!(result.chars[0].character, " ");
         assert!(result.chars[0].start_seconds.is_none());

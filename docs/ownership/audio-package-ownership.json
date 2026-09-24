@@ -1792,5 +1792,65 @@
       "temporary_boundary_violations": [],
       "wrapped_library": "moenarch-audio-generation-tts"
     }
-  ]
+  ],
+  "repository_boundary": {
+    "schema_version": 1,
+    "repository": "moritzbrantner/audio-analysis",
+    "layer": "domain",
+    "purpose": "Own reusable audio decoding, analysis, recognition, speaker, transcription, alignment, synthesis, MIDI, TTS, and thin inference adapter capabilities without owning product workflow or persistence policy.",
+    "owned_capabilities": [
+      "audio-decoding",
+      "signal-analysis",
+      "speech-recognition",
+      "voice-activity-detection",
+      "speaker-analysis-and-diarization",
+      "transcription-and-forced-alignment",
+      "source-separation",
+      "audio-synthesis",
+      "midi",
+      "text-to-speech",
+      "thin-audio-inference-adapters"
+    ],
+    "known_consumer_repositories": [
+      "moritzbrantner/media-similarity",
+      "moritzbrantner/native-whisperx",
+      "moritzbrantner/stutter-tracker",
+      "moritzbrantner/subtitle-merger",
+      "moritzbrantner/video-analysis-studio"
+    ],
+    "excluded_authorities": [
+      {
+        "authority": "application-composition",
+        "owner_layer": "application"
+      },
+      {
+        "authority": "corpus-persistence",
+        "owner_layer": "application"
+      },
+      {
+        "authority": "downstream-interpretation",
+        "owner_layer": "application"
+      },
+      {
+        "authority": "product-specific-transcription-workflows",
+        "owner_layer": "application"
+      },
+      {
+        "authority": "subtitle-editing",
+        "owner_layer": "application"
+      },
+      {
+        "authority": "visual-analysis",
+        "owner_layer": "domain"
+      },
+      {
+        "authority": "video-frame-decoding",
+        "owner_layer": "domain"
+      },
+      {
+        "authority": "shared-media-runtime-data-contracts",
+        "owner_repository": "moritzbrantner/moenarch-foundation"
+      }
+    ]
+  }
 }

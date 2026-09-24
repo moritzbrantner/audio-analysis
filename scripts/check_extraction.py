@@ -146,9 +146,17 @@ def main() -> int:
             )
 
     consumers = boundary.get("known_consumer_repositories", [])
-    if consumers != sorted(set(consumers)):
-        errors.append("known consumer repositories must be unique and sorted")
-    missing_consumers = REQUIRED_KNOWN_CONSUMERS - set(consumers)
+    if not isinstance(consumers, list) or any(
+        not isinstance(consumer, str) or not consumer
+        for consumer in consumers
+    ):
+        errors.append("known consumer repositories must be a list of non-empty repository names")
+        consumer_set: set[str] = set()
+    else:
+        consumer_set = set(consumers)
+        if consumers != sorted(consumer_set):
+            errors.append("known consumer repositories must be unique and sorted")
+    missing_consumers = REQUIRED_KNOWN_CONSUMERS - consumer_set
     if missing_consumers:
         errors.append(
             "repository ownership boundary is missing known consumers: "

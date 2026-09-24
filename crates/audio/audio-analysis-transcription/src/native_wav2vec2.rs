@@ -1070,14 +1070,14 @@ fn fallback_words_from_segment(
         .map(|(word_index, text)| {
             let source_word = source_words.get(word_index).copied();
             let synthetic_start = segment_start + word_index as f64 * width;
-            let start_seconds = source_word
-                .and_then(|word| word.start_seconds())
-                .unwrap_or(synthetic_start)
-                .clamp(segment_start, segment_end);
-            let end_seconds = source_word
-                .and_then(|word| word.end_seconds())
-                .unwrap_or((synthetic_start + width).min(segment_end))
-                .clamp(start_seconds, segment_end);
+            let synthetic_end = (synthetic_start + width).min(segment_end);
+            let (start_seconds, end_seconds) = source_word
+                .and_then(|word| word.start_seconds().zip(word.end_seconds()))
+                .map(|(start, end)| {
+                    let start = start.clamp(segment_start, segment_end);
+                    (start, end.clamp(start, segment_end))
+                })
+                .unwrap_or((synthetic_start, synthetic_end));
             AlignedWord {
                 segment_index: segment.index,
                 word_index,

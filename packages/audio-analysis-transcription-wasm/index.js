@@ -625,7 +625,7 @@ export function normalizeBrowserTranscriptionOutput(output, context = {}) {
     .filter((segment) => segment.text.length > 0);
 
   return {
-    text: rawChunks.length > 0 ? segments.map((segment) => segment.text).join(" ").trim() : text,
+    text: text || segments.map((segment) => segment.text).join(" "),
     language: null,
     segments,
     source: typeof context.source === "string" ? context.source : "browser-audio",

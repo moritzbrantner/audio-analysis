@@ -30,6 +30,12 @@ if (await supportsBrowserTranscription()) {
 }
 ```
 
+Container-demuxed browser audio should use the decoded-audio adapter. It accepts WebCodecs
+`AudioData` frames, downmixes and continuously resamples them to 16 kHz mono, then feeds the same
+bounded transcription session while honoring its `push()` backpressure. This lets a demuxer pause
+file reads and decoding whenever inference falls behind, without tying acquisition to real-time
+playback.
+
 Long-running capture should use the bounded PCM session instead of retaining an entire recording.
 The session accepts 16 kHz mono `Float32Array` chunks, runs deterministic 29-second windows with a
 5-second overlap, commits only the non-overlap timeline, and keeps at most 58 seconds of queued PCM.

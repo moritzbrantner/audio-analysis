@@ -29,8 +29,9 @@ const PCM_CAPTURE_CHUNK_FRAMES = BROWSER_SAMPLE_RATE_HZ;
 
 let wasmModulePromise;
 let transformersModulePromise;
-const transcriberPromises = new Map();
+const transcriberEntries = new Map();
 const activeModelProgress = new Map();
+let preferredModelId = DEFAULT_BROWSER_MODEL_ID;
 
 export async function init() {
   const wasmEntry = "./pkg/audio_analysis_transcription_wasm.js";
@@ -64,6 +65,10 @@ export function browserTranscriptionCapabilities() {
     modelId: DEFAULT_BROWSER_MODEL_ID,
     models: browserTranscriptionModels(),
     modelProvisioning: "browser-cache",
+    modelLifecycle: {
+      maxIdleResidentModels: 1,
+      eviction: "dispose-superseded",
+    },
     input: {
       sampleRateHz: BROWSER_SAMPLE_RATE_HZ,
       channels: 1,
@@ -215,24 +220,28 @@ export async function transcribeAudioSamples(samples, options = {}) {
   validatePcmSamples(samples);
   const model = resolveBrowserModel(options.modelId);
   const modelOptions = { ...options, modelId: model.id };
-  const transcriber = await requireTranscriber(modelOptions);
+  const lease = await acquireTranscriber(modelOptions);
 
-  emitProgress(modelOptions, {
-    stage: "transcribe",
-    message: `Transcribing captured audio locally with ${model.label} on WebGPU…`,
-  });
-  const output = await transcriber(samples, {
-    chunk_length_s: DEFAULT_WINDOW_SECONDS,
-    stride_length_s: DEFAULT_STRIDE_SECONDS,
-    return_timestamps: true,
-    task: "transcribe",
-  });
-  return normalizeBrowserTranscriptionOutput(output, {
-    durationSeconds:
-      finiteOrNull(options.durationSeconds) ?? samples.length / BROWSER_SAMPLE_RATE_HZ,
-    source: typeof options.source === "string" ? options.source : "browser-audio",
-    modelId: model.id,
-  });
+  try {
+    emitProgress(modelOptions, {
+      stage: "transcribe",
+      message: `Transcribing captured audio locally with ${model.label} on WebGPU…`,
+    });
+    const output = await lease.transcriber(samples, {
+      chunk_length_s: DEFAULT_WINDOW_SECONDS,
+      stride_length_s: DEFAULT_STRIDE_SECONDS,
+      return_timestamps: true,
+      task: "transcribe",
+    });
+    return normalizeBrowserTranscriptionOutput(output, {
+      durationSeconds:
+        finiteOrNull(options.durationSeconds) ?? samples.length / BROWSER_SAMPLE_RATE_HZ,
+      source: typeof options.source === "string" ? options.source : "browser-audio",
+      modelId: model.id,
+    });
+  } finally {
+    await lease.release();
+  }
 }
 
 export function createBrowserTranscriptionSession(options = {}) {
@@ -247,12 +256,6 @@ export function createBrowserTranscriptionSession(options = {}) {
   let windowIndex = 0;
   let closed = false;
   let drainPromise = null;
-  let transcriberReadyPromise = null;
-
-  async function ensureTranscriber() {
-    transcriberReadyPromise ??= requireTranscriber(modelOptions);
-    return transcriberReadyPromise;
-  }
 
   async function processWindow(final) {
     const length = final ? queue.length : plan.windowSamples;
@@ -261,27 +264,31 @@ export function createBrowserTranscriptionSession(options = {}) {
     const samples = queue.peek(length);
     const windowStartSeconds = absoluteStartSample / BROWSER_SAMPLE_RATE_HZ;
     const durationSeconds = samples.length / BROWSER_SAMPLE_RATE_HZ;
-    const transcriber = await ensureTranscriber();
+    const lease = await acquireTranscriber(modelOptions);
+    let output;
+    try {
+      emitProgress(options, {
+        stage: "transcribe",
+        message: final
+          ? `Transcribing final bounded audio window ${windowIndex + 1}…`
+          : `Transcribing bounded audio window ${windowIndex + 1}…`,
+        detail: {
+          windowIndex,
+          windowStartSeconds,
+          durationSeconds,
+          bufferedSeconds: queue.length / BROWSER_SAMPLE_RATE_HZ,
+        },
+      });
 
-    emitProgress(options, {
-      stage: "transcribe",
-      message: final
-        ? `Transcribing final bounded audio window ${windowIndex + 1}…`
-        : `Transcribing bounded audio window ${windowIndex + 1}…`,
-      detail: {
-        windowIndex,
-        windowStartSeconds,
-        durationSeconds,
-        bufferedSeconds: queue.length / BROWSER_SAMPLE_RATE_HZ,
-      },
-    });
-
-    const output = await transcriber(samples, {
-      chunk_length_s: plan.windowSeconds,
-      stride_length_s: 0,
-      return_timestamps: true,
-      task: "transcribe",
-    });
+      output = await lease.transcriber(samples, {
+        chunk_length_s: plan.windowSeconds,
+        stride_length_s: 0,
+        return_timestamps: true,
+        task: "transcribe",
+      });
+    } finally {
+      await lease.release();
+    }
     const normalized = normalizeBrowserTranscriptionOutput(output, {
       durationSeconds,
       offsetSeconds: windowStartSeconds,
@@ -707,11 +714,15 @@ function resolveBrowserModel(modelId) {
   return model;
 }
 
-async function requireTranscriber(options) {
+async function acquireTranscriber(options) {
   if (!(await supportsBrowserTranscription())) {
     throw new Error("WebGPU is required for browser transcription. No CPU or server fallback is used.");
   }
+
   const model = resolveBrowserModel(options.modelId);
+  preferredModelId = model.id;
+  await disposeIdleTranscribers(model.id);
+
   emitProgress(options, {
     stage: "model",
     message: `Loading ${model.label} into the browser cache…`,
@@ -727,8 +738,38 @@ async function requireTranscriber(options) {
     listeners.add(onProgress);
   }
 
+  let entry = transcriberEntries.get(model.id);
+  if (!entry) {
+    entry = {
+      activeUses: 0,
+      promise: loadTranscriber(model),
+    };
+    transcriberEntries.set(model.id, entry);
+  }
+  entry.activeUses += 1;
+
   try {
-    return await getTranscriber(model);
+    const transcriber = await entry.promise;
+    let released = false;
+    return {
+      transcriber,
+      async release() {
+        if (released) {
+          return;
+        }
+        released = true;
+        entry.activeUses -= 1;
+        if (entry.activeUses === 0 && preferredModelId !== model.id) {
+          await disposeTranscriberEntry(model.id, entry);
+        }
+      },
+    };
+  } catch (error) {
+    entry.activeUses -= 1;
+    if (transcriberEntries.get(model.id) === entry) {
+      transcriberEntries.delete(model.id);
+    }
+    throw error;
   } finally {
     if (onProgress) {
       const listeners = activeModelProgress.get(model.id);
@@ -740,31 +781,49 @@ async function requireTranscriber(options) {
   }
 }
 
-async function getTranscriber(model) {
-  let promise = transcriberPromises.get(model.id);
-  if (!promise) {
-    promise = loadTransformers().then(({ pipeline }) =>
-      pipeline("automatic-speech-recognition", model.id, {
-        device: "webgpu",
-        progress_callback: (info) => {
-          const update = {
-            stage: "model",
-            message: modelProgressMessage(info, model.label),
-            detail: info,
-          };
-          for (const listener of activeModelProgress.get(model.id) ?? []) {
-            listener(update);
-          }
-        },
-      }),
-    );
-    promise = promise.catch((error) => {
-      transcriberPromises.delete(model.id);
-      throw error;
-    });
-    transcriberPromises.set(model.id, promise);
+function loadTranscriber(model) {
+  return loadTransformers().then(({ pipeline }) =>
+    pipeline("automatic-speech-recognition", model.id, {
+      device: "webgpu",
+      progress_callback: (info) => {
+        const update = {
+          stage: "model",
+          message: modelProgressMessage(info, model.label),
+          detail: info,
+        };
+        for (const listener of activeModelProgress.get(model.id) ?? []) {
+          listener(update);
+        }
+      },
+    }),
+  );
+}
+
+async function disposeIdleTranscribers(exceptModelId) {
+  for (const [modelId, entry] of transcriberEntries) {
+    if (modelId !== exceptModelId && entry.activeUses === 0) {
+      await disposeTranscriberEntry(modelId, entry);
+    }
   }
-  return promise;
+}
+
+async function disposeTranscriberEntry(modelId, entry) {
+  if (entry.activeUses !== 0 || transcriberEntries.get(modelId) !== entry) {
+    return;
+  }
+
+  transcriberEntries.delete(modelId);
+  let transcriber;
+  try {
+    transcriber = await entry.promise;
+  } catch {
+    return;
+  }
+
+  if (typeof transcriber.dispose !== "function") {
+    throw new Error(`Browser transcription model "${modelId}" cannot release its WebGPU pipeline.`);
+  }
+  await transcriber.dispose();
 }
 
 async function loadTransformers() {

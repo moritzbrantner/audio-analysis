@@ -313,6 +313,27 @@ test("browser PCM resampler preserves continuity across decoded frame boundaries
   expect(resampler.outputSampleRateHz).toBe(16_000);
 });
 
+test("browser PCM resampler rejects out-of-band energy before 48 kHz decimation", async () => {
+  const entry = await import("../index.js");
+  const sampleRate = 48_000;
+  const frames = 4_800;
+  const tone = (frequency: number) =>
+    Float32Array.from(
+      { length: frames },
+      (_, index) => Math.sin((2 * Math.PI * frequency * index) / sampleRate),
+    );
+
+  const lowBand = entry.createBrowserPcmResampler(sampleRate).push([tone(4_000)]);
+  const outOfBand = entry.createBrowserPcmResampler(sampleRate).push([tone(12_000)]);
+  const steadyRms = (samples: Float32Array) => {
+    const steady = samples.subarray(Math.min(64, samples.length));
+    return Math.sqrt(steady.reduce((sum, sample) => sum + sample * sample, 0) / steady.length);
+  };
+
+  expect(steadyRms(lowBand)).toBeGreaterThan(0.6);
+  expect(steadyRms(outOfBand)).toBeLessThan(0.05);
+});
+
 test("browser PCM resampler handles non-integer source ratios without resetting phase", async () => {
   const entry = await import("../index.js");
   const resampler = entry.createBrowserPcmResampler(44_100);

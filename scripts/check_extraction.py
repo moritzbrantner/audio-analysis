@@ -11,6 +11,8 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 OWNERSHIP = ROOT / "docs/repository-split/package-ownership.json"
+CURRENT_OWNERSHIP = ROOT / "docs/ownership/audio-package-ownership.json"
+DEPENDENCY_ARCHITECTURE = ROOT / ".coding-tooling.dependencies.json"
 ADAPTATIONS = ROOT / "docs/repository-split/copy-adaptations.json"
 IDENTITY = ROOT / "docs/repository-split/byte-identity.json"
 EXPECTED_DIGEST = "5aa9380ee57698e24537a43f538fe61407c3ca6bbfbeb4677b0ed0d788c66d8b"
@@ -40,6 +42,33 @@ FORBIDDEN = (
     "../video-analysis-ui",
 )
 GENERATED_PARTS = {"target", "node_modules", "pkg", "dist", "coverage"}
+REQUIRED_OWNED_CAPABILITIES = {
+    "audio-decoding",
+    "signal-analysis",
+    "speech-recognition",
+    "voice-activity-detection",
+    "speaker-analysis-and-diarization",
+    "transcription-and-forced-alignment",
+    "source-separation",
+    "audio-synthesis",
+    "midi",
+    "text-to-speech",
+    "thin-audio-inference-adapters",
+}
+REQUIRED_EXCLUDED_AUTHORITIES = {
+    "application-composition",
+    "corpus-persistence",
+    "downstream-interpretation",
+    "product-specific-transcription-workflows",
+    "subtitle-editing",
+    "visual-analysis",
+    "video-frame-decoding",
+    "shared-media-runtime-data-contracts",
+}
+REQUIRED_KNOWN_CONSUMERS = {
+    "moritzbrantner/native-whisperx",
+    "moritzbrantner/subtitle-merger",
+}
 
 
 def load_json(path: Path) -> dict:
@@ -77,6 +106,93 @@ def dependency_tables(manifest: dict):
 def main() -> int:
     errors: list[str] = []
     ownership = load_json(OWNERSHIP)
+    current_ownership = load_json(CURRENT_OWNERSHIP)
+    boundary = current_ownership.get("repository_boundary", {})
+    if (
+        boundary.get("schema_version") != 1
+        or boundary.get("repository") != "moritzbrantner/audio-analysis"
+        or boundary.get("layer") != "domain"
+        or not str(boundary.get("purpose", "")).strip()
+    ):
+        errors.append("repository ownership boundary must identify audio-analysis as a domain capability owner")
+
+    owned_capabilities = set(boundary.get("owned_capabilities", []))
+    missing_owned = REQUIRED_OWNED_CAPABILITIES - owned_capabilities
+    if missing_owned:
+        errors.append(
+            "repository ownership boundary is missing owned capabilities: "
+            + ", ".join(sorted(missing_owned))
+        )
+
+    excluded_records = boundary.get("excluded_authorities", [])
+    excluded_authorities = {
+        record.get("authority")
+        for record in excluded_records
+        if isinstance(record, dict) and isinstance(record.get("authority"), str)
+    }
+    missing_excluded = REQUIRED_EXCLUDED_AUTHORITIES - excluded_authorities
+    if missing_excluded:
+        errors.append(
+            "repository ownership boundary is missing excluded authorities: "
+            + ", ".join(sorted(missing_excluded))
+        )
+    for record in excluded_records:
+        if not isinstance(record, dict) or not isinstance(record.get("authority"), str):
+            errors.append("repository ownership boundary has an invalid excluded-authority record")
+            continue
+        if "owner_layer" not in record and "owner_repository" not in record:
+            errors.append(
+                f"excluded authority {record['authority']} must declare its owner layer or repository"
+            )
+
+    consumers = boundary.get("known_consumer_repositories", [])
+    if not isinstance(consumers, list) or any(
+        not isinstance(consumer, str) or not consumer
+        for consumer in consumers
+    ):
+        errors.append("known consumer repositories must be a list of non-empty repository names")
+        consumer_set: set[str] = set()
+    else:
+        consumer_set = set(consumers)
+        if consumers != sorted(consumer_set):
+            errors.append("known consumer repositories must be unique and sorted")
+    missing_consumers = REQUIRED_KNOWN_CONSUMERS - consumer_set
+    if missing_consumers:
+        errors.append(
+            "repository ownership boundary is missing known consumers: "
+            + ", ".join(sorted(missing_consumers))
+        )
+
+    architecture = load_json(DEPENDENCY_ARCHITECTURE)
+    repository_contract = architecture.get("repository", {})
+    if repository_contract != {
+        "name": "moritzbrantner/audio-analysis",
+        "layer": "domain",
+    }:
+        errors.append("dependency architecture must keep audio-analysis in the domain layer")
+    architecture_dependencies = architecture.get("dependencies", [])
+    upward_dependencies = sorted(
+        dependency.get("repository", "<unknown>")
+        for dependency in architecture_dependencies
+        if isinstance(dependency, dict)
+        and dependency.get("layer") not in {"foundation", "tooling"}
+    )
+    if upward_dependencies:
+        errors.append(
+            "audio capability implementation depends on non-foundation repositories: "
+            + ", ".join(upward_dependencies)
+        )
+    declared_dependency_repositories = {
+        dependency.get("repository")
+        for dependency in architecture_dependencies
+        if isinstance(dependency, dict) and isinstance(dependency.get("repository"), str)
+    }
+    graph_dependencies = set(
+        architecture.get("graph", {}).get("moritzbrantner/audio-analysis", [])
+    )
+    if graph_dependencies != declared_dependency_repositories:
+        errors.append("dependency architecture graph does not match declared audio dependencies")
+
     packages = sorted(ownership.get("packages", []), key=lambda record: record.get("id", ""))
     encoded = json.dumps(packages, sort_keys=True, separators=(",", ":")).encode() + b"\n"
     digest = hashlib.sha256(encoded).hexdigest()

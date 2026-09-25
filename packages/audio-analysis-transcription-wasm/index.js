@@ -77,6 +77,7 @@ export function browserTranscriptionCapabilities() {
         "Blob",
         "Float32Array",
         "bounded Float32Array stream",
+        "WebCodecs AudioData stream",
         "caller-acquired MediaStream",
       ],
     },
@@ -84,6 +85,7 @@ export function browserTranscriptionCapabilities() {
       transcription: true,
       timedSegments: true,
       boundedPcmStreaming: true,
+      decodedAudioAdapter: true,
       mediaStreamAdapter: true,
       alignment: false,
       diarization: false,
@@ -242,6 +244,226 @@ export async function transcribeAudioSamples(samples, options = {}) {
   } finally {
     await lease.release();
   }
+}
+
+export function createBrowserPcmResampler(inputSampleRateHz) {
+  if (
+    typeof inputSampleRateHz !== "number"
+    || !Number.isFinite(inputSampleRateHz)
+    || inputSampleRateHz <= 0
+  ) {
+    throw new RangeError("Browser PCM resampling requires a positive finite input sample rate.");
+  }
+
+  const step = inputSampleRateHz / BROWSER_SAMPLE_RATE_HZ;
+  const lowPassCoefficients = createBrowserResamplerLowPass(inputSampleRateHz);
+  const filterHistory = new Float32Array(lowPassCoefficients.length);
+  let filterCursor = 0;
+  let inputCursor = 0;
+  let nextOutputPosition = 0;
+  let previousSample = null;
+  let closed = false;
+
+  function push(channelPlanes) {
+    if (closed) {
+      throw new Error("Browser PCM resampler is already closed.");
+    }
+    if (!Array.isArray(channelPlanes) || channelPlanes.length === 0) {
+      throw new TypeError("Browser PCM resampling requires at least one channel plane.");
+    }
+    const frameCount = channelPlanes[0]?.length ?? 0;
+    if (frameCount === 0) {
+      throw new TypeError("Browser PCM resampling requires non-empty channel planes.");
+    }
+    for (const plane of channelPlanes) {
+      if (!(plane instanceof Float32Array) || plane.length !== frameCount) {
+        throw new TypeError(
+          "Browser PCM resampling requires equally sized Float32Array channel planes.",
+        );
+      }
+    }
+
+    const mono = new Float32Array(frameCount);
+    for (let frame = 0; frame < frameCount; frame += 1) {
+      let mixed = 0;
+      for (const plane of channelPlanes) {
+        const sample = plane[frame];
+        if (!Number.isFinite(sample)) {
+          throw new TypeError("Browser PCM resampling requires finite samples.");
+        }
+        mixed += sample;
+      }
+      mono[frame] = filterSample(mixed / channelPlanes.length);
+    }
+
+    const chunkStart = inputCursor;
+    const chunkEnd = chunkStart + frameCount;
+    const output = [];
+
+    while (Math.ceil(nextOutputPosition) < chunkEnd) {
+      const leftIndex = Math.floor(nextOutputPosition);
+      const rightIndex = Math.ceil(nextOutputPosition);
+      const left = sourceSample(leftIndex);
+      const right = sourceSample(rightIndex);
+      if (left === undefined || right === undefined) {
+        break;
+      }
+      const fraction = nextOutputPosition - leftIndex;
+      output.push(left + (right - left) * fraction);
+      nextOutputPosition += step;
+    }
+
+    previousSample = mono[frameCount - 1];
+    inputCursor = chunkEnd;
+    return Float32Array.from(output);
+
+    function sourceSample(absoluteIndex) {
+      if (absoluteIndex === chunkStart - 1) {
+        return previousSample ?? undefined;
+      }
+      if (absoluteIndex < chunkStart || absoluteIndex >= chunkEnd) {
+        return undefined;
+      }
+      return mono[absoluteIndex - chunkStart];
+    }
+  }
+
+  function filterSample(sample) {
+    filterHistory[filterCursor] = sample;
+    let filtered = 0;
+    let historyIndex = filterCursor;
+    for (let tap = 0; tap < lowPassCoefficients.length; tap += 1) {
+      filtered += lowPassCoefficients[tap] * filterHistory[historyIndex];
+      historyIndex = historyIndex === 0 ? filterHistory.length - 1 : historyIndex - 1;
+    }
+    filterCursor = (filterCursor + 1) % filterHistory.length;
+    return filtered;
+  }
+
+  function close() {
+    closed = true;
+  }
+
+  return {
+    push,
+    close,
+    get inputSampleRateHz() {
+      return inputSampleRateHz;
+    },
+    get outputSampleRateHz() {
+      return BROWSER_SAMPLE_RATE_HZ;
+    },
+    get closed() {
+      return closed;
+    },
+  };
+}
+
+function createBrowserResamplerLowPass(inputSampleRateHz) {
+  if (inputSampleRateHz <= BROWSER_SAMPLE_RATE_HZ) {
+    return Float64Array.of(1);
+  }
+
+  const tapCount = 63;
+  const half = (tapCount - 1) / 2;
+  const cutoff = 0.5 * (BROWSER_SAMPLE_RATE_HZ / inputSampleRateHz) * 0.94;
+  const coefficients = new Float64Array(tapCount);
+  let sum = 0;
+
+  for (let index = 0; index < tapCount; index += 1) {
+    const offset = index - half;
+    const ideal =
+      offset === 0
+        ? 2 * cutoff
+        : Math.sin(2 * Math.PI * cutoff * offset) / (Math.PI * offset);
+    const window = 0.54 - 0.46 * Math.cos((2 * Math.PI * index) / (tapCount - 1));
+    const coefficient = ideal * window;
+    coefficients[index] = coefficient;
+    sum += coefficient;
+  }
+
+  for (let index = 0; index < coefficients.length; index += 1) {
+    coefficients[index] /= sum;
+  }
+  return coefficients;
+}
+
+export function createBrowserDecodedAudioTranscriptionSession(options = {}) {
+  const transcription = createBrowserTranscriptionSession(options);
+  let resampler = null;
+  let decodedSampleRateHz = null;
+  let closed = false;
+
+  async function push(audioData) {
+    if (closed) {
+      throw new Error("Browser decoded-audio transcription session is already closed.");
+    }
+    if (
+      !audioData
+      || typeof audioData.copyTo !== "function"
+      || typeof audioData.close !== "function"
+      || !Number.isInteger(audioData.numberOfFrames)
+      || audioData.numberOfFrames <= 0
+      || !Number.isInteger(audioData.numberOfChannels)
+      || audioData.numberOfChannels <= 0
+      || typeof audioData.sampleRate !== "number"
+      || !Number.isFinite(audioData.sampleRate)
+      || audioData.sampleRate <= 0
+    ) {
+      throw new TypeError("Browser decoded-audio transcription requires a valid AudioData frame.");
+    }
+
+    try {
+      if (decodedSampleRateHz === null) {
+        decodedSampleRateHz = audioData.sampleRate;
+        resampler = createBrowserPcmResampler(decodedSampleRateHz);
+      } else if (audioData.sampleRate !== decodedSampleRateHz) {
+        throw new Error(
+          `Decoded audio sample rate changed from ${decodedSampleRateHz} Hz to ${audioData.sampleRate} Hz.`,
+        );
+      }
+
+      const planes = [];
+      for (let channel = 0; channel < audioData.numberOfChannels; channel += 1) {
+        const plane = new Float32Array(audioData.numberOfFrames);
+        audioData.copyTo(plane, { planeIndex: channel, format: "f32-planar" });
+        planes.push(plane);
+      }
+      const samples = resampler.push(planes);
+      if (samples.length === 0) {
+        return [];
+      }
+      return await transcription.push(samples);
+    } finally {
+      audioData.close();
+    }
+  }
+
+  async function flush() {
+    if (!closed) {
+      closed = true;
+      resampler?.close();
+    }
+    return transcription.flush();
+  }
+
+  return {
+    push,
+    flush,
+    get bufferedSeconds() {
+      return transcription.bufferedSeconds;
+    },
+    get closed() {
+      return closed;
+    },
+    get decodedSampleRateHz() {
+      return decodedSampleRateHz;
+    },
+    get outputSampleRateHz() {
+      return BROWSER_SAMPLE_RATE_HZ;
+    },
+    plan: transcription.plan,
+  };
 }
 
 export function createBrowserTranscriptionSession(options = {}) {

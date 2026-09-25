@@ -12,6 +12,8 @@ test("audio-analysis-transcription-wasm package exports stable entrypoints", asy
   expect(typeof entry.supportsBrowserTranscription).toBe("function");
   expect(typeof entry.transcribeAudioBlob).toBe("function");
   expect(typeof entry.transcribeAudioSamples).toBe("function");
+  expect(typeof entry.createBrowserPcmResampler).toBe("function");
+  expect(typeof entry.createBrowserDecodedAudioTranscriptionSession).toBe("function");
   expect(typeof entry.createBrowserTranscriptionSession).toBe("function");
   expect(typeof entry.createBrowserMediaStreamTranscriptionSession).toBe("function");
 });
@@ -37,6 +39,7 @@ test("browser transcription capabilities stay WebGPU-only and bounded", async ()
   expect(capabilities.features.transcription).toBe(true);
   expect(capabilities.features.timedSegments).toBe(true);
   expect(capabilities.features.boundedPcmStreaming).toBe(true);
+  expect(capabilities.features.decodedAudioAdapter).toBe(true);
   expect(capabilities.features.mediaStreamAdapter).toBe(true);
   expect(capabilities.features.alignment).toBe(false);
   expect(capabilities.features.diarization).toBe(false);
@@ -285,4 +288,59 @@ test("normalized browser output records the selected model", async () => {
 
   expect(result.attributes.modelId).toBe("onnx-community/whisper-small");
   expect(result.segments[0].attributes.modelId).toBe("onnx-community/whisper-small");
+});
+
+
+test("browser PCM resampler preserves continuity across decoded frame boundaries", async () => {
+  const entry = await import("../index.js");
+  const resampler = entry.createBrowserPcmResampler(48_000);
+
+  const first = resampler.push([
+    Float32Array.from({ length: 480 }, (_, index) => index / 480),
+    Float32Array.from({ length: 480 }, (_, index) => index / 240),
+  ]);
+  const second = resampler.push([
+    Float32Array.from({ length: 480 }, (_, index) => (480 + index) / 480),
+    Float32Array.from({ length: 480 }, (_, index) => (480 + index) / 240),
+  ]);
+
+  expect(first.length).toBe(160);
+  expect(second.length).toBe(160);
+  expect(first[0]).toBeCloseTo(0, 6);
+  expect(first[159]).toBeCloseTo((477 / 480 + 477 / 240) / 2, 5);
+  expect(second[0]).toBeCloseTo((480 / 480 + 480 / 240) / 2, 5);
+  expect(second[159]).toBeCloseTo((957 / 480 + 957 / 240) / 2, 5);
+  expect(resampler.outputSampleRateHz).toBe(16_000);
+});
+
+test("browser PCM resampler rejects out-of-band energy before 48 kHz decimation", async () => {
+  const entry = await import("../index.js");
+  const sampleRate = 48_000;
+  const frames = 4_800;
+  const tone = (frequency: number) =>
+    Float32Array.from(
+      { length: frames },
+      (_, index) => Math.sin((2 * Math.PI * frequency * index) / sampleRate),
+    );
+
+  const lowBand = entry.createBrowserPcmResampler(sampleRate).push([tone(4_000)]);
+  const outOfBand = entry.createBrowserPcmResampler(sampleRate).push([tone(12_000)]);
+  const steadyRms = (samples: Float32Array) => {
+    const steady = samples.subarray(Math.min(64, samples.length));
+    return Math.sqrt(steady.reduce((sum, sample) => sum + sample * sample, 0) / steady.length);
+  };
+
+  expect(steadyRms(lowBand)).toBeGreaterThan(0.6);
+  expect(steadyRms(outOfBand)).toBeLessThan(0.05);
+});
+
+test("browser PCM resampler handles non-integer source ratios without resetting phase", async () => {
+  const entry = await import("../index.js");
+  const resampler = entry.createBrowserPcmResampler(44_100);
+
+  const first = resampler.push([new Float32Array(441).fill(0.25)]);
+  const second = resampler.push([new Float32Array(441).fill(0.25)]);
+
+  expect(first.length + second.length).toBe(320);
+  expect([...first, ...second].every((sample) => Math.abs(sample - 0.25) < 1e-6)).toBe(true);
 });

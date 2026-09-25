@@ -107,6 +107,7 @@ export type BrowserTranscriptionCapabilities = {
     transcription: boolean;
     timedSegments: boolean;
     boundedPcmStreaming: boolean;
+    decodedAudioAdapter: boolean;
     mediaStreamAdapter: boolean;
     alignment: boolean;
     diarization: boolean;
@@ -180,6 +181,28 @@ export function transcribeAudioSamples(
   samples: Float32Array,
   options?: BrowserTranscriptionOptions,
 ): Promise<BrowserTranscriptionResult>;
+export type BrowserPcmResampler = {
+  push(channelPlanes: Float32Array[]): Float32Array;
+  close(): void;
+  readonly inputSampleRateHz: number;
+  readonly outputSampleRateHz: number;
+  readonly closed: boolean;
+};
+
+export type BrowserDecodedAudioTranscriptionSession = {
+  push(audioData: AudioData): Promise<BrowserTranscriptionSegment[]>;
+  flush(): Promise<BrowserTranscriptionResult>;
+  readonly bufferedSeconds: number;
+  readonly closed: boolean;
+  readonly decodedSampleRateHz: number | null;
+  readonly outputSampleRateHz: number;
+  readonly plan: BrowserTranscriptionWindowPlan;
+};
+
+export function createBrowserPcmResampler(inputSampleRateHz: number): BrowserPcmResampler;
+export function createBrowserDecodedAudioTranscriptionSession(
+  options?: BrowserTranscriptionSessionOptions,
+): BrowserDecodedAudioTranscriptionSession;
 export function createBrowserTranscriptionSession(
   options?: BrowserTranscriptionSessionOptions,
 ): BrowserTranscriptionSession;

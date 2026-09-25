@@ -592,7 +592,7 @@ export async function createBrowserMediaStreamTranscriptionSession(stream, optio
 }
 
 export function normalizeBrowserTranscriptionOutput(output, context = {}) {
-  const text = String(output?.text ?? "").trim();
+  const text = normalizeBrowserTranscriptText(output?.text);
   const durationSeconds = finiteOrNull(context.durationSeconds);
   const offsetSeconds = finiteOrNull(context.offsetSeconds) ?? 0;
   const rawChunks = Array.isArray(output?.chunks) ? output.chunks : [];
@@ -602,7 +602,7 @@ export function normalizeBrowserTranscriptionOutput(output, context = {}) {
       : [{ text, timestamp: text ? [0, durationSeconds] : [null, null] }];
   const segments = chunks
     .map((chunk, index) => {
-      const segmentText = String(chunk?.text ?? "").trim();
+      const segmentText = normalizeBrowserTranscriptText(chunk?.text);
       const timestamp = Array.isArray(chunk?.timestamp) ? chunk.timestamp : [];
       return {
         index,
@@ -625,7 +625,7 @@ export function normalizeBrowserTranscriptionOutput(output, context = {}) {
     .filter((segment) => segment.text.length > 0);
 
   return {
-    text: text || segments.map((segment) => segment.text).join(" "),
+    text: rawChunks.length > 0 ? segments.map((segment) => segment.text).join(" ").trim() : text,
     language: null,
     segments,
     source: typeof context.source === "string" ? context.source : "browser-audio",
@@ -884,6 +884,14 @@ function emitProgress(options, update) {
 function shortFileName(value) {
   const parts = value.split("/").filter(Boolean);
   return parts[parts.length - 1] ?? value;
+}
+
+function normalizeBrowserTranscriptText(value) {
+  return String(value ?? "")
+    .replace(/(?:\.\s*){6,}/g, " ")
+    .replace(/(?:…\s*){3,}/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function addOffset(value, offsetSeconds) {

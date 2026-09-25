@@ -27,6 +27,10 @@ test("browser transcription capabilities stay WebGPU-only and bounded", async ()
     "onnx-community/whisper-base",
     "onnx-community/whisper-small",
   ]);
+  expect(capabilities.modelLifecycle).toEqual({
+    maxIdleResidentModels: 1,
+    eviction: "dispose-superseded",
+  });
   expect(capabilities.input.sampleRateHz).toBe(16_000);
   expect(capabilities.input.channels).toBe(1);
   expect(capabilities.input.acceptedSources).toContain("caller-acquired MediaStream");

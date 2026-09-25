@@ -256,6 +256,9 @@ export function createBrowserPcmResampler(inputSampleRateHz) {
   }
 
   const step = inputSampleRateHz / BROWSER_SAMPLE_RATE_HZ;
+  const lowPassCoefficients = createBrowserResamplerLowPass(inputSampleRateHz);
+  const filterHistory = new Float32Array(lowPassCoefficients.length);
+  let filterCursor = 0;
   let inputCursor = 0;
   let nextOutputPosition = 0;
   let previousSample = null;
@@ -290,7 +293,7 @@ export function createBrowserPcmResampler(inputSampleRateHz) {
         }
         mixed += sample;
       }
-      mono[frame] = mixed / channelPlanes.length;
+      mono[frame] = filterSample(mixed / channelPlanes.length);
     }
 
     const chunkStart = inputCursor;
@@ -325,6 +328,18 @@ export function createBrowserPcmResampler(inputSampleRateHz) {
     }
   }
 
+  function filterSample(sample) {
+    filterHistory[filterCursor] = sample;
+    let filtered = 0;
+    let historyIndex = filterCursor;
+    for (let tap = 0; tap < lowPassCoefficients.length; tap += 1) {
+      filtered += lowPassCoefficients[tap] * filterHistory[historyIndex];
+      historyIndex = historyIndex === 0 ? filterHistory.length - 1 : historyIndex - 1;
+    }
+    filterCursor = (filterCursor + 1) % filterHistory.length;
+    return filtered;
+  }
+
   function close() {
     closed = true;
   }
@@ -342,6 +357,35 @@ export function createBrowserPcmResampler(inputSampleRateHz) {
       return closed;
     },
   };
+}
+
+function createBrowserResamplerLowPass(inputSampleRateHz) {
+  if (inputSampleRateHz <= BROWSER_SAMPLE_RATE_HZ) {
+    return Float64Array.of(1);
+  }
+
+  const tapCount = 63;
+  const half = (tapCount - 1) / 2;
+  const cutoff = 0.5 * (BROWSER_SAMPLE_RATE_HZ / inputSampleRateHz) * 0.94;
+  const coefficients = new Float64Array(tapCount);
+  let sum = 0;
+
+  for (let index = 0; index < tapCount; index += 1) {
+    const offset = index - half;
+    const ideal =
+      offset === 0
+        ? 2 * cutoff
+        : Math.sin(2 * Math.PI * cutoff * offset) / (Math.PI * offset);
+    const window = 0.54 - 0.46 * Math.cos((2 * Math.PI * index) / (tapCount - 1));
+    const coefficient = ideal * window;
+    coefficients[index] = coefficient;
+    sum += coefficient;
+  }
+
+  for (let index = 0; index < coefficients.length; index += 1) {
+    coefficients[index] /= sum;
+  }
+  return coefficients;
 }
 
 export function createBrowserDecodedAudioTranscriptionSession(options = {}) {

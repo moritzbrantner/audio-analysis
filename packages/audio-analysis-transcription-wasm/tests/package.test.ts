@@ -114,6 +114,23 @@ test("browser output normalization removes long dot hallucinations but preserves
   ]);
 });
 
+test("browser output normalization preserves aggregate spacing from multilingual model text", async () => {
+  const entry = await import("../index.js");
+  const result = entry.normalizeBrowserTranscriptionOutput(
+    {
+      text: "你好世界",
+      chunks: [
+        { text: "你好", timestamp: [0, 0.5] },
+        { text: "世界", timestamp: [0.5, 1] },
+      ],
+    },
+    { durationSeconds: 1, source: "fixture" },
+  );
+
+  expect(result.text).toBe("你好世界");
+  expect(result.segments.map((segment) => segment.text)).toEqual(["你好", "世界"]);
+});
+
 test("browser output normalization offsets bounded windows onto the global timeline", async () => {
   const entry = await import("../index.js");
   const result = entry.normalizeBrowserTranscriptionOutput(

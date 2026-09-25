@@ -93,6 +93,10 @@ export type BrowserTranscriptionCapabilities = {
   modelId: string;
   models: BrowserTranscriptionModel[];
   modelProvisioning: string;
+  modelLifecycle: {
+    maxIdleResidentModels: number;
+    eviction: "dispose-superseded";
+  };
   input: {
     sampleRateHz: number;
     channels: number;

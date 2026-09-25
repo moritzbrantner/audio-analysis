@@ -92,6 +92,45 @@ test("browser output normalization preserves timed transcription segments", asyn
   expect(result.segments[1]).toMatchObject({ startSeconds: 0.5, endSeconds: 1.25, text: "world" });
 });
 
+test("browser output normalization removes long dot hallucinations but preserves ellipses", async () => {
+  const entry = await import("../index.js");
+  const result = entry.normalizeBrowserTranscriptionOutput(
+    {
+      text: "before ........................................ after Wait...",
+      chunks: [
+        { text: " before", timestamp: [0, 0.5] },
+        { text: " ........................................", timestamp: [0.5, 1] },
+        { text: " after Wait...", timestamp: [1, 1.5] },
+      ],
+    },
+    { durationSeconds: 1.5, source: "fixture" },
+  );
+
+  expect(result.text).toBe("before after Wait...");
+  expect(result.segments.map((segment) => segment.text)).toEqual(["before", "after Wait..."]);
+  expect(result.segments.map((segment) => [segment.startSeconds, segment.endSeconds])).toEqual([
+    [0, 0.5],
+    [1, 1.5],
+  ]);
+});
+
+test("browser output normalization preserves aggregate spacing from multilingual model text", async () => {
+  const entry = await import("../index.js");
+  const result = entry.normalizeBrowserTranscriptionOutput(
+    {
+      text: "你好世界",
+      chunks: [
+        { text: "你好", timestamp: [0, 0.5] },
+        { text: "世界", timestamp: [0.5, 1] },
+      ],
+    },
+    { durationSeconds: 1, source: "fixture" },
+  );
+
+  expect(result.text).toBe("你好世界");
+  expect(result.segments.map((segment) => segment.text)).toEqual(["你好", "世界"]);
+});
+
 test("browser output normalization offsets bounded windows onto the global timeline", async () => {
   const entry = await import("../index.js");
   const result = entry.normalizeBrowserTranscriptionOutput(

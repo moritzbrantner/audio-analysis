@@ -4,20 +4,25 @@ Browser/WASM adapter for `audio-analysis-transcription`.
 
 The Rust/WASM surface remains the deterministic package contract. The package also owns the first
 browser-local Whisper provider used by static consumers: audio is decoded and resampled to 16 kHz
-mono in the browser, then transcribed with Whisper tiny on WebGPU. Model assets are cached by the
-browser and no server, Python, or CPU fallback is used.
+mono in the browser, then transcribed with a curated Whisper model on WebGPU. The browser catalog
+contains Whisper Tiny (default), Base, and Small; callers select by model ID instead of supplying an
+arbitrary remote model. Each model is cached independently by the browser, and no server, Python, or
+CPU fallback is used.
 
 For short files, use the Blob helper:
 
 ```js
 import {
+  browserTranscriptionModels,
   supportsBrowserTranscription,
   transcribeAudioBlob,
 } from "@moritzbrantner/audio-analysis-transcription-wasm";
 
 if (await supportsBrowserTranscription()) {
+  const [tiny, base, small] = browserTranscriptionModels();
   const result = await transcribeAudioBlob(audioBlob, {
     source: "captured-tab-audio",
+    modelId: base.id,
     onProgress: ({ message }) => console.log(message),
   });
   console.log(result.text, result.segments);

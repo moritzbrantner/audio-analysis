@@ -6,8 +6,9 @@ The Rust/WASM surface remains the deterministic package contract. The package al
 browser-local Whisper provider used by static consumers: audio is decoded and resampled to 16 kHz
 mono in the browser, then transcribed with a curated Whisper model on WebGPU. The browser catalog
 contains Whisper Tiny (default), Base, and Small; callers select by model ID instead of supplying an
-arbitrary remote model. Each model is cached independently by the browser, and no server, Python, or
-CPU fallback is used.
+arbitrary remote model. Downloaded assets remain in the browser cache, while only one idle WebGPU
+pipeline is retained in memory; selecting another model disposes a superseded pipeline after its
+active inference finishes. No server, Python, or CPU fallback is used.
 
 For short files, use the Blob helper:
 

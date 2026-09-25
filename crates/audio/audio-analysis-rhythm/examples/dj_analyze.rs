@@ -1,7 +1,10 @@
 use std::{error::Error, path::PathBuf};
 
 use audio_analysis_io::{decode_audio_to_clip, AudioInput, AudioInputOptions};
-use audio_analysis_pitch::key::{estimate_musical_key, HarmonicKeyConfig, MusicalScale};
+use audio_analysis_pitch::key::{
+    analyze_key_track_with_boundaries, HarmonicKeyConfig, KeyTimelineConfig, MusicalKeyEstimate,
+    MusicalScale,
+};
 use audio_analysis_rhythm::track::{analyze_rhythm_track, TrackRhythmConfig};
 use serde_json::json;
 
@@ -17,31 +20,42 @@ fn main() -> Result<(), Box<dyn Error>> {
     let samples = downmix_to_mono(&clip.samples, clip.channels);
 
     let rhythm = analyze_rhythm_track(&samples, clip.sample_rate, TrackRhythmConfig::default())?;
-    let key = estimate_musical_key(&samples, clip.sample_rate, HarmonicKeyConfig::default())?;
+    let duration_seconds = samples.len() as f64 / clip.sample_rate as f64;
+    let key_boundaries = key_bar_boundaries(&rhythm.downbeats, duration_seconds);
+    let key_analysis = analyze_key_track_with_boundaries(
+        &samples,
+        clip.sample_rate,
+        HarmonicKeyConfig::default(),
+        KeyTimelineConfig::default(),
+        &key_boundaries,
+    )?;
 
-    let key_value = key.map(|estimate| {
-        let scale = match estimate.scale {
-            MusicalScale::Major => "major",
-            MusicalScale::Minor => "minor",
-        };
-        json!({
-            "label": estimate.label(),
-            "tonic": estimate.tonic.as_str(),
-            "scale": scale,
-            "strength": estimate.strength,
-            "confidence": estimate.confidence,
-            "tuningCents": estimate.tuning_cents,
-            "chroma": estimate.chroma.bins,
-            "runnerUp": {
-                "tonic": estimate.runner_up.tonic.as_str(),
-                "scale": match estimate.runner_up.scale {
-                    MusicalScale::Major => "major",
-                    MusicalScale::Minor => "minor",
-                },
-                "correlation": estimate.runner_up.correlation
-            }
+    let key_value = key_analysis.dominant.as_ref().map(key_estimate_json);
+    let key_timeline = key_analysis
+        .timeline
+        .iter()
+        .map(|window| {
+            json!({
+                "startSeconds": window.start_seconds,
+                "endSeconds": window.end_seconds,
+                "centerSeconds": window.center_seconds,
+                "key": window.key.as_ref().map(key_estimate_json)
+            })
         })
-    });
+        .collect::<Vec<_>>();
+    let key_segments = key_analysis
+        .segments
+        .iter()
+        .map(|segment| {
+            json!({
+                "startSeconds": segment.start_seconds,
+                "endSeconds": segment.end_seconds,
+                "key": key_estimate_json(&segment.key),
+                "confidence": segment.confidence,
+                "windowCount": segment.window_count
+            })
+        })
+        .collect::<Vec<_>>();
 
     println!(
         "{}",
@@ -49,7 +63,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             "path": path,
             "sampleRate": clip.sample_rate,
             "channels": clip.channels,
-            "durationSeconds": samples.len() as f64 / clip.sample_rate as f64,
+            "durationSeconds": duration_seconds,
             "rhythm": {
                 "bpm": rhythm.bpm,
                 "confidence": rhythm.confidence,
@@ -64,7 +78,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 "downbeats": rhythm.downbeats,
                 "downbeatConfidence": rhythm.downbeat_confidence
             },
-            "key": key_value
+            "key": key_value,
+            "keyTimeline": key_timeline,
+            "keySegments": key_segments,
+            "keyBoundaryAligned": key_analysis.boundary_aligned,
+            "keyTimelineComplete": key_analysis.timeline_complete
         }))?
     );
     Ok(())
@@ -79,4 +97,55 @@ fn downmix_to_mono(samples: &[f32], channels: u16) -> Vec<f32> {
         .chunks_exact(channels)
         .map(|frame| frame.iter().sum::<f32>() / channels as f32)
         .collect()
+}
+
+
+fn key_estimate_json(estimate: &MusicalKeyEstimate) -> serde_json::Value {
+    json!({
+        "label": estimate.label(),
+        "tonic": estimate.tonic.as_str(),
+        "scale": match estimate.scale {
+            MusicalScale::Major => "major",
+            MusicalScale::Minor => "minor",
+        },
+        "strength": estimate.strength,
+        "confidence": estimate.confidence,
+        "tuningCents": estimate.tuning_cents,
+        "chroma": estimate.chroma.bins,
+        "runnerUp": {
+            "tonic": estimate.runner_up.tonic.as_str(),
+            "scale": match estimate.runner_up.scale {
+                MusicalScale::Major => "major",
+                MusicalScale::Minor => "minor",
+            },
+            "correlation": estimate.runner_up.correlation
+        }
+    })
+}
+
+fn key_bar_boundaries(downbeats: &[f64], duration_seconds: f64) -> Vec<f64> {
+    if downbeats.len() < 2 || !duration_seconds.is_finite() || duration_seconds <= 0.0 {
+        return Vec::new();
+    }
+
+    let mut boundaries = downbeats
+        .iter()
+        .copied()
+        .filter(|time| time.is_finite() && *time >= 0.0 && *time <= duration_seconds)
+        .collect::<Vec<_>>();
+    boundaries.sort_by(f64::total_cmp);
+    boundaries.dedup();
+    if boundaries.len() < 2 {
+        return Vec::new();
+    }
+    if boundaries.first().is_some_and(|time| *time > 0.0) {
+        boundaries.insert(0, 0.0);
+    }
+    if boundaries
+        .last()
+        .is_some_and(|time| *time < duration_seconds)
+    {
+        boundaries.push(duration_seconds);
+    }
+    boundaries
 }

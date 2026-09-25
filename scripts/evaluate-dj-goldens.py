@@ -30,6 +30,7 @@ import subprocess
 import sys
 import urllib.request
 from dataclasses import dataclass
+from urllib.parse import urlparse
 from typing import Any
 
 
@@ -37,6 +38,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 CACHE = ROOT / "target" / "dj-goldens"
 CORPUS_MANIFEST = ROOT / "tests" / "fixtures" / "dj" / "real-music-corpus.v1.json"
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+SHA1_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 BEAT_TOLERANCE_SECONDS = 0.07
 
@@ -50,7 +52,13 @@ class Fixture:
     category: str
     coverage: tuple[str, ...]
     focus: tuple[str, ...]
+    source_url: str | None = None
+    provenance_url: str | None = None
+    source_bytes: int | None = None
+    source_sha1: str | None = None
     reference_key: str | None = None
+    reference_key_source: str | None = None
+    assert_key: bool = False
     assert_tempo: bool = False
 
 
@@ -85,6 +93,17 @@ def string_list(
     if len(set(value)) != len(value):
         raise RuntimeError(f"{label} must not contain duplicates")
     return tuple(value)
+
+
+def optional_https_url(value: Any, label: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError(f"{label} must be null or a non-empty HTTPS URL")
+    parsed = urlparse(value)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise RuntimeError(f"{label} must use an absolute HTTPS URL")
+    return value
 
 
 def load_corpus() -> Corpus:
@@ -133,7 +152,15 @@ def load_corpus() -> Corpus:
         checksum = item.get("sha256")
         license_name = item.get("license")
         category = item.get("category")
+        source_url = optional_https_url(item.get("sourceUrl"), f"{label}.sourceUrl")
+        provenance_url = optional_https_url(
+            item.get("provenanceUrl"), f"{label}.provenanceUrl"
+        )
+        source_bytes = item.get("sourceBytes")
+        source_sha1 = item.get("sourceSha1")
         reference_key = item.get("referenceKey")
+        reference_key_source = item.get("referenceKeySource")
+        assert_key = item.get("assertKey", False)
         assert_tempo = item.get("assertTempo", False)
 
         if not isinstance(name, str) or not name.strip():
@@ -159,10 +186,43 @@ def load_corpus() -> Corpus:
             raise RuntimeError(f"{label}.license must be a non-empty string")
         if not isinstance(category, str) or not category.strip():
             raise RuntimeError(f"{label}.category must be a non-empty string")
+        external_metadata = (source_url, provenance_url, source_bytes, source_sha1)
+        if any(value is not None for value in external_metadata) and any(
+            value is None for value in external_metadata
+        ):
+            raise RuntimeError(
+                f"{label} external source metadata requires sourceUrl, provenanceUrl, "
+                "sourceBytes, and sourceSha1"
+            )
+        if source_bytes is not None and (
+            not isinstance(source_bytes, int)
+            or isinstance(source_bytes, bool)
+            or source_bytes <= 0
+        ):
+            raise RuntimeError(f"{label}.sourceBytes must be a positive integer")
+        if source_sha1 is not None and (
+            not isinstance(source_sha1, str)
+            or SHA1_PATTERN.fullmatch(source_sha1) is None
+        ):
+            raise RuntimeError(f"{label}.sourceSha1 must be a lowercase SHA-1 digest")
         if reference_key is not None and (
             not isinstance(reference_key, str) or not reference_key.strip()
         ):
             raise RuntimeError(f"{label}.referenceKey must be null or a non-empty string")
+        if reference_key_source is not None and (
+            not isinstance(reference_key_source, str) or not reference_key_source.strip()
+        ):
+            raise RuntimeError(
+                f"{label}.referenceKeySource must be null or a non-empty string"
+            )
+        if reference_key is None and reference_key_source is not None:
+            raise RuntimeError(
+                f"{label}.referenceKeySource requires {label}.referenceKey"
+            )
+        if not isinstance(assert_key, bool):
+            raise RuntimeError(f"{label}.assertKey must be a boolean")
+        if assert_key and reference_key is None:
+            raise RuntimeError(f"{label}.assertKey requires {label}.referenceKey")
         if not isinstance(assert_tempo, bool):
             raise RuntimeError(f"{label}.assertTempo must be a boolean")
 
@@ -183,7 +243,13 @@ def load_corpus() -> Corpus:
                 category=category,
                 coverage=coverage,
                 focus=focus,
+                source_url=source_url,
+                provenance_url=provenance_url,
+                source_bytes=source_bytes,
+                source_sha1=source_sha1,
                 reference_key=reference_key,
+                reference_key_source=reference_key_source,
+                assert_key=assert_key,
                 assert_tempo=assert_tempo,
             )
         )
@@ -195,6 +261,17 @@ def load_corpus() -> Corpus:
         required_coverage=required_coverage,
         fixtures=tuple(fixtures),
     )
+
+
+def select_fixtures(corpus: Corpus, names: list[str]) -> tuple[Fixture, ...]:
+    if not names:
+        return corpus.fixtures
+    requested = set(names)
+    known = {fixture.name for fixture in corpus.fixtures}
+    unknown = sorted(requested - known)
+    if unknown:
+        raise RuntimeError(f"unknown DJ corpus fixtures: {unknown}")
+    return tuple(fixture for fixture in corpus.fixtures if fixture.name in requested)
 
 
 def coverage_summary(corpus: Corpus) -> dict[str, Any]:
@@ -209,25 +286,61 @@ def coverage_summary(corpus: Corpus) -> dict[str, Any]:
     }
 
 
+def fixture_source_url(corpus: Corpus, fixture: Fixture) -> str:
+    return fixture.source_url or f"{corpus.raw_audio_root}/{fixture.filename}"
+
+
 def download_fixture(corpus: Corpus, fixture: Fixture) -> pathlib.Path:
     CACHE.mkdir(parents=True, exist_ok=True)
     path = CACHE / fixture.filename
-    if path.exists() and sha256(path) == fixture.sha256:
-        return path
     if path.exists():
+        if fixture_file_matches(path, fixture):
+            return path
         path.unlink()
     print(
         f"downloading {fixture.name} ({fixture.category}, {fixture.license})",
         file=sys.stderr,
     )
-    urllib.request.urlretrieve(f"{corpus.raw_audio_root}/{fixture.filename}", path)
-    digest = sha256(path)
-    if digest != fixture.sha256:
+    request = urllib.request.Request(
+        fixture_source_url(corpus, fixture),
+        headers={
+            "User-Agent": (
+                "audio-analysis-dj-corpus/1.0 "
+                "(+https://github.com/moritzbrantner/audio-analysis)"
+            )
+        },
+    )
+    with urllib.request.urlopen(request, timeout=120) as response, path.open("wb") as stream:
+        while chunk := response.read(1024 * 1024):
+            stream.write(chunk)
+    if not fixture_file_matches(path, fixture):
+        actual_sha256 = sha256(path)
+        actual_bytes = path.stat().st_size
+        actual_sha1 = sha1(path) if fixture.source_sha1 is not None else None
         path.unlink(missing_ok=True)
         raise RuntimeError(
-            f"fixture checksum mismatch for {fixture.name}: {digest} != {fixture.sha256}"
+            f"fixture source mismatch for {fixture.name}: "
+            f"sha256={actual_sha256}, bytes={actual_bytes}, sha1={actual_sha1}"
         )
     return path
+
+
+def fixture_file_matches(path: pathlib.Path, fixture: Fixture) -> bool:
+    if sha256(path) != fixture.sha256:
+        return False
+    if fixture.source_bytes is not None and path.stat().st_size != fixture.source_bytes:
+        return False
+    if fixture.source_sha1 is not None and sha1(path) != fixture.source_sha1:
+        return False
+    return True
+
+
+def sha1(path: pathlib.Path) -> str:
+    digest = hashlib.sha1()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def sha256(path: pathlib.Path) -> str:
@@ -239,23 +352,34 @@ def sha256(path: pathlib.Path) -> str:
 
 
 def rust_analysis(path: pathlib.Path) -> dict[str, Any]:
+    command = [
+        "cargo",
+        "run",
+        "--locked",
+        "--quiet",
+        "-p",
+        "moenarch-audio-analysis-rhythm",
+        "--example",
+        "dj_analyze",
+        "--",
+        str(path),
+    ]
     completed = subprocess.run(
-        [
-            "cargo",
-            "run",
-            "--quiet",
-            "-p",
-            "moenarch-audio-analysis-rhythm",
-            "--example",
-            "dj_analyze",
-            "--",
-            str(path),
-        ],
+        command,
         cwd=ROOT,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
     )
+    if completed.returncode != 0:
+        if completed.stdout:
+            print(completed.stdout, file=sys.stderr, end="")
+        if completed.stderr:
+            print(completed.stderr, file=sys.stderr, end="")
+        raise RuntimeError(
+            f"Rust DJ analyzer failed for {path.name} with exit code "
+            f"{completed.returncode}"
+        )
     return json.loads(completed.stdout)
 
 
@@ -344,6 +468,36 @@ def beat_f1(
     return 2.0 * precision * recall / (precision + recall)
 
 
+def key_timeline_metrics(rust: dict[str, Any]) -> dict[str, Any]:
+    timeline = rust.get("keyTimeline")
+    timeline = timeline if isinstance(timeline, list) else []
+    segments = rust.get("keySegments")
+    segments = segments if isinstance(segments, list) else []
+    labels = sorted(
+        {
+            label
+            for segment in segments
+            if isinstance(segment, dict)
+            for key in [segment.get("key")]
+            if isinstance(key, dict)
+            for label in [key.get("label")]
+            if isinstance(label, str) and label
+        }
+    )
+    known_windows = sum(
+        isinstance(window, dict) and isinstance(window.get("key"), dict)
+        for window in timeline
+    )
+    return {
+        "keyTimelineWindowCount": len(timeline),
+        "keyTimelineKnownWindowCount": known_windows,
+        "keySegmentCount": len(segments),
+        "distinctStableKeys": labels,
+        "keyBoundaryAligned": rust.get("keyBoundaryAligned") is True,
+        "keyTimelineComplete": rust.get("keyTimelineComplete") is True,
+    }
+
+
 def fixture_metrics(
     rust: dict[str, Any],
     librosa: dict[str, Any],
@@ -359,6 +513,7 @@ def fixture_metrics(
         "tempoEquivalentEssentia": None,
         "tempoErrorEssentiaPercent": None,
         "beatF1Essentia": None,
+        **key_timeline_metrics(rust),
     }
     if rust_bpm is not None:
         error = tempo_relative_error(float(rust_bpm), librosa["tempo"])
@@ -388,10 +543,20 @@ def aggregate_metrics(
         (report["rust"].get("key") or {}).get("label") == report["referenceKey"]
         for report in pinned_key_reports
     )
+    asserted_key_reports = [report for report in pinned_key_reports if report.get("assertKey")]
+    modulation_reports = [
+        report for report in reports if "modulation" in report.get("coverage", ())
+    ]
+    modulation_multi_key = sum(
+        len(report["metrics"]["distinctStableKeys"]) > 1
+        for report in modulation_reports
+    )
     return {
         "fixtureCount": len(reports),
         "categories": sorted({report["category"] for report in reports}),
         "coverage": coverage,
+        "modulationFixtureCount": len(modulation_reports),
+        "modulationFixturesWithMultipleStableKeys": modulation_multi_key,
         "tempoEquivalentLibrosa": sum(item["tempoEquivalentLibrosa"] is True for item in metrics),
         "tempoEquivalentEssentia": sum(item["tempoEquivalentEssentia"] is True for item in metrics),
         "essentiaFixtureCount": sum(report["essentia"] is not None for report in reports),
@@ -399,6 +564,7 @@ def aggregate_metrics(
         "meanBeatF1Essentia": mean_present([item["beatF1Essentia"] for item in metrics]),
         "pinnedKeyMatches": pinned_key_matches,
         "pinnedKeyFixtureCount": len(pinned_key_reports),
+        "assertedKeyFixtureCount": len(asserted_key_reports),
     }
 
 
@@ -409,9 +575,16 @@ def main() -> int:
         action="store_true",
         help="validate corpus metadata and report coverage without downloading audio",
     )
+    parser.add_argument(
+        "--fixture",
+        action="append",
+        default=[],
+        help="evaluate only the named fixture; may be repeated",
+    )
     args = parser.parse_args()
     corpus = load_corpus()
     coverage = coverage_summary(corpus)
+    selected_fixtures = select_fixtures(corpus, args.fixture)
 
     if args.check_manifest:
         print(
@@ -425,6 +598,21 @@ def main() -> int:
                         "audioRoot": corpus.audio_root,
                     },
                     "fixtureCount": len(corpus.fixtures),
+                    "selectedFixtureCount": len(selected_fixtures),
+                    "externalFixtureCount": sum(
+                        fixture.source_url is not None for fixture in corpus.fixtures
+                    ),
+                    "externalSources": [
+                        {
+                            "fixture": fixture.name,
+                            "sourceUrl": fixture.source_url,
+                            "provenanceUrl": fixture.provenance_url,
+                            "sourceBytes": fixture.source_bytes,
+                            "sourceSha1": fixture.source_sha1,
+                        }
+                        for fixture in corpus.fixtures
+                        if fixture.source_url is not None
+                    ],
                     "coverage": coverage,
                 },
                 indent=2,
@@ -434,7 +622,8 @@ def main() -> int:
 
     reports: list[dict[str, Any]] = []
     failures: list[str] = []
-    for fixture in corpus.fixtures:
+    disagreements: list[str] = []
+    for fixture in selected_fixtures:
         path = download_fixture(corpus, fixture)
         rust = rust_analysis(path)
         librosa = librosa_analysis(path)
@@ -447,7 +636,13 @@ def main() -> int:
             "focus": fixture.focus,
             "license": fixture.license,
             "sha256": fixture.sha256,
+            "sourceUrl": fixture_source_url(corpus, fixture),
+            "provenanceUrl": fixture.provenance_url,
+            "sourceBytes": fixture.source_bytes,
+            "sourceSha1": fixture.source_sha1,
             "referenceKey": fixture.reference_key,
+            "referenceKeySource": fixture.reference_key_source,
+            "assertKey": fixture.assert_key,
             "metrics": metrics,
             "rust": rust,
             "librosa": librosa,
@@ -455,33 +650,42 @@ def main() -> int:
         }
         reports.append(report)
 
-        if fixture.assert_tempo:
-            rust_bpm = rust.get("rhythm", {}).get("bpm")
-            if rust_bpm is None or not tempo_equivalent(float(rust_bpm), librosa["tempo"]):
-                failures.append(
-                    f"{fixture.name}: Rust BPM {rust_bpm} is not equivalent to "
-                    f"librosa BPM {librosa['tempo']:.3f}"
-                )
-            if essentia is not None and (
-                rust_bpm is None
-                or not tempo_equivalent(float(rust_bpm), essentia["tempo"])
-            ):
-                failures.append(
-                    f"{fixture.name}: Rust BPM {rust_bpm} is not equivalent to "
-                    f"Essentia BPM {essentia['tempo']:.3f}"
-                )
+        rust_bpm = rust.get("rhythm", {}).get("bpm")
+        if metrics["tempoEquivalentLibrosa"] is False:
+            message = (
+                f"{fixture.name}: Rust BPM {rust_bpm} differs from "
+                f"librosa BPM {librosa['tempo']:.3f} beyond octave-equivalent tolerance"
+            )
+            if fixture.assert_tempo:
+                failures.append(message)
+            else:
+                disagreements.append(message)
+        if essentia is not None and metrics["tempoEquivalentEssentia"] is False:
+            message = (
+                f"{fixture.name}: Rust BPM {rust_bpm} differs from "
+                f"Essentia BPM {essentia['tempo']:.3f} beyond octave-equivalent tolerance"
+            )
+            if fixture.assert_tempo:
+                failures.append(message)
+            else:
+                disagreements.append(message)
 
         if fixture.reference_key is not None:
             rust_key = (rust.get("key") or {}).get("label")
+            metrics["referenceKeyMatch"] = rust_key == fixture.reference_key
             if rust_key != fixture.reference_key:
-                failures.append(
-                    f"{fixture.name}: Rust key {rust_key!r} != pinned Essentia reference "
+                message = (
+                    f"{fixture.name}: Rust key {rust_key!r} differs from "
+                    f"{fixture.reference_key_source or 'stored'} reference "
                     f"{fixture.reference_key!r}"
                 )
-            if essentia is not None and essentia["key"] != fixture.reference_key:
-                failures.append(
-                    f"{fixture.name}: Essentia key {essentia['key']!r} differs from pinned "
-                    f"reference {fixture.reference_key!r}"
+                if fixture.assert_key:
+                    failures.append(message)
+                else:
+                    disagreements.append(message)
+            if essentia is not None:
+                metrics["liveEssentiaReferenceKeyMatch"] = (
+                    essentia["key"] == fixture.reference_key
                 )
 
     output = {
@@ -491,9 +695,11 @@ def main() -> int:
             "manifest": str(CORPUS_MANIFEST.relative_to(ROOT)),
             "sourceRepository": corpus.source_repository,
             "sourceRevision": corpus.source_revision,
+            "selectedFixtures": [fixture.name for fixture in selected_fixtures],
         },
         "aggregate": aggregate_metrics(reports, coverage),
         "fixtures": reports,
+        "disagreements": disagreements,
         "failures": failures,
     }
     print(json.dumps(output, indent=2))

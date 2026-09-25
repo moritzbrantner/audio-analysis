@@ -70,7 +70,7 @@ external-tool execution.
 
 ## Golden evaluation
 
-`scripts/evaluate-dj-goldens.py` downloads checksum-pinned reusable music fixtures into `target/`, runs this crate's real file-analysis path, and compares tempo against librosa and, when available, Essentia. Half/double tempo is treated as an explicit equivalence class. Key references are pinned from Essentia 2.1b6.dev1389 on the exact fixture bytes (Choice: G major; the Brahms fixture: G minor) rather than inferred from filenames or titles.
+`scripts/evaluate-dj-goldens.py` downloads checksum-pinned reusable music fixtures into `target/`, runs this crate's real file-analysis path, and compares tempo against librosa and, when available, Essentia. Half/double tempo is treated as an explicit equivalence class. Stored Essentia 2.1b6.dev1389 key outputs (Choice: G major; Brahms: G minor) remain explicit comparison evidence rather than being promoted to ground truth.
 
 The evaluator is opt-in because the third-party Python packages and audio downloads are intentionally outside ordinary deterministic repository CI.
 

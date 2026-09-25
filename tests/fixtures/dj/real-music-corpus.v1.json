@@ -33,7 +33,9 @@
         "half-double-time"
       ],
       "referenceKey": "G major",
-      "assertTempo": true
+      "assertTempo": true,
+      "referenceKeySource": "Essentia 2.1b6.dev1389",
+      "assertKey": false
     },
     {
       "name": "brahms-hungarian-dance-5",
@@ -51,7 +53,9 @@
         "weak-percussion"
       ],
       "referenceKey": "G minor",
-      "assertTempo": true
+      "assertTempo": true,
+      "referenceKeySource": "Essentia 2.1b6.dev1389",
+      "assertKey": false
     },
     {
       "name": "sweet-waltz",
@@ -128,6 +132,152 @@
         "variable-beat-map"
       ],
       "assertTempo": false
+    },
+    {
+      "name": "friendly-evil-gangsta-synth-hip-hop",
+      "filename": "Friendly_Evil_Gangsta_Synth_Hip_Hop.ogg",
+      "sha256": "0a85df3432989ac391808580c5bc22af28f956bf7c365bf5b963d79cd02ac457",
+      "license": "CC0-1.0",
+      "category": "hip-hop",
+      "coverage": [
+        "hip-hop"
+      ],
+      "focus": [
+        "slow-tempo",
+        "beat-driven",
+        "dissonant-synth",
+        "instrumental"
+      ],
+      "sourceUrl": "https://upload.wikimedia.org/wikipedia/commons/1/10/Friendly_Evil_Gangsta_Synth_Hip_Hop.ogg",
+      "provenanceUrl": "https://commons.wikimedia.org/w/index.php?title=File:Friendly_Evil_Gangsta_Synth_Hip_Hop.ogg&oldid=1261864752",
+      "assertTempo": false,
+      "sourceBytes": 8987157,
+      "sourceSha1": "4927325282f73c64855042153cfd15bb0ccab976"
+    },
+    {
+      "name": "pop-rock-wikiservicio",
+      "filename": "Pop_rock.ogg",
+      "sha256": "9d1df18122bea9ae56e9812ab92d7a020c899952ef970e8e881b8d4bb6c2adf6",
+      "license": "CC-BY-SA-4.0",
+      "category": "pop-rock",
+      "coverage": [
+        "pop-rock"
+      ],
+      "focus": [
+        "rock-arrangement",
+        "full-track",
+        "structure-change"
+      ],
+      "sourceUrl": "https://upload.wikimedia.org/wikipedia/commons/4/41/Pop_rock.ogg",
+      "provenanceUrl": "https://commons.wikimedia.org/w/index.php?title=File:Pop_rock.ogg&oldid=911373800",
+      "assertTempo": false,
+      "sourceBytes": 8397939,
+      "sourceSha1": "db4b96c98b402749712adf5b138899f7761b30da"
+    },
+    {
+      "name": "beethoven-pathetique-adagio-modulation",
+      "filename": "Beethoven_Pathetique_Adagio_cantabile.ogg",
+      "sha256": "96868eb250651f50522de6277528625172c8af78e238ff3b59dfc31004eb466a",
+      "license": "CC0-1.0",
+      "category": "classical-modulation",
+      "coverage": [
+        "classical",
+        "modulation"
+      ],
+      "focus": [
+        "modulation",
+        "multi-key",
+        "expressive-timing",
+        "weak-percussion"
+      ],
+      "sourceUrl": "https://upload.wikimedia.org/wikipedia/commons/6/63/Beethoven%2C_Sonata_No._8_in_C_Minor_Pathetique%2C_Op._13_-_II._Adagio_cantabile.ogg",
+      "provenanceUrl": "https://commons.wikimedia.org/w/index.php?title=File:Beethoven,_Sonata_No._8_in_C_Minor_Pathetique,_Op._13_-_II._Adagio_cantabile.ogg&oldid=1194461364",
+      "assertTempo": false,
+      "sourceBytes": 7450009,
+      "sourceSha1": "d3f818a65106beef18368a64c3fdbbb3ee3df2c3"
+    },
+    {
+      "name": "mj-pia-solarity-acid-techno",
+      "filename": "MJ-PIA_-_Solarity_(Acid-Techno).ogg",
+      "sha256": "82412530cf346c48d19b10c4fe0b5102ddd6095ecf5fede50cff4edbdef0a599",
+      "license": "CC-BY-SA-4.0",
+      "category": "acid-techno",
+      "coverage": [
+        "electronic-dance"
+      ],
+      "focus": [
+        "documented-124-bpm",
+        "steady-four-on-floor",
+        "acid-bass",
+        "full-track"
+      ],
+      "sourceUrl": "https://upload.wikimedia.org/wikipedia/commons/8/8c/MJ-PIA_-_Solarity_%28Acid-Techno%29.ogg",
+      "provenanceUrl": "https://commons.wikimedia.org/w/index.php?title=File:MJ-PIA_-_Solarity_(Acid-Techno).ogg&oldid=1173739936",
+      "assertTempo": false,
+      "sourceBytes": 12384633,
+      "sourceSha1": "d5c8e8c04940d529c3660eb050fafd49536b1fbc"
+    },
+    {
+      "name": "crooked-cop-reggae",
+      "filename": "CrookedCop.ogg",
+      "sha256": "14eb8d6c1b7318055d933483b26e99cbdb5e81f60b60fdf27ffe023d1b3f9347",
+      "license": "CC-BY-3.0",
+      "category": "reggae",
+      "coverage": [],
+      "focus": [
+        "offbeat-groove",
+        "syncopation",
+        "bass-heavy",
+        "full-track"
+      ],
+      "sourceUrl": "https://upload.wikimedia.org/wikipedia/commons/0/09/CrookedCop.ogg",
+      "provenanceUrl": "https://commons.wikimedia.org/w/index.php?title=File:CrookedCop.ogg&oldid=1204159893",
+      "assertTempo": false,
+      "sourceBytes": 2199445,
+      "sourceSha1": "0bb18ce8e794ce3bc85283f65b8768e0339b707b"
+    },
+    {
+      "name": "dream-vilanculos-mini-light-trance",
+      "filename": "Mini_light_trance_mix_by_Dream_Vilanculos.ogg",
+      "sha256": "e8da341273bba05baa64668752828ed4bebee54abe1bab05a84fe7a85adf7e12",
+      "license": "CC-BY-SA-4.0",
+      "category": "trance",
+      "coverage": [
+        "electronic-dance"
+      ],
+      "focus": [
+        "trance",
+        "layered-electronic",
+        "steady-tempo",
+        "short-track"
+      ],
+      "sourceUrl": "https://upload.wikimedia.org/wikipedia/commons/b/bb/Mini_light_trance_mix_by_Dream_Vilanculos.ogg",
+      "provenanceUrl": "https://commons.wikimedia.org/w/index.php?title=File:Mini_light_trance_mix_by_Dream_Vilanculos.ogg&oldid=1111179310",
+      "assertTempo": false,
+      "sourceBytes": 1334641,
+      "sourceSha1": "58ea22d3e0e13015f9728da7bd6a840543bd2df4"
+    },
+    {
+      "name": "wikipedia-guitar-solo-f-sharp-minor",
+      "filename": "Wikipedia_guitar_solo.ogg",
+      "sha256": "d6ff6cafd3025db2e2215b32e3e7e6411fa08a8d2e0fca7c3353b5a4a82523a5",
+      "license": "CC0-1.0",
+      "category": "guitar-solo",
+      "coverage": [],
+      "focus": [
+        "weak-percussion",
+        "guitar-led",
+        "author-declared-key",
+        "harmonic-motion"
+      ],
+      "sourceUrl": "https://upload.wikimedia.org/wikipedia/commons/b/b6/Wikipedia_guitar_solo.ogg",
+      "provenanceUrl": "https://commons.wikimedia.org/w/index.php?title=File:Wikipedia_guitar_solo.ogg&oldid=1210610043",
+      "referenceKey": "F# minor",
+      "referenceKeySource": "Wikimedia Commons creator description, revision 1210610043",
+      "assertKey": true,
+      "assertTempo": false,
+      "sourceBytes": 558882,
+      "sourceSha1": "1a97d0ee955dbb2173a781c67b2e301e05daf5d7"
     }
   ]
 }

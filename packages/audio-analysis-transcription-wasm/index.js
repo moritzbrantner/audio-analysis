@@ -660,7 +660,7 @@ export function normalizeBrowserTranscriptionOutput(output, context = {}) {
     source: typeof context.source === "string" ? context.source : "browser-audio",
     attributes: {
       acceleration: "webgpu",
-      modelId: DEFAULT_BROWSER_MODEL_ID,
+      modelId: model.id,
       requiredChannels: "1",
       requiredSampleRateHz: String(BROWSER_SAMPLE_RATE_HZ),
       runtime: BROWSER_RUNTIME_ID,

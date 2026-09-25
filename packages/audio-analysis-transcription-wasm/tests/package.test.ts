@@ -5,6 +5,7 @@ test("audio-analysis-transcription-wasm package exports stable entrypoints", asy
   expect(typeof entry.init).toBe("function");
   expect(typeof entry.packageSurface).toBe("function");
   expect(typeof entry.runOperation).toBe("function");
+  expect(typeof entry.browserTranscriptionModels).toBe("function");
   expect(typeof entry.browserTranscriptionCapabilities).toBe("function");
   expect(typeof entry.browserTranscriptionWindowPlan).toBe("function");
   expect(typeof entry.stitchBrowserTranscriptionWindow).toBe("function");
@@ -20,6 +21,16 @@ test("browser transcription capabilities stay WebGPU-only and bounded", async ()
   const capabilities = entry.browserTranscriptionCapabilities();
 
   expect(capabilities.requiredAcceleration).toBe("webgpu");
+  expect(capabilities.modelId).toBe("onnx-community/whisper-tiny");
+  expect(capabilities.models.map((model) => model.id)).toEqual([
+    "onnx-community/whisper-tiny",
+    "onnx-community/whisper-base",
+    "onnx-community/whisper-small",
+  ]);
+  expect(capabilities.modelLifecycle).toEqual({
+    maxIdleResidentModels: 1,
+    eviction: "dispose-superseded",
+  });
   expect(capabilities.input.sampleRateHz).toBe(16_000);
   expect(capabilities.input.channels).toBe(1);
   expect(capabilities.input.acceptedSources).toContain("caller-acquired MediaStream");
@@ -218,4 +229,60 @@ test("MediaStream adapter rejects invalid caller acquisition before browser runt
   await expect(
     entry.createBrowserMediaStreamTranscriptionSession({ getAudioTracks: () => [] }),
   ).rejects.toThrow("contains no audio track");
+});
+
+
+test("browser transcription model catalog is curated and defensive", async () => {
+  const entry = await import("../index.js");
+  const first = entry.browserTranscriptionModels();
+  const second = entry.browserTranscriptionModels();
+
+  expect(first.map((model) => model.label)).toEqual([
+    "Whisper Tiny",
+    "Whisper Base",
+    "Whisper Small",
+  ]);
+  expect(first).not.toBe(second);
+  first[0].label = "mutated";
+  expect(entry.browserTranscriptionModels()[0].label).toBe("Whisper Tiny");
+});
+
+test("empty bounded sessions preserve the selected model without loading it", async () => {
+  const entry = await import("../index.js");
+  const session = entry.createBrowserTranscriptionSession({
+    source: "empty-base-fixture",
+    modelId: "onnx-community/whisper-base",
+  });
+  const result = await session.flush();
+
+  expect(result.attributes.modelId).toBe("onnx-community/whisper-base");
+  expect(result.segments).toEqual([]);
+});
+
+test("browser transcription rejects model ids outside the curated catalog", async () => {
+  const entry = await import("../index.js");
+
+  expect(() =>
+    entry.createBrowserTranscriptionSession({
+      modelId: "some-owner/arbitrary-whisper",
+    }),
+  ).toThrow("Unsupported browser transcription model");
+});
+
+test("normalized browser output records the selected model", async () => {
+  const entry = await import("../index.js");
+  const result = entry.normalizeBrowserTranscriptionOutput(
+    {
+      text: "selected model",
+      chunks: [{ text: " selected model", timestamp: [0, 1] }],
+    },
+    {
+      durationSeconds: 1,
+      source: "fixture",
+      modelId: "onnx-community/whisper-small",
+    },
+  );
+
+  expect(result.attributes.modelId).toBe("onnx-community/whisper-small");
+  expect(result.segments[0].attributes.modelId).toBe("onnx-community/whisper-small");
 });

@@ -203,7 +203,7 @@ export async function supportsBrowserTranscription() {
   return adapter !== null;
 }
 
-export async function transcribeAudioBlob(source, options = {}) {
+export async function decodeBrowserAudioBlob(source, options = {}) {
   if (!source || typeof source.arrayBuffer !== "function") {
     throw new TypeError("audio-analysis browser transcription requires a Blob-like audio source.");
   }
@@ -211,7 +211,11 @@ export async function transcribeAudioBlob(source, options = {}) {
     stage: "decode",
     message: "Decoding and resampling audio to 16 kHz mono…",
   });
-  const audio = await decodeAndResample(source);
+  return decodeAndResample(source);
+}
+
+export async function transcribeAudioBlob(source, options = {}) {
+  const audio = await decodeBrowserAudioBlob(source, options);
   return transcribeAudioSamples(audio.samples, {
     ...options,
     durationSeconds: audio.durationSeconds,

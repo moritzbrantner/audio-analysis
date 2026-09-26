@@ -69,6 +69,11 @@ export type BrowserTranscriptionResult = {
   attributes: Record<string, string>;
 };
 
+export type BrowserDecodedAudio = {
+  samples: Float32Array;
+  durationSeconds: number;
+};
+
 export type BrowserTranscriptionWindowOptions = {
   windowSeconds?: number;
   strideSeconds?: number;
@@ -173,6 +178,10 @@ export function stitchBrowserTranscriptionWindow(
   options?: BrowserTranscriptionStitchOptions,
 ): BrowserTranscriptionStitchResult;
 export function supportsBrowserTranscription(): Promise<boolean>;
+export function decodeBrowserAudioBlob(
+  source: Blob,
+  options?: Pick<BrowserTranscriptionOptions, "onProgress">,
+): Promise<BrowserDecodedAudio>;
 export function transcribeAudioBlob(
   source: Blob,
   options?: BrowserTranscriptionOptions,

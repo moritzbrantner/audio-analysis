@@ -10,6 +10,7 @@ test("audio-analysis-transcription-wasm package exports stable entrypoints", asy
   expect(typeof entry.browserTranscriptionWindowPlan).toBe("function");
   expect(typeof entry.stitchBrowserTranscriptionWindow).toBe("function");
   expect(typeof entry.supportsBrowserTranscription).toBe("function");
+  expect(typeof entry.decodeBrowserAudioBlob).toBe("function");
   expect(typeof entry.transcribeAudioBlob).toBe("function");
   expect(typeof entry.transcribeAudioSamples).toBe("function");
   expect(typeof entry.createBrowserPcmResampler).toBe("function");

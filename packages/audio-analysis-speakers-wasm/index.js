@@ -86,7 +86,7 @@ export function diarizeAudioSamples(samples, options = {}) {
   );
   if (sampleRateHz !== BROWSER_DIARIZATION_SAMPLE_RATE_HZ) {
     throw new RangeError(
-      \`Browser diarization expects \${BROWSER_DIARIZATION_SAMPLE_RATE_HZ} Hz mono PCM.\`,
+      `Browser diarization expects ${BROWSER_DIARIZATION_SAMPLE_RATE_HZ} Hz mono PCM.`,
     );
   }
 
@@ -307,7 +307,7 @@ function assignPrototype(feature, prototypes, threshold, maxSpeakers) {
 function mergeSpeakerWindows(windows, sampleRateHz, hopSamples) {
   const merged = [];
   for (const window of windows) {
-    const speaker = \`speaker_\${window.speakerIndex}\`;
+    const speaker = `speaker_${window.speakerIndex}`;
     const startSeconds = window.start / sampleRateHz;
     const endSeconds = window.end / sampleRateHz;
     const score = Math.min(1, Math.max(0, window.rms * 8));

@@ -33,6 +33,15 @@ test("browser diarization returns local anonymous speaker segments", async () =>
   expect(result.modelId).toBe("spectral-speaker-baseline");
   expect(result.segments.length).toBeGreaterThan(0);
   expect(result.segments.every((segment) => segment.speaker.startsWith("speaker_"))).toBe(true);
+  expect(result.segments[0]?.speaker).toBe("speaker_0");
+});
+
+test("browser diarization reports its required runtime sample rate", async () => {
+  const { diarizeAudioSamples } = await import("../index.js");
+
+  expect(() =>
+    diarizeAudioSamples(new Float32Array([0.25]), { sampleRateHz: 8_000 }),
+  ).toThrow("Browser diarization expects 16000 Hz mono PCM.");
 });
 
 test("browser transcript assignment uses greatest overlap", async () => {

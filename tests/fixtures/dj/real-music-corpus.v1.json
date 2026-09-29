@@ -213,7 +213,7 @@
       ],
       "sourceUrl": "https://upload.wikimedia.org/wikipedia/commons/8/8c/MJ-PIA_-_Solarity_%28Acid-Techno%29.ogg",
       "provenanceUrl": "https://commons.wikimedia.org/w/index.php?title=File:MJ-PIA_-_Solarity_(Acid-Techno).ogg&oldid=1173739936",
-      "assertTempo": false,
+      "assertTempo": true,
       "sourceBytes": 12384633,
       "sourceSha1": "d5c8e8c04940d529c3660eb050fafd49536b1fbc",
       "referenceBpm": 124,

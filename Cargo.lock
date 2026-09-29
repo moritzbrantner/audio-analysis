@@ -1631,9 +1631,9 @@ dependencies = [
  "moenarch-audio-contracts",
  "moenarch-math-signal-core",
  "moenarch-runtime-core",
- "rustfft",
  "moenarch-tensor-data",
  "proptest",
+ "rustfft",
  "serde",
  "serde_json",
 ]

@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use audio_analysis_core::{
-    interleaved_to_mono, peak, rms, zero_pad_to, ChannelMix, FrameSpec, StreamingFrameBuffer,
-    StreamingFrameConfig, WindowFunction,
+    interleaved_to_mono, peak, rms,
+    spectral::{FourierTransform, Spectrum},
+    zero_pad_to, ChannelMix, FrameSpec, StreamingFrameBuffer, StreamingFrameConfig, WindowFunction,
 };
-use audio_analysis_fourier::{FourierTransform, Spectrum};
 use audio_contracts::{AnalysisEvent, AudioAnalyzer, AudioFrame, DetectError, Result, Timestamp};
 pub use media_core::{TranscriptSegmentContract, TranscriptionContract};
 use model_runtime::ModelSpec;

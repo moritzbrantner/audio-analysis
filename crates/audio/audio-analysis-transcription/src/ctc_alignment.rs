@@ -83,24 +83,38 @@ pub(crate) fn align_with_observer(
             }
         },
     )?;
+    let mut diagnostics = vec![
+        "alignment=wav2vec2Ctc".to_string(),
+        "alignmentProvider=ctc-forced-aligner".to_string(),
+        "alignmentModelExecution=candle-wav2vec2".to_string(),
+        format!("alignmentModelResolved={}", resolved.bundle.display()),
+        format!("alignmentModelSource={}", resolved.source),
+        format!("alignmentDevice={}", resolved_device.diagnostic_name()),
+        format!("alignmentCuda={}", resolved_device.cuda_active()),
+        format!(
+            "alignmentInterpolateMethod={}",
+            options.interpolate_method.as_whisperx_arg()
+        ),
+        format!("returnCharAlignments={}", options.return_char_alignments),
+    ];
+    if !aligned.fallback_segment_indices.is_empty() {
+        diagnostics.push("alignmentFallback=segmentTiming".to_string());
+        diagnostics.push("alignmentFallbackReason=ctcFrameDeficit".to_string());
+        diagnostics.push(format!(
+            "alignmentFallbackSegments={}",
+            aligned
+                .fallback_segment_indices
+                .iter()
+                .map(u64::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+    }
     Ok(AlignmentResponse {
         model_id: resolved.model_id,
         words: aligned.words,
         chars: aligned.chars,
-        diagnostics: vec![
-            "alignment=wav2vec2Ctc".to_string(),
-            "alignmentProvider=ctc-forced-aligner".to_string(),
-            "alignmentModelExecution=candle-wav2vec2".to_string(),
-            format!("alignmentModelResolved={}", resolved.bundle.display()),
-            format!("alignmentModelSource={}", resolved.source),
-            format!("alignmentDevice={}", resolved_device.diagnostic_name()),
-            format!("alignmentCuda={}", resolved_device.cuda_active()),
-            format!(
-                "alignmentInterpolateMethod={}",
-                options.interpolate_method.as_whisperx_arg()
-            ),
-            format!("returnCharAlignments={}", options.return_char_alignments),
-        ],
+        diagnostics,
     })
 }
 

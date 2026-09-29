@@ -23,14 +23,16 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import pathlib
 import re
 import statistics
 import subprocess
 import sys
+import tempfile
 import urllib.request
 from dataclasses import dataclass
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from typing import Any
 
 
@@ -60,6 +62,8 @@ class Fixture:
     reference_key_source: str | None = None
     assert_key: bool = False
     assert_tempo: bool = False
+    reference_bpm: float | None = None
+    reference_bpm_source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -162,6 +166,8 @@ def load_corpus() -> Corpus:
         reference_key_source = item.get("referenceKeySource")
         assert_key = item.get("assertKey", False)
         assert_tempo = item.get("assertTempo", False)
+        reference_bpm = item.get("referenceBpm")
+        reference_bpm_source = item.get("referenceBpmSource")
 
         if not isinstance(name, str) or not name.strip():
             raise RuntimeError(f"{label}.name must be a non-empty string")
@@ -194,6 +200,22 @@ def load_corpus() -> Corpus:
                 f"{label} external source metadata requires sourceUrl, provenanceUrl, "
                 "sourceBytes, and sourceSha1"
             )
+        if provenance_url is not None:
+            provenance = urlparse(provenance_url)
+            if provenance.hostname == "commons.wikimedia.org":
+                query = parse_qs(provenance.query)
+                revisions = query.get("oldid", [])
+                titles = query.get("title", [])
+                if (
+                    provenance.path != "/w/index.php"
+                    or len(revisions) != 1
+                    or re.fullmatch(r"[1-9][0-9]*", revisions[0]) is None
+                    or len(titles) != 1
+                    or not titles[0].startswith("File:")
+                ):
+                    raise RuntimeError(
+                        f"{label}.provenanceUrl requires one immutable Commons file revision"
+                    )
         if source_bytes is not None and (
             not isinstance(source_bytes, int)
             or isinstance(source_bytes, bool)
@@ -225,6 +247,19 @@ def load_corpus() -> Corpus:
             raise RuntimeError(f"{label}.assertKey requires {label}.referenceKey")
         if not isinstance(assert_tempo, bool):
             raise RuntimeError(f"{label}.assertTempo must be a boolean")
+        if reference_bpm is not None and (
+            not isinstance(reference_bpm, (int, float))
+            or isinstance(reference_bpm, bool)
+            or not math.isfinite(reference_bpm)
+            or reference_bpm <= 0
+        ):
+            raise RuntimeError(f"{label}.referenceBpm must be finite and positive")
+        if (reference_bpm is None) != (reference_bpm_source is None):
+            raise RuntimeError(f"{label} tempo reference requires referenceBpm and referenceBpmSource")
+        if reference_bpm_source is not None and (
+            not isinstance(reference_bpm_source, str) or not reference_bpm_source.strip()
+        ):
+            raise RuntimeError(f"{label}.referenceBpmSource must be a non-empty string")
 
         coverage = string_list(item.get("coverage", []), f"{label}.coverage", allow_empty=True)
         unknown_coverage = sorted(set(coverage) - required_set)
@@ -251,6 +286,8 @@ def load_corpus() -> Corpus:
                 reference_key_source=reference_key_source,
                 assert_key=assert_key,
                 assert_tempo=assert_tempo,
+                reference_bpm=reference_bpm,
+                reference_bpm_source=reference_bpm_source,
             )
         )
 
@@ -310,18 +347,25 @@ def download_fixture(corpus: Corpus, fixture: Fixture) -> pathlib.Path:
             )
         },
     )
-    with urllib.request.urlopen(request, timeout=120) as response, path.open("wb") as stream:
-        while chunk := response.read(1024 * 1024):
-            stream.write(chunk)
-    if not fixture_file_matches(path, fixture):
-        actual_sha256 = sha256(path)
-        actual_bytes = path.stat().st_size
-        actual_sha1 = sha1(path) if fixture.source_sha1 is not None else None
-        path.unlink(missing_ok=True)
-        raise RuntimeError(
-            f"fixture source mismatch for {fixture.name}: "
-            f"sha256={actual_sha256}, bytes={actual_bytes}, sha1={actual_sha1}"
-        )
+    temporary_path = None
+    try:
+        with (
+            urllib.request.urlopen(request, timeout=120) as response,
+            tempfile.NamedTemporaryFile(dir=CACHE, suffix=".part", delete=False) as stream,
+        ):
+            temporary_path = pathlib.Path(stream.name)
+            while chunk := response.read(1024 * 1024):
+                stream.write(chunk)
+        if not fixture_file_matches(temporary_path, fixture):
+            raise RuntimeError(
+                f"fixture source mismatch for {fixture.name}: "
+                f"sha256={sha256(temporary_path)}, bytes={temporary_path.stat().st_size}, "
+                f"sha1={sha1(temporary_path) if fixture.source_sha1 is not None else None}"
+            )
+        temporary_path.replace(path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
     return path
 
 
@@ -437,6 +481,29 @@ def tempo_relative_error(actual: float, golden: float) -> float:
 
 def tempo_equivalent(actual: float, golden: float, tolerance: float = 0.035) -> bool:
     return tempo_relative_error(actual, golden) <= tolerance
+
+
+def reference_tempo_metrics(
+    rust_bpm: float | None,
+    librosa_bpm: float,
+    essentia_bpm: float | None,
+    fixture: Fixture,
+) -> dict[str, Any]:
+    if fixture.reference_bpm is None:
+        return {}
+    error = (
+        tempo_relative_error(rust_bpm, fixture.reference_bpm)
+        if rust_bpm is not None else None
+    )
+    return {
+        "referenceTempoMatch": error is not None and error <= 0.035,
+        "referenceTempoErrorPercent": error * 100.0 if error is not None else None,
+        "librosaReferenceTempoMatch": tempo_equivalent(librosa_bpm, fixture.reference_bpm),
+        "essentiaReferenceTempoMatch": (
+            tempo_equivalent(essentia_bpm, fixture.reference_bpm)
+            if essentia_bpm is not None else None
+        ),
+    }
 
 
 def beat_f1(
@@ -565,6 +632,9 @@ def aggregate_metrics(
         "pinnedKeyMatches": pinned_key_matches,
         "pinnedKeyFixtureCount": len(pinned_key_reports),
         "assertedKeyFixtureCount": len(asserted_key_reports),
+        "referenceTempoFixtureCount": sum(report.get("referenceBpm") is not None for report in reports),
+        "referenceTempoMatches": sum(item.get("referenceTempoMatch") is True for item in metrics),
+        "assertedTempoFixtureCount": sum(report.get("assertTempo") is True for report in reports),
     }
 
 
@@ -629,6 +699,12 @@ def main() -> int:
         librosa = librosa_analysis(path)
         essentia = essentia_analysis(path)
         metrics = fixture_metrics(rust, librosa, essentia)
+        metrics.update(reference_tempo_metrics(
+            rust.get("rhythm", {}).get("bpm"),
+            librosa["tempo"],
+            essentia["tempo"] if essentia is not None else None,
+            fixture,
+        ))
         report = {
             "fixture": fixture.name,
             "category": fixture.category,
@@ -643,6 +719,9 @@ def main() -> int:
             "referenceKey": fixture.reference_key,
             "referenceKeySource": fixture.reference_key_source,
             "assertKey": fixture.assert_key,
+            "assertTempo": fixture.assert_tempo,
+            "referenceBpm": fixture.reference_bpm,
+            "referenceBpmSource": fixture.reference_bpm_source,
             "metrics": metrics,
             "rust": rust,
             "librosa": librosa,
@@ -656,7 +735,7 @@ def main() -> int:
                 f"{fixture.name}: Rust BPM {rust_bpm} differs from "
                 f"librosa BPM {librosa['tempo']:.3f} beyond octave-equivalent tolerance"
             )
-            if fixture.assert_tempo:
+            if fixture.assert_tempo and fixture.reference_bpm is None:
                 failures.append(message)
             else:
                 disagreements.append(message)
@@ -664,6 +743,17 @@ def main() -> int:
             message = (
                 f"{fixture.name}: Rust BPM {rust_bpm} differs from "
                 f"Essentia BPM {essentia['tempo']:.3f} beyond octave-equivalent tolerance"
+            )
+            if fixture.assert_tempo and fixture.reference_bpm is None:
+                failures.append(message)
+            else:
+                disagreements.append(message)
+
+        if fixture.reference_bpm is not None and not metrics["referenceTempoMatch"]:
+            message = (
+                f"{fixture.name}: Rust BPM {rust_bpm} differs from "
+                f"{fixture.reference_bpm_source} reference {fixture.reference_bpm} BPM "
+                "beyond octave-equivalent tolerance"
             )
             if fixture.assert_tempo:
                 failures.append(message)

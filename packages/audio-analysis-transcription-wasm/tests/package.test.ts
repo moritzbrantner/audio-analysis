@@ -5,12 +5,15 @@ test("audio-analysis-transcription-wasm package exports stable entrypoints", asy
   expect(typeof entry.init).toBe("function");
   expect(typeof entry.packageSurface).toBe("function");
   expect(typeof entry.runOperation).toBe("function");
+  expect(typeof entry.browserTranscriptionModels).toBe("function");
   expect(typeof entry.browserTranscriptionCapabilities).toBe("function");
   expect(typeof entry.browserTranscriptionWindowPlan).toBe("function");
   expect(typeof entry.stitchBrowserTranscriptionWindow).toBe("function");
   expect(typeof entry.supportsBrowserTranscription).toBe("function");
   expect(typeof entry.transcribeAudioBlob).toBe("function");
   expect(typeof entry.transcribeAudioSamples).toBe("function");
+  expect(typeof entry.createBrowserPcmResampler).toBe("function");
+  expect(typeof entry.createBrowserDecodedAudioTranscriptionSession).toBe("function");
   expect(typeof entry.createBrowserTranscriptionSession).toBe("function");
   expect(typeof entry.createBrowserMediaStreamTranscriptionSession).toBe("function");
 });
@@ -20,12 +23,23 @@ test("browser transcription capabilities stay WebGPU-only and bounded", async ()
   const capabilities = entry.browserTranscriptionCapabilities();
 
   expect(capabilities.requiredAcceleration).toBe("webgpu");
+  expect(capabilities.modelId).toBe("onnx-community/whisper-tiny");
+  expect(capabilities.models.map((model) => model.id)).toEqual([
+    "onnx-community/whisper-tiny",
+    "onnx-community/whisper-base",
+    "onnx-community/whisper-small",
+  ]);
+  expect(capabilities.modelLifecycle).toEqual({
+    maxIdleResidentModels: 1,
+    eviction: "dispose-superseded",
+  });
   expect(capabilities.input.sampleRateHz).toBe(16_000);
   expect(capabilities.input.channels).toBe(1);
   expect(capabilities.input.acceptedSources).toContain("caller-acquired MediaStream");
   expect(capabilities.features.transcription).toBe(true);
   expect(capabilities.features.timedSegments).toBe(true);
   expect(capabilities.features.boundedPcmStreaming).toBe(true);
+  expect(capabilities.features.decodedAudioAdapter).toBe(true);
   expect(capabilities.features.mediaStreamAdapter).toBe(true);
   expect(capabilities.features.alignment).toBe(false);
   expect(capabilities.features.diarization).toBe(false);
@@ -90,6 +104,45 @@ test("browser output normalization preserves timed transcription segments", asyn
   expect(result.segments).toHaveLength(2);
   expect(result.segments[0]).toMatchObject({ startSeconds: 0, endSeconds: 0.5, text: "hello" });
   expect(result.segments[1]).toMatchObject({ startSeconds: 0.5, endSeconds: 1.25, text: "world" });
+});
+
+test("browser output normalization removes long dot hallucinations but preserves ellipses", async () => {
+  const entry = await import("../index.js");
+  const result = entry.normalizeBrowserTranscriptionOutput(
+    {
+      text: "before ........................................ after Wait...",
+      chunks: [
+        { text: " before", timestamp: [0, 0.5] },
+        { text: " ........................................", timestamp: [0.5, 1] },
+        { text: " after Wait...", timestamp: [1, 1.5] },
+      ],
+    },
+    { durationSeconds: 1.5, source: "fixture" },
+  );
+
+  expect(result.text).toBe("before after Wait...");
+  expect(result.segments.map((segment) => segment.text)).toEqual(["before", "after Wait..."]);
+  expect(result.segments.map((segment) => [segment.startSeconds, segment.endSeconds])).toEqual([
+    [0, 0.5],
+    [1, 1.5],
+  ]);
+});
+
+test("browser output normalization preserves aggregate spacing from multilingual model text", async () => {
+  const entry = await import("../index.js");
+  const result = entry.normalizeBrowserTranscriptionOutput(
+    {
+      text: "你好世界",
+      chunks: [
+        { text: "你好", timestamp: [0, 0.5] },
+        { text: "世界", timestamp: [0.5, 1] },
+      ],
+    },
+    { durationSeconds: 1, source: "fixture" },
+  );
+
+  expect(result.text).toBe("你好世界");
+  expect(result.segments.map((segment) => segment.text)).toEqual(["你好", "世界"]);
 });
 
 test("browser output normalization offsets bounded windows onto the global timeline", async () => {
@@ -179,4 +232,115 @@ test("MediaStream adapter rejects invalid caller acquisition before browser runt
   await expect(
     entry.createBrowserMediaStreamTranscriptionSession({ getAudioTracks: () => [] }),
   ).rejects.toThrow("contains no audio track");
+});
+
+
+test("browser transcription model catalog is curated and defensive", async () => {
+  const entry = await import("../index.js");
+  const first = entry.browserTranscriptionModels();
+  const second = entry.browserTranscriptionModels();
+
+  expect(first.map((model) => model.label)).toEqual([
+    "Whisper Tiny",
+    "Whisper Base",
+    "Whisper Small",
+  ]);
+  expect(first).not.toBe(second);
+  first[0].label = "mutated";
+  expect(entry.browserTranscriptionModels()[0].label).toBe("Whisper Tiny");
+});
+
+test("empty bounded sessions preserve the selected model without loading it", async () => {
+  const entry = await import("../index.js");
+  const session = entry.createBrowserTranscriptionSession({
+    source: "empty-base-fixture",
+    modelId: "onnx-community/whisper-base",
+  });
+  const result = await session.flush();
+
+  expect(result.attributes.modelId).toBe("onnx-community/whisper-base");
+  expect(result.segments).toEqual([]);
+});
+
+test("browser transcription rejects model ids outside the curated catalog", async () => {
+  const entry = await import("../index.js");
+
+  expect(() =>
+    entry.createBrowserTranscriptionSession({
+      modelId: "some-owner/arbitrary-whisper",
+    }),
+  ).toThrow("Unsupported browser transcription model");
+});
+
+test("normalized browser output records the selected model", async () => {
+  const entry = await import("../index.js");
+  const result = entry.normalizeBrowserTranscriptionOutput(
+    {
+      text: "selected model",
+      chunks: [{ text: " selected model", timestamp: [0, 1] }],
+    },
+    {
+      durationSeconds: 1,
+      source: "fixture",
+      modelId: "onnx-community/whisper-small",
+    },
+  );
+
+  expect(result.attributes.modelId).toBe("onnx-community/whisper-small");
+  expect(result.segments[0].attributes.modelId).toBe("onnx-community/whisper-small");
+});
+
+
+test("browser PCM resampler preserves continuity across decoded frame boundaries", async () => {
+  const entry = await import("../index.js");
+  const resampler = entry.createBrowserPcmResampler(48_000);
+
+  const first = resampler.push([
+    Float32Array.from({ length: 480 }, (_, index) => index / 480),
+    Float32Array.from({ length: 480 }, (_, index) => index / 240),
+  ]);
+  const second = resampler.push([
+    Float32Array.from({ length: 480 }, (_, index) => (480 + index) / 480),
+    Float32Array.from({ length: 480 }, (_, index) => (480 + index) / 240),
+  ]);
+
+  expect(first.length).toBe(160);
+  expect(second.length).toBe(160);
+  expect(first[0]).toBeCloseTo(0, 6);
+  expect(first[159]).toBeCloseTo((477 / 480 + 477 / 240) / 2, 5);
+  expect(second[0]).toBeCloseTo((480 / 480 + 480 / 240) / 2, 5);
+  expect(second[159]).toBeCloseTo((957 / 480 + 957 / 240) / 2, 5);
+  expect(resampler.outputSampleRateHz).toBe(16_000);
+});
+
+test("browser PCM resampler rejects out-of-band energy before 48 kHz decimation", async () => {
+  const entry = await import("../index.js");
+  const sampleRate = 48_000;
+  const frames = 4_800;
+  const tone = (frequency: number) =>
+    Float32Array.from(
+      { length: frames },
+      (_, index) => Math.sin((2 * Math.PI * frequency * index) / sampleRate),
+    );
+
+  const lowBand = entry.createBrowserPcmResampler(sampleRate).push([tone(4_000)]);
+  const outOfBand = entry.createBrowserPcmResampler(sampleRate).push([tone(12_000)]);
+  const steadyRms = (samples: Float32Array) => {
+    const steady = samples.subarray(Math.min(64, samples.length));
+    return Math.sqrt(steady.reduce((sum, sample) => sum + sample * sample, 0) / steady.length);
+  };
+
+  expect(steadyRms(lowBand)).toBeGreaterThan(0.6);
+  expect(steadyRms(outOfBand)).toBeLessThan(0.05);
+});
+
+test("browser PCM resampler handles non-integer source ratios without resetting phase", async () => {
+  const entry = await import("../index.js");
+  const resampler = entry.createBrowserPcmResampler(44_100);
+
+  const first = resampler.push([new Float32Array(441).fill(0.25)]);
+  const second = resampler.push([new Float32Array(441).fill(0.25)]);
+
+  expect(first.length + second.length).toBe(320);
+  expect([...first, ...second].every((sample) => Math.abs(sample - 0.25) < 1e-6)).toBe(true);
 });

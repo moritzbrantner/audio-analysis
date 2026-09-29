@@ -99,7 +99,6 @@ fn downmix_to_mono(samples: &[f32], channels: u16) -> Vec<f32> {
         .collect()
 }
 
-
 fn key_estimate_json(estimate: &MusicalKeyEstimate) -> serde_json::Value {
     json!({
         "label": estimate.label(),

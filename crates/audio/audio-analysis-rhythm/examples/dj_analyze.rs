@@ -75,6 +75,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 })).collect::<Vec<_>>(),
                 "beatCount": rhythm.beats.len(),
                 "beats": rhythm.beats.iter().map(|beat| beat.timestamp_seconds).collect::<Vec<_>>(),
+                "tempoMap": rhythm.tempo_map.iter().map(|point| json!({
+                    "timestampSeconds": point.timestamp_seconds,
+                    "bpm": point.bpm,
+                    "confidence": point.confidence
+                })).collect::<Vec<_>>(),
                 "downbeats": rhythm.downbeats,
                 "downbeatConfidence": rhythm.downbeat_confidence
             },

@@ -16,6 +16,8 @@ Onset, tempo, beat, downbeat, and rhythmic-section analysis for music and media 
 4. Dynamic-programming beat tracking around the selected beat period.
 5. Four-beat bar-phase inference from transient and low-frequency beat accents.
 
+Stable tempo maps retain the selected global candidate as the song BPM. With at least eight finite positive local estimates and a 15% tempo spread after trimming the outer 10% at each end, the song BPM becomes the trimmed median. This is a summary per tracked beat, not per elapsed second; spread can reflect acceleration, abrupt changes, or tracking instability. Ranked candidates and local tempo points remain available, and confidence still describes the selected global candidate and beat path rather than a separately calibrated summary.
+
 The downbeat result is intentionally a confidence-bearing 4/4 heuristic rather than a claim of meter recognition. Tracks with unusual meter, weak bar accents, changing tempo, or intentionally ambiguous half-time feel should use the returned candidates and confidence values rather than treating one number as ground truth.
 
 ```rust,ignore

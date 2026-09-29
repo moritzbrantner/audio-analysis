@@ -56,14 +56,17 @@ REQUIRED_OWNED_CAPABILITIES = {
     "thin-audio-inference-adapters",
 }
 REQUIRED_EXCLUDED_AUTHORITIES = {
-    "application-composition",
-    "corpus-persistence",
-    "downstream-interpretation",
-    "product-specific-transcription-workflows",
-    "subtitle-editing",
-    "visual-analysis",
-    "video-frame-decoding",
-    "shared-media-runtime-data-contracts",
+    "application-composition": ("owner_layer", "application"),
+    "corpus-persistence": ("owner_layer", "application"),
+    "downstream-interpretation": ("owner_layer", "application"),
+    "product-specific-transcription-workflows": ("owner_layer", "application"),
+    "subtitle-editing": ("owner_layer", "application"),
+    "visual-analysis": ("owner_layer", "domain"),
+    "video-frame-decoding": ("owner_layer", "domain"),
+    "shared-media-runtime-data-contracts": (
+        "owner_repository",
+        "moritzbrantner/moenarch-foundation",
+    ),
 }
 REQUIRED_KNOWN_CONSUMERS = {
     "moritzbrantner/native-whisperx",
@@ -116,7 +119,21 @@ def main() -> int:
     ):
         errors.append("repository ownership boundary must identify audio-analysis as a domain capability owner")
 
-    owned_capabilities = set(boundary.get("owned_capabilities", []))
+    owned_records = boundary.get("owned_capabilities", [])
+    if (
+        not isinstance(owned_records, list)
+        or any(
+            not isinstance(capability, str) or not capability.strip()
+            for capability in owned_records
+        )
+        or len(set(owned_records)) != len(owned_records)
+    ):
+        errors.append(
+            "repository ownership boundary owned capabilities must be a list of unique non-empty strings"
+        )
+        owned_capabilities: set[str] = set()
+    else:
+        owned_capabilities = set(owned_records)
     missing_owned = REQUIRED_OWNED_CAPABILITIES - owned_capabilities
     if missing_owned:
         errors.append(
@@ -125,24 +142,33 @@ def main() -> int:
         )
 
     excluded_records = boundary.get("excluded_authorities", [])
-    excluded_authorities = {
-        record.get("authority")
-        for record in excluded_records
-        if isinstance(record, dict) and isinstance(record.get("authority"), str)
-    }
-    missing_excluded = REQUIRED_EXCLUDED_AUTHORITIES - excluded_authorities
+    excluded_by_authority: dict[str, dict] = {}
+    if not isinstance(excluded_records, list):
+        errors.append("repository ownership boundary excluded authorities must be a list")
+        excluded_records = []
+    for record in excluded_records:
+        if not isinstance(record, dict) or not isinstance(record.get("authority"), str):
+            errors.append("repository ownership boundary has an invalid excluded-authority record")
+            continue
+        authority = record["authority"]
+        if authority in excluded_by_authority:
+            errors.append(f"excluded authority {authority} must be declared exactly once")
+            continue
+        excluded_by_authority[authority] = record
+
+    missing_excluded = set(REQUIRED_EXCLUDED_AUTHORITIES) - set(excluded_by_authority)
     if missing_excluded:
         errors.append(
             "repository ownership boundary is missing excluded authorities: "
             + ", ".join(sorted(missing_excluded))
         )
-    for record in excluded_records:
-        if not isinstance(record, dict) or not isinstance(record.get("authority"), str):
-            errors.append("repository ownership boundary has an invalid excluded-authority record")
+    for authority, (owner_key, expected_owner) in REQUIRED_EXCLUDED_AUTHORITIES.items():
+        record = excluded_by_authority.get(authority)
+        if record is None:
             continue
-        if "owner_layer" not in record and "owner_repository" not in record:
+        if record.get(owner_key) != expected_owner:
             errors.append(
-                f"excluded authority {record['authority']} must declare its owner layer or repository"
+                f"excluded authority {authority} must declare {owner_key}={expected_owner}"
             )
 
     consumers = boundary.get("known_consumer_repositories", [])

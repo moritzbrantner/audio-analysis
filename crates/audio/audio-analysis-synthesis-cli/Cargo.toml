@@ -1,0 +1,26 @@
+[package]
+name = "moenarch-audio-analysis-synthesis-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Command-line adapter for the audio-analysis-synthesis library crate."
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+default-run = "audio-analysis-synthesis-cli"
+
+[lib]
+name = "audio_analysis_synthesis_cli"
+
+[[bin]]
+name = "audio-analysis-synthesis-cli"
+path = "src/main.rs"
+
+[dependencies]
+runtime-core.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+audio-analysis-synthesis = { package = "moenarch-audio-analysis-synthesis", version = "0.1.0", path = "../audio-analysis-synthesis" }

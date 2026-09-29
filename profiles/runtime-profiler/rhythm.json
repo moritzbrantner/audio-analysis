@@ -1,0 +1,16 @@
+{
+  "schema_version": "runtime-profiler/scenario/v1",
+  "id": "audio-analysis-rhythm",
+  "target": {
+    "type": "command",
+    "program": "bash",
+    "args": ["scripts/profile-rhythm.sh"],
+    "working_directory": "../.."
+  },
+  "run": {
+    "warmup_iterations": 1,
+    "measurement_iterations": 7,
+    "timeout_seconds": 60
+  },
+  "collectors": ["process"]
+}

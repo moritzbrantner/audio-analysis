@@ -1,0 +1,47 @@
+[project]
+name = "audio-analysis"
+repo = "."
+baseline_ref = "main"
+
+[eval]
+work_dir = ".moonlight/evals"
+keep_worktrees = "failed"
+jobs = 1
+target_timeout_ms = 900000
+max_body_capture_bytes = 20000
+
+[[checks]]
+id = "structure"
+name = "Extraction structure"
+command = "python3 scripts/check_extraction.py"
+cwd = "."
+timeout_ms = 120000
+ignore_stdout = true
+ignore_stderr = true
+
+[[checks]]
+id = "rust-format"
+name = "Rust format"
+command = "cargo fmt --all -- --check"
+cwd = "."
+timeout_ms = 120000
+ignore_stdout = true
+ignore_stderr = true
+
+[[checks]]
+id = "rhythm-clippy"
+name = "Rhythm clippy"
+command = "cargo clippy -p moenarch-audio-analysis-rhythm --all-targets -- -D warnings"
+cwd = "."
+timeout_ms = 900000
+ignore_stdout = true
+ignore_stderr = true
+
+[[checks]]
+id = "rhythm-tests"
+name = "Rhythm tests"
+command = "cargo test -p moenarch-audio-analysis-rhythm"
+cwd = "."
+timeout_ms = 900000
+ignore_stdout = true
+ignore_stderr = true

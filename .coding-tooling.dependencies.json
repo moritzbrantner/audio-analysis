@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "repository": {
+    "name": "moritzbrantner/audio-analysis",
+    "layer": "domain"
+  },
+  "dependencies": [
+    {
+      "repository": "moritzbrantner/moenarch-foundation",
+      "layer": "foundation",
+      "relation": "foundation"
+    }
+  ],
+  "maxExactSourceRepositories": 1,
+  "legacyRepositories": {
+    "moritzbrantner/rust-packages": "moritzbrantner/audio-analysis"
+  },
+  "graph": {
+    "moritzbrantner/audio-analysis": ["moritzbrantner/moenarch-foundation"],
+    "moritzbrantner/moenarch-foundation": []
+  }
+}

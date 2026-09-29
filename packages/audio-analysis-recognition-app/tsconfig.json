@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@moritzbrantner/audio-app-ui": [
+        "../audio-app-ui/src/index.ts"
+      ],
+      "@moritzbrantner/audio-app-ui/tailwind-content": [
+        "../audio-app-ui/src/tailwind-content.ts"
+      ],
+      "@moritzbrantner/audio-app-ui/*": [
+        "../audio-app-ui/src/*/index.tsx"
+      ]
+    },
+    "ignoreDeprecations": "6.0"
+  },
+  "include": [
+    "src"
+  ],
+  "references": []
+}

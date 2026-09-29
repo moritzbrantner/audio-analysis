@@ -1,0 +1,17 @@
+name: Publish Score History
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  score-history:
+    permissions:
+      contents: write
+    uses: moritzbrantner/reusable-workflows/.github/workflows/coding-tooling-score-history.yml@27bcfd648f5fdf3f08b3e4b1adc96ccce28508bc
+    with:
+      tier: fast

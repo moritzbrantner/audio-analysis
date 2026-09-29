@@ -16,6 +16,8 @@ test-corpora/
 coverage/
 .nyc_output/
 node_modules/
+__pycache__/
+.venv-dj/
 packages/*/node_modules/
 packages/*/.vite/
 packages/*/coverage/

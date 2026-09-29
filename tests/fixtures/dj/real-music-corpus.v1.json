@@ -215,7 +215,9 @@
       "provenanceUrl": "https://commons.wikimedia.org/w/index.php?title=File:MJ-PIA_-_Solarity_(Acid-Techno).ogg&oldid=1173739936",
       "assertTempo": false,
       "sourceBytes": 12384633,
-      "sourceSha1": "d5c8e8c04940d529c3660eb050fafd49536b1fbc"
+      "sourceSha1": "d5c8e8c04940d529c3660eb050fafd49536b1fbc",
+      "referenceBpm": 124,
+      "referenceBpmSource": "Wikimedia Commons creator description, revision 1173739936"
     },
     {
       "name": "crooked-cop-reggae",

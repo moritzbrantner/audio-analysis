@@ -1656,6 +1656,7 @@ mod tests {
             (selected as f64 - bpm).abs() / bpm < 0.035,
             "bpm={selected}"
         );
+        assert_eq!(analysis.beats.len(), 6, "extra subdivision beats");
         for beat in 0..6 {
             let expected = 0.5 + beat as f64 * period;
             assert!(

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "audio-analysis-consumer-scenarios/v1",
+  "evidenceKind": "authored-synthetic-scenario",
+  "cases": [
+    {
+      "id": "dj-party-analyzed-quantized-loops",
+      "consumer": "moritzbrantner/dj-party",
+      "origin": "https://github.com/moritzbrantner/dj-party/blob/825e84110d28357c6d414f65c5b9b791908c56bd/src/lib.rs#L419",
+      "status": "existing-product-scenario",
+      "scenario": "Analyze decoded PCM before planning the product's 1/2/4/8-beat loops; reject playheads beyond analyzed beats."
+    },
+    {
+      "id": "media-player-planned-two-track-transition",
+      "consumer": "moritzbrantner/media-player",
+      "origin": "https://github.com/moritzbrantner/media-player/issues/8",
+      "status": "planned-consumer-requirement",
+      "scenario": "Independent C-major and G-major tracks provide confidence-bearing tempo/key evidence and beat-aligned transition anchors. Product policy chooses compatibility and overlap."
+    }
+  ]
+}

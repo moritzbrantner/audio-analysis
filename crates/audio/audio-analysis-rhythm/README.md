@@ -76,6 +76,20 @@ external-tool execution.
 
 The evaluator is opt-in because the third-party Python packages and audio downloads are intentionally outside ordinary deterministic repository CI.
 
+Consumer scenarios run offline through public rhythm, key, and playback APIs:
+
+```text
+cargo run --locked -p moenarch-audio-analysis-rhythm --example dj_consumer_acceptance
+```
+
+The JSON report includes case IDs and provenance from
+`tests/fixtures/consumer-scenarios.v1.json`. These authored synthetic cases
+exercise DJ Party's analyzed 1/2/4/8-beat loop inputs and Media Player's planned
+two-track transition evidence. They are also tested by the ordinary workspace
+gate. Media Player issue #8 remains a planned integration: these tests do not
+claim downstream playback, queue, crossfade, or audible acceptance. Consumer
+policy and calibrated confidence thresholds stay downstream.
+
 ## Related crates
 
 - `audio-analysis-core`

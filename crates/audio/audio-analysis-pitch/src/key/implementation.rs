@@ -211,45 +211,39 @@ pub fn harmonic_chroma(
     let tuning_cents = estimate_tuning_cents(&all_frames);
 
     let mut aggregate_hpcp = [0.0_f32; HPCP_BINS_PER_OCTAVE];
-    let mut contributing_bands = 0_usize;
     let mut contributing_frames = 0_usize;
     let mut peak_count = 0_usize;
 
+    // Keep measured peak energy until bands are combined. Normalizing every
+    // active frame/band separately amplifies weak transient-only bands to the
+    // same weight as sustained tonal evidence. Mean over all frames (including
+    // empty ones) accounts for different FFT-pyramid hop sizes.
     for band_frames in &peak_bands {
         let mut band_hpcp = [0.0_f32; HPCP_BINS_PER_OCTAVE];
-        let mut band_frame_count = 0_usize;
         for frame_peaks in band_frames {
             let mut frame_hpcp = [0.0_f32; HPCP_BINS_PER_OCTAVE];
             for peak in frame_peaks {
                 add_peak_to_hpcp(&mut frame_hpcp, *peak, tuning_cents);
                 peak_count += 1;
             }
-            if normalize_nonnegative(&mut frame_hpcp) {
+            if frame_hpcp.iter().sum::<f32>() > f32::EPSILON {
                 for (target, value) in band_hpcp.iter_mut().zip(frame_hpcp) {
                     *target += value;
                 }
-                band_frame_count += 1;
                 contributing_frames += 1;
             }
         }
-        if band_frame_count > 0 {
+        if !band_frames.is_empty() {
             for value in &mut band_hpcp {
-                *value /= band_frame_count as f32;
+                *value /= band_frames.len() as f32;
             }
-            normalize_nonnegative(&mut band_hpcp);
             for (target, value) in aggregate_hpcp.iter_mut().zip(band_hpcp) {
                 *target += value;
             }
-            contributing_bands += 1;
         }
     }
 
-    if contributing_bands > 0 {
-        for value in &mut aggregate_hpcp {
-            *value /= contributing_bands as f32;
-        }
-        normalize_nonnegative(&mut aggregate_hpcp);
-    }
+    normalize_nonnegative(&mut aggregate_hpcp);
 
     let mut chroma = collapse_hpcp(&aggregate_hpcp);
     normalize_chroma(&mut chroma);

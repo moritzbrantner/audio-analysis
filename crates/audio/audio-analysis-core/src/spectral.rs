@@ -148,14 +148,18 @@ pub struct FourierTransform {
 struct SpectralScratch {
     fft: Arc<dyn Fft<f32>>,
     buffer: Vec<Complex<f32>>,
+    workspace: Vec<Complex<f32>>,
 }
 
 impl SpectralScratch {
     fn new(fft_size: usize) -> Self {
         let mut planner = FftPlanner::<f32>::new();
+        let fft = planner.plan_fft_forward(fft_size);
+        let workspace = vec![Complex::new(0.0, 0.0); fft.get_inplace_scratch_len()];
         Self {
-            fft: planner.plan_fft_forward(fft_size),
+            fft,
             buffer: vec![Complex::new(0.0, 0.0); fft_size],
+            workspace,
         }
     }
 
@@ -168,7 +172,8 @@ impl SpectralScratch {
     }
 
     fn process(&mut self) {
-        self.fft.process(&mut self.buffer);
+        self.fft
+            .process_with_scratch(&mut self.buffer, &mut self.workspace);
     }
 }
 

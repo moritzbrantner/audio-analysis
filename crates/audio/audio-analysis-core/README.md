@@ -32,6 +32,15 @@ assert!(!frames.is_empty());
 assert_eq!(joined.channels, 1);
 ```
 
+## Spectral ownership
+
+`audio_analysis_core::spectral` owns reusable FFT, STFT, spectrum, spectral-feature,
+and phase-aware novelty primitives. The `audio-analysis-fourier` package remains
+the compatibility/runtime surface and re-exports these computational symbols.
+
+STFT execution reuses one planned FFT and one complex scratch buffer across a frame
+sequence instead of rebuilding planner and window buffers for every frame.
+
 ## Whole-Buffer Editing
 
 `AudioClip` stores validated interleaved `f32` audio with sample rate and channel

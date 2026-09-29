@@ -6,7 +6,7 @@
 //! resolution representation to stable pitch classes, and correlates the result
 //! against established major/minor key profiles.
 
-use audio_analysis_fourier::{spectrogram, SpectrumBin, StftConfig};
+use audio_analysis_core::spectral::{spectrogram, SpectrumBin, StftConfig};
 use audio_contracts::{DetectError, Result};
 
 use crate::{ChromaVector, NoteName};

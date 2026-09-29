@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 mod clip;
+pub mod spectral;
 pub mod surface;
 pub use clip::{AudioClip, ConcatPolicy, FadeCurve, MixPolicy};
 /// Re-exports the math signal core API.

@@ -133,9 +133,13 @@ pub struct StructuralDescriptor {
 /// Whole-track rhythm result.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TrackRhythmAnalysis {
-    /// Selected tempo, if rhythmic evidence was sufficient.
+    /// Representative tempo, if rhythmic evidence was sufficient.
+    ///
+    /// Stable maps retain the selected global candidate. Maps with at least eight
+    /// local estimates and a 15% trimmed tempo spread use their trimmed median.
     pub bpm: Option<f32>,
-    /// Confidence in the selected tempo and beat path.
+    /// Confidence in the selected global candidate and beat path.
+    /// This is not a separately calibrated confidence in the representative BPM.
     pub confidence: f32,
     /// Ranked alternative tempo hypotheses.
     pub tempo_candidates: Vec<TempoCandidate>,
@@ -611,7 +615,8 @@ fn beat_path_support(path: &[usize], novelty: &[f32], frame_rate: f32, bpm: f32)
         0.0
     };
     let expected = ((path[path.len() - 1] - path[0]) as f32 / period).max(1.0);
-    let count_support = ((path.len() - 1) as f32 / expected).min(expected / (path.len() - 1) as f32);
+    let count_support =
+        ((path.len() - 1) as f32 / expected).min(expected / (path.len() - 1) as f32);
     let smoothness = if gaps.len() < 2 {
         1.0
     } else {
@@ -626,7 +631,7 @@ fn beat_path_support(path: &[usize], novelty: &[f32], frame_rate: f32, bpm: f32)
         + 0.15 * coverage.clamp(0.0, 1.0)
         + 0.15 * smoothness
         + 0.15 * count_support.clamp(0.0, 1.0))
-        .clamp(0.0, 1.0)
+    .clamp(0.0, 1.0)
 }
 
 fn beat_path_onset_recall(path: &[usize], novelty: &[f32], period: f32) -> f32 {
@@ -652,12 +657,7 @@ fn beat_path_onset_recall(path: &[usize], novelty: &[f32], period: f32) -> f32 {
         / total
 }
 
-fn fold_tempo_to_anchor_octave(
-    bpm: f32,
-    anchor_bpm: f32,
-    min_bpm: f32,
-    max_bpm: f32,
-) -> f32 {
+fn fold_tempo_to_anchor_octave(bpm: f32, anchor_bpm: f32, min_bpm: f32, max_bpm: f32) -> f32 {
     if !bpm.is_finite()
         || !anchor_bpm.is_finite()
         || bpm <= 0.0
@@ -693,9 +693,10 @@ fn fold_local_tempo_candidates(
     let mut folded = Vec::<LocalTempoCandidate>::new();
     for candidate in candidates {
         let bpm = fold_tempo_to_anchor_octave(candidate.bpm, anchor_bpm, min_bpm, max_bpm);
-        if let Some(existing) = folded.iter_mut().find(|existing| {
-            (existing.bpm - bpm).abs() / existing.bpm.max(bpm) < 0.025
-        }) {
+        if let Some(existing) = folded
+            .iter_mut()
+            .find(|existing| (existing.bpm - bpm).abs() / existing.bpm.max(bpm) < 0.025)
+        {
             if candidate.autocorrelation_score > existing.score {
                 existing.bpm = bpm;
                 existing.score = candidate.autocorrelation_score;
@@ -733,13 +734,8 @@ fn estimate_local_tempo_path(
     while center < novelty.len() {
         let start = center.saturating_sub(radius);
         let end = center.saturating_add(radius + 1).min(novelty.len());
-        let raw_candidates = estimate_tempo_candidates(
-            &novelty[start..end],
-            frame_rate,
-            min_bpm,
-            max_bpm,
-            8,
-        );
+        let raw_candidates =
+            estimate_tempo_candidates(&novelty[start..end], frame_rate, min_bpm, max_bpm, 8);
         let mut candidates =
             fold_local_tempo_candidates(raw_candidates, anchor_bpm, min_bpm, max_bpm);
         if !candidates.iter().any(|candidate| {
@@ -1001,11 +997,7 @@ fn build_tempo_map_with_path(
 }
 
 #[cfg(test)]
-fn build_tempo_map(
-    beat_frames: &[usize],
-    timestamps: &[f64],
-    novelty: &[f32],
-) -> Vec<TempoPoint> {
+fn build_tempo_map(beat_frames: &[usize], timestamps: &[f64], novelty: &[f32]) -> Vec<TempoPoint> {
     if beat_frames.len() < 2 {
         return Vec::new();
     }
@@ -1061,9 +1053,7 @@ fn summarize_tempo_map_bpm(tempo_map: &[TempoPoint], fallback_bpm: f32) -> f32 {
 
     let mut bpms = tempo_map
         .iter()
-        .filter_map(|point| {
-            (point.bpm.is_finite() && point.bpm > 0.0).then_some(point.bpm)
-        })
+        .filter_map(|point| (point.bpm.is_finite() && point.bpm > 0.0).then_some(point.bpm))
         .collect::<Vec<_>>();
     if bpms.len() < MIN_DRIFT_POINTS {
         return fallback_bpm;
@@ -1125,7 +1115,11 @@ fn infer_downbeat_phase(
         .zip(counts.iter())
         .enumerate()
         .map(|(phase, (sum, count))| {
-            let score = if *count == 0 { 0.0 } else { *sum / *count as f32 };
+            let score = if *count == 0 {
+                0.0
+            } else {
+                *sum / *count as f32
+            };
             (phase, score)
         })
         .collect::<Vec<_>>();
@@ -1181,7 +1175,9 @@ mod tests {
         let raw = estimate_tempo_candidates(&novelty, 100.0, 55.0, 220.0, 12);
         let candidates = rescore_tempo_candidates(raw, &novelty, 100.0, 1.25, 5);
         assert!(!candidates.is_empty());
-        assert!(candidates.iter().all(|candidate| candidate.beat_support > 0.0));
+        assert!(candidates
+            .iter()
+            .all(|candidate| candidate.beat_support > 0.0));
         assert!(candidates
             .iter()
             .any(|candidate| (candidate.bpm - 120.0).abs() < 1.0));
@@ -1276,7 +1272,9 @@ mod tests {
             (candidate.bpm - 120.0).abs() < 1.0 && (candidate.score - 0.9).abs() < 0.001
         }));
         assert!(!folded.iter().any(|candidate| candidate.bpm < 90.0));
-        assert!(folded.iter().any(|candidate| (candidate.bpm - 150.0).abs() < 1.0));
+        assert!(folded
+            .iter()
+            .any(|candidate| (candidate.bpm - 150.0).abs() < 1.0));
     }
 
     #[test]
@@ -1300,7 +1298,11 @@ mod tests {
                 (std::f32::consts::TAU * frequency * index as f32 / sample_rate as f32).sin()
             })
             .collect::<Vec<_>>();
-        for (index, sample) in samples.iter_mut().enumerate().skip(sample_rate as usize / 2) {
+        for (index, sample) in samples
+            .iter_mut()
+            .enumerate()
+            .skip(sample_rate as usize / 2)
+        {
             *sample = (std::f32::consts::TAU * frequency * index as f32 / sample_rate as f32
                 + std::f32::consts::FRAC_PI_2)
                 .sin();
@@ -1347,13 +1349,7 @@ mod tests {
         }
         let mut tempo_path = vec![100.0_f32; novelty.len()];
         tempo_path[1_000..].fill(150.0);
-        let beats = track_beat_frames_with_tempo_path(
-            &novelty,
-            100.0,
-            &tempo_path,
-            120.0,
-            1.25,
-        );
+        let beats = track_beat_frames_with_tempo_path(&novelty, 100.0, &tempo_path, 120.0, 1.25);
         let early_gaps = beats
             .windows(2)
             .filter(|pair| pair[1] < 1_000)
@@ -1396,8 +1392,8 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let summary = summarize_tempo_map_bpm(&tempo_map, 120.0);
-        assert!((summary - 120.0).abs() < f32::EPSILON);
+        let summary = summarize_tempo_map_bpm(&tempo_map, 125.0);
+        assert!((summary - 125.0).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -1446,6 +1442,9 @@ mod tests {
             },
         )
         .expect("track rhythm analysis");
+        let bpm = analysis.bpm.expect("stable track tempo");
+        assert!((bpm - 120.0).abs() < 3.0, "bpm={bpm}");
+        assert_eq!(bpm, analysis.tempo_candidates[0].bpm);
         assert!(analysis
             .tempo_candidates
             .iter()
@@ -1453,6 +1452,43 @@ mod tests {
         assert!(!analysis.beats.is_empty());
         assert_eq!(analysis.tempo_map.len(), analysis.beats.len());
         assert!(!analysis.structural_descriptors.is_empty());
+    }
+
+    #[test]
+    fn whole_track_bpm_represents_an_accelerating_pcm_beat_schedule() {
+        let sample_rate = 8_000;
+        // Sixty-four authored beats accelerate by one BPM per beat: 100..=163.
+        // Their central tempo is 131.5 BPM, independent of the analysis algorithm.
+        let mut beat_times = Vec::new();
+        let mut time = 0.5;
+        for beat in 0..64 {
+            beat_times.push(time);
+            time += 60.0 / (100.0 + beat as f64);
+        }
+        let mut samples = vec![0.0; ((time + 0.5) * sample_rate as f64) as usize];
+        for (beat, time) in beat_times.iter().enumerate() {
+            let start = (time * sample_rate as f64).round() as usize;
+            let amplitude = if beat % 4 == 0 { 1.0 } else { 0.72 };
+            for offset in 0..80 {
+                samples[start + offset] += amplitude * (1.0 - offset as f32 / 80.0);
+            }
+        }
+
+        let analysis = analyze_rhythm_track(
+            &samples,
+            sample_rate,
+            TrackRhythmConfig {
+                fft_size: 512,
+                hop_size: 128,
+                ..TrackRhythmConfig::default()
+            },
+        )
+        .expect("accelerating PCM analysis");
+
+        let bpm = analysis.bpm.expect("accelerating track tempo");
+        assert!((bpm - 131.5).abs() < 5.0, "bpm={bpm}");
+        assert_eq!(analysis.tempo_map.len(), analysis.beats.len());
+        assert!(analysis.confidence.is_finite() && analysis.confidence > 0.0);
     }
 
     #[test]

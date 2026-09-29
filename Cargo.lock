@@ -1909,6 +1909,7 @@ dependencies = [
  "moenarch-audio-analysis-core",
  "moenarch-audio-analysis-io",
  "moenarch-audio-analysis-pitch",
+ "moenarch-audio-analysis-processing",
  "moenarch-audio-contracts",
  "moenarch-runtime-core",
  "serde_json",

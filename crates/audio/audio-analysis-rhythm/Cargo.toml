@@ -25,6 +25,11 @@ audio-contracts.workspace = true
 criterion.workspace = true
 audio-analysis-io.workspace = true
 audio-analysis-pitch.workspace = true
+audio-analysis-processing.workspace = true
+
+[[example]]
+name = "dj_consumer_acceptance"
+test = true
 
 [[bench]]
 name = "rhythm"

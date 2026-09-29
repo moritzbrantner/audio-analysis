@@ -79,7 +79,7 @@ impl TrackRhythmConfig {
 pub struct TempoCandidate {
     /// Tempo in beats per minute.
     pub bpm: f32,
-    /// Final score after octave-family periodicity and beat-path support are combined.
+    /// Final score combining mixed/low-band octave-family periodicity and beat-path support.
     pub score: f32,
     /// Normalized onset-envelope autocorrelation support.
     pub autocorrelation_score: f32,
@@ -160,6 +160,7 @@ pub struct TrackRhythmAnalysis {
 #[derive(Debug, Clone)]
 struct OnsetFeatures {
     novelty: Vec<f32>,
+    low_novelty: Vec<f32>,
     low_energy: Vec<f32>,
     timestamps: Vec<f64>,
     structural_descriptors: Vec<StructuralDescriptor>,
@@ -224,9 +225,17 @@ pub fn analyze_rhythm_track(
         config.max_bpm,
         raw_count,
     );
+    let low_candidates = estimate_tempo_candidates(
+        &features.low_novelty,
+        frame_rate,
+        config.min_bpm,
+        config.max_bpm,
+        raw_count,
+    );
     let candidates = rescore_tempo_candidates(
         candidates,
         &features.novelty,
+        &low_candidates,
         frame_rate,
         config.beat_tightness,
         config.tempo_candidate_count,
@@ -235,46 +244,55 @@ pub fn analyze_rhythm_track(
         return Ok(empty_analysis(hop_seconds, features.structural_descriptors));
     };
 
-    let tempo_path = estimate_local_tempo_path(
-        &features.novelty,
+    let low_weight = low_band_weight(&low_candidates);
+    // Use the same independent pulse evidence for observable beat positions;
+    // correcting only the reported BPM would leave the tracker on subdivisions.
+    let tracking_novelty = features
+        .novelty
+        .iter()
+        .zip(&features.low_novelty)
+        .map(|(mixed, low)| (1.0 - low_weight) * mixed + low_weight * low)
+        .collect::<Vec<_>>();
+    let mut trajectory = infer_beat_trajectory(
+        &features,
+        &tracking_novelty,
         frame_rate,
-        config.min_bpm,
-        config.max_bpm,
+        config,
         selected.bpm,
-        config.beat_tightness,
     );
-    let beat_frames = track_beat_frames_with_tempo_path(
-        &features.novelty,
-        frame_rate,
-        &tempo_path.bpm_by_frame,
-        selected.bpm,
-        config.beat_tightness,
-    );
-    let tempo_map = build_tempo_map_with_path(
-        &beat_frames,
-        &features.timestamps,
-        &features.novelty,
-        &tempo_path,
-    );
-    let representative_bpm = summarize_tempo_map_bpm(&tempo_map, selected.bpm);
+    let mut representative_bpm = summarize_tempo_map_bpm(&trajectory.tempo_map, selected.bpm);
+    if (representative_bpm - selected.bpm).abs() / selected.bpm > 0.025 {
+        // A drifting trajectory can expose an initial anchor in the wrong
+        // octave near a track edge. Refine once from its robust central tempo;
+        // local observations still own the changing beat periods.
+        trajectory = infer_beat_trajectory(
+            &features,
+            &tracking_novelty,
+            frame_rate,
+            config,
+            representative_bpm,
+        );
+        representative_bpm = summarize_tempo_map_bpm(&trajectory.tempo_map, representative_bpm);
+    }
     let (phase, downbeat_confidence) = infer_downbeat_phase(
-        &beat_frames,
-        &features.novelty,
+        &trajectory.beat_frames,
+        &tracking_novelty,
         &features.low_energy,
         config.beats_per_bar,
     );
 
-    let beats = beat_frames
+    let beats = trajectory
+        .beat_frames
         .iter()
         .enumerate()
         .map(|(index, frame)| {
             let beat_in_bar = ((index + config.beats_per_bar - phase) % config.beats_per_bar) + 1;
             TrackedBeat {
                 timestamp_seconds: features.timestamps[*frame],
-                strength: features.novelty[*frame],
+                strength: tracking_novelty[*frame],
                 beat_in_bar,
                 downbeat: beat_in_bar == 1,
-                local_bpm: tempo_map.get(index).map(|point| point.bpm),
+                local_bpm: trajectory.tempo_map.get(index).map(|point| point.bpm),
             }
         })
         .collect::<Vec<_>>();
@@ -290,7 +308,10 @@ pub fn analyze_rhythm_track(
     } else {
         0.0
     };
-    let path_confidence = mean_at_frames(&tempo_path.confidence_by_frame, &beat_frames);
+    let path_confidence = mean_at_frames(
+        &trajectory.tempo_path.confidence_by_frame,
+        &trajectory.beat_frames,
+    );
     let confidence = (0.50 * selected.score
         + 0.20 * candidate_margin
         + 0.15 * downbeat_confidence
@@ -305,9 +326,51 @@ pub fn analyze_rhythm_track(
         downbeats,
         downbeat_confidence,
         hop_seconds,
-        tempo_map,
+        tempo_map: trajectory.tempo_map,
         structural_descriptors: features.structural_descriptors,
     })
+}
+
+struct BeatTrajectory {
+    tempo_path: TempoPath,
+    beat_frames: Vec<usize>,
+    tempo_map: Vec<TempoPoint>,
+}
+
+fn infer_beat_trajectory(
+    features: &OnsetFeatures,
+    tracking_novelty: &[f32],
+    frame_rate: f32,
+    config: TrackRhythmConfig,
+    anchor_bpm: f32,
+) -> BeatTrajectory {
+    let tempo_path = estimate_local_tempo_path(
+        &features.novelty,
+        &features.low_novelty,
+        frame_rate,
+        config.min_bpm,
+        config.max_bpm,
+        anchor_bpm,
+        config.beat_tightness,
+    );
+    let beat_frames = track_beat_frames_with_tempo_path(
+        tracking_novelty,
+        frame_rate,
+        &tempo_path.bpm_by_frame,
+        anchor_bpm,
+        config.beat_tightness,
+    );
+    let tempo_map = build_tempo_map_with_path(
+        &beat_frames,
+        &features.timestamps,
+        tracking_novelty,
+        &tempo_path,
+    );
+    BeatTrajectory {
+        tempo_path,
+        beat_frames,
+        tempo_map,
+    }
 }
 
 fn empty_analysis(
@@ -337,6 +400,7 @@ fn spectral_onset_features(
     if frames.is_empty() {
         return Ok(OnsetFeatures {
             novelty: Vec::new(),
+            low_novelty: Vec::new(),
             low_energy: Vec::new(),
             timestamps: Vec::new(),
             structural_descriptors: Vec::new(),
@@ -439,6 +503,7 @@ fn spectral_onset_features(
 
     Ok(OnsetFeatures {
         novelty,
+        low_novelty: low_rise,
         low_energy,
         timestamps,
         structural_descriptors,
@@ -496,9 +561,9 @@ fn estimate_tempo_candidates(
     if novelty.len() < 3 || frame_rate <= 0.0 {
         return Vec::new();
     }
-    let min_lag = ((60.0 * frame_rate / max_bpm).floor() as usize).max(1);
+    let min_lag = ((60.0 * frame_rate / max_bpm).ceil() as usize).max(1);
     let max_lag =
-        ((60.0 * frame_rate / min_bpm).ceil() as usize).min(novelty.len().saturating_sub(1));
+        ((60.0 * frame_rate / min_bpm).floor() as usize).min(novelty.len().saturating_sub(1));
     if min_lag > max_lag {
         return Vec::new();
     }
@@ -557,6 +622,7 @@ fn estimate_tempo_candidates(
 fn rescore_tempo_candidates(
     mut candidates: Vec<TempoCandidate>,
     novelty: &[f32],
+    low_candidates: &[TempoCandidate],
     frame_rate: f32,
     tightness: f32,
     candidate_count: usize,
@@ -566,9 +632,35 @@ fn rescore_tempo_candidates(
         candidate.beat_support = beat_path_support(&path, novelty, frame_rate, candidate.bpm);
     }
     combine_tempo_candidate_scores(&mut candidates);
+    apply_low_band_periodicity(&mut candidates, low_candidates);
     candidates.sort_by(|left, right| right.score.total_cmp(&left.score));
     candidates.truncate(candidate_count);
     candidates
+}
+
+fn low_band_weight(candidates: &[TempoCandidate]) -> f32 {
+    0.60 * candidates
+        .iter()
+        .map(|candidate| candidate.autocorrelation_score)
+        .fold(0.0_f32, f32::max)
+}
+
+fn apply_low_band_periodicity(
+    candidates: &mut [TempoCandidate],
+    low_candidates: &[TempoCandidate],
+) {
+    // The mixed envelope can favor a syncopated subdivision over the kick's
+    // quarter-note family. Bound low-band influence by measured periodicity:
+    // weak or absent periodicity leaves the mixed/path evidence dominant.
+    let low_weight = low_band_weight(low_candidates);
+    for candidate in candidates {
+        let low_support = low_candidates
+            .iter()
+            .filter(|other| same_octave_tempo_family(candidate.bpm, other.bpm))
+            .map(|other| other.autocorrelation_score)
+            .fold(0.0_f32, f32::max);
+        candidate.score = (1.0 - low_weight) * candidate.score + low_weight * low_support;
+    }
 }
 
 fn combine_tempo_candidate_scores(candidates: &mut [TempoCandidate]) {
@@ -697,14 +789,14 @@ fn fold_local_tempo_candidates(
             .iter_mut()
             .find(|existing| (existing.bpm - bpm).abs() / existing.bpm.max(bpm) < 0.025)
         {
-            if candidate.autocorrelation_score > existing.score {
+            if candidate.score > existing.score {
                 existing.bpm = bpm;
-                existing.score = candidate.autocorrelation_score;
+                existing.score = candidate.score;
             }
         } else {
             folded.push(LocalTempoCandidate {
                 bpm,
-                score: candidate.autocorrelation_score,
+                score: candidate.score,
             });
         }
     }
@@ -713,6 +805,7 @@ fn fold_local_tempo_candidates(
 
 fn estimate_local_tempo_path(
     novelty: &[f32],
+    low_novelty: &[f32],
     frame_rate: f32,
     min_bpm: f32,
     max_bpm: f32,
@@ -734,8 +827,16 @@ fn estimate_local_tempo_path(
     while center < novelty.len() {
         let start = center.saturating_sub(radius);
         let end = center.saturating_add(radius + 1).min(novelty.len());
-        let raw_candidates =
+        let mut raw_candidates =
             estimate_tempo_candidates(&novelty[start..end], frame_rate, min_bpm, max_bpm, 8);
+        let low_candidates = estimate_tempo_candidates(
+            low_novelty.get(start..end).unwrap_or(&[]),
+            frame_rate,
+            min_bpm,
+            max_bpm,
+            8,
+        );
+        apply_low_band_periodicity(&mut raw_candidates, &low_candidates);
         let mut candidates =
             fold_local_tempo_candidates(raw_candidates, anchor_bpm, min_bpm, max_bpm);
         if !candidates.iter().any(|candidate| {
@@ -752,6 +853,9 @@ fn estimate_local_tempo_path(
         center = center.saturating_add(block_hop);
     }
 
+    // Short syncopated windows can favor another pulse family despite stronger
+    // whole-track evidence. A soft anchor prior preserves that global context;
+    // strong local evidence can still follow real drift and tempo changes.
     let mut scores: Vec<Vec<f32>> = Vec::with_capacity(blocks.len());
     let mut back: Vec<Vec<usize>> = Vec::with_capacity(blocks.len());
     for (block_index, candidates) in blocks.iter().enumerate() {
@@ -760,7 +864,7 @@ fn estimate_local_tempo_path(
         if block_index == 0 {
             for (index, candidate) in candidates.iter().enumerate() {
                 let anchor_distance = (candidate.bpm / anchor_bpm).log2().abs();
-                block_scores[index] = candidate.score - 0.08 * anchor_distance;
+                block_scores[index] = candidate.score - 0.40 * anchor_distance;
             }
         } else {
             for (current_index, current) in candidates.iter().enumerate() {
@@ -777,7 +881,7 @@ fn estimate_local_tempo_path(
                     }
                 }
                 let anchor_distance = (current.bpm / anchor_bpm).log2().abs();
-                block_scores[current_index] = best_score - 0.04 * anchor_distance;
+                block_scores[current_index] = best_score - 0.40 * anchor_distance;
                 block_back[current_index] = best_previous;
             }
         }
@@ -1173,7 +1277,7 @@ mod tests {
     fn beat_path_rescoring_keeps_real_path_support_visible() {
         let novelty = pulse_envelope(50, 24);
         let raw = estimate_tempo_candidates(&novelty, 100.0, 55.0, 220.0, 12);
-        let candidates = rescore_tempo_candidates(raw, &novelty, 100.0, 1.25, 5);
+        let candidates = rescore_tempo_candidates(raw, &novelty, &[], 100.0, 1.25, 5);
         assert!(!candidates.is_empty());
         assert!(candidates
             .iter()
@@ -1283,7 +1387,7 @@ mod tests {
         for beat in 0..48 {
             novelty[beat * 50] = if beat % 2 == 0 { 1.0 } else { 0.58 };
         }
-        let path = estimate_local_tempo_path(&novelty, 100.0, 55.0, 220.0, 120.0, 1.25);
+        let path = estimate_local_tempo_path(&novelty, &[], 100.0, 55.0, 220.0, 120.0, 1.25);
         let center = path.bpm_by_frame[1_200];
         assert!(center > 100.0 && center < 140.0, "center={center}");
         assert!(path.bpm_by_frame.iter().all(|bpm| *bpm >= 90.0));
@@ -1321,7 +1425,7 @@ mod tests {
         for frame in (1_200..2_400).step_by(40) {
             novelty[frame] = 1.0;
         }
-        let path = estimate_local_tempo_path(&novelty, 100.0, 60.0, 200.0, 120.0, 1.25);
+        let path = estimate_local_tempo_path(&novelty, &[], 100.0, 60.0, 200.0, 120.0, 1.25);
         let early = path.bpm_by_frame[600];
         let late = path.bpm_by_frame[1_800];
         assert!(late > early + 20.0, "early={early}, late={late}");
@@ -1488,7 +1592,101 @@ mod tests {
         let bpm = analysis.bpm.expect("accelerating track tempo");
         assert!((bpm - 131.5).abs() < 5.0, "bpm={bpm}");
         assert_eq!(analysis.tempo_map.len(), analysis.beats.len());
+        let early = analysis
+            .tempo_map
+            .iter()
+            .take(8)
+            .map(|point| point.bpm)
+            .sum::<f32>()
+            / 8.0;
+        let late = analysis
+            .tempo_map
+            .iter()
+            .rev()
+            .take(8)
+            .map(|point| point.bpm)
+            .sum::<f32>()
+            / 8.0;
+        assert!(late > early + 25.0, "trajectory lost authored drift: selected={:?}, representative={:?}, early={early}, late={late}", analysis.tempo_candidates.first(), analysis.bpm);
         assert!(analysis.confidence.is_finite() && analysis.confidence > 0.0);
+    }
+
+    #[test]
+    fn quarter_note_kicks_resist_four_against_three_high_band_pulses() {
+        // Authored analogue of the 4:3 family error in mj-pia-solarity-acid-techno
+        // (tests/fixtures/dj/real-music-corpus.v1.json, creator-declared 124 BPM).
+        // Independent low quarter-note kicks and faster high-band pulses make
+        // the semantic failure reproducible without copying the real audio.
+        let sample_rate = 8_000;
+        let bpm = 124.0;
+        let period = 60.0 / bpm;
+        let duration = 0.5 + 6.0 * period;
+        let mut samples = vec![0.0; (duration * sample_rate as f64).ceil() as usize];
+        for (count, pulse_period, frequency, amplitude, width) in [
+            (6, period, 70.0, 0.30, 640),
+            (8, period * 0.75, 1_400.0, 0.60, 80),
+        ] {
+            for pulse in 0..count {
+                let start =
+                    ((0.5 + pulse as f64 * pulse_period) * sample_rate as f64).round() as usize;
+                for offset in 0..width {
+                    if let Some(sample) = samples.get_mut(start + offset) {
+                        let time = offset as f64 / sample_rate as f64;
+                        *sample += (amplitude
+                            * (std::f64::consts::TAU * frequency * time).sin()
+                            * (-6.0 * offset as f64 / width as f64).exp())
+                            as f32;
+                    }
+                }
+            }
+        }
+        let analysis = analyze_rhythm_track(
+            &samples,
+            sample_rate,
+            TrackRhythmConfig {
+                fft_size: 512,
+                hop_size: 128,
+                max_bpm: 200.0,
+                ..TrackRhythmConfig::default()
+            },
+        )
+        .expect("four against three PCM analysis");
+        let selected = analysis.bpm.expect("quarter-note tempo");
+        assert!(
+            (selected as f64 - bpm).abs() / bpm < 0.035,
+            "bpm={selected}"
+        );
+        assert_eq!(analysis.beats.len(), 6, "extra subdivision beats");
+        for beat in 0..6 {
+            let expected = 0.5 + beat as f64 * period;
+            assert!(
+                analysis
+                    .beats
+                    .iter()
+                    .any(|tracked| { (tracked.timestamp_seconds - expected).abs() < 0.07 }),
+                "missing authored beat at {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn public_tempo_candidates_stay_inside_configured_bounds() {
+        let config = TrackRhythmConfig {
+            fft_size: 512,
+            hop_size: 128,
+            ..TrackRhythmConfig::default()
+        };
+        let samples = dance_click_track(8_000, 225.0, 24);
+        let analysis = analyze_rhythm_track(&samples, 8_000, config).unwrap();
+        assert!(!analysis.tempo_candidates.is_empty());
+        assert!(
+            analysis
+                .tempo_candidates
+                .iter()
+                .all(|candidate| { (config.min_bpm..=config.max_bpm).contains(&candidate.bpm) }),
+            "candidates={:?}",
+            analysis.tempo_candidates
+        );
     }
 
     #[test]

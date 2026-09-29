@@ -12,11 +12,19 @@ Onset, tempo, beat, downbeat, and rhythmic-section analysis for music and media 
 
 1. Hann-window STFT analysis through `audio-analysis-core::spectral`.
 2. Log-compressed, frequency-weighted spectral flux with local adaptive whitening.
-3. Ranked tempo candidates from onset-envelope autocorrelation. Alternative candidates remain visible so half/double-tempo ambiguity is not hidden.
-4. Dynamic-programming beat tracking around the selected beat period.
+3. Ranked tempo candidates from mixed-envelope autocorrelation and beat-path support, with independent low-band pulse-family evidence weighted by its periodicity. Alternative candidates remain visible so half/double-tempo ambiguity is not hidden; lag bounds keep candidates inside the configured BPM range.
+4. A variable-tempo path with a soft global anchor prior, then dynamic-programming beat tracking using the retained pulse evidence.
 5. Four-beat bar-phase inference from transient and low-frequency beat accents.
 
 Stable tempo maps retain the selected global candidate as the song BPM. With at least eight finite positive local estimates and a 15% tempo spread after trimming the outer 10% at each end, the song BPM becomes the trimmed median. This is a summary per tracked beat, not per elapsed second; spread can reflect acceleration, abrupt changes, or tracking instability. Ranked candidates and local tempo points remain available, and confidence still describes the selected global candidate and beat path rather than a separately calibrated summary.
+
+When that robust trajectory summary differs from the initial anchor by more than
+2.5%, the local trajectory is inferred once more using the summary as its octave
+anchor. This allows genuine drift while correcting edge windows that were folded
+into an octave closer to the original global candidate. The retained low-band
+curve adds global/local autocorrelation work without another FFT pass; drifting
+tracks can require the one additional trajectory pass. These are correctness
+choices, not measured speed improvements.
 
 The downbeat result is intentionally a confidence-bearing 4/4 heuristic rather than a claim of meter recognition. Tracks with unusual meter, weak bar accents, changing tempo, or intentionally ambiguous half-time feel should use the returned candidates and confidence values rather than treating one number as ground truth.
 

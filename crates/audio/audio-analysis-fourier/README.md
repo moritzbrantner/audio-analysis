@@ -1,6 +1,8 @@
 # audio-analysis-fourier
 
-FFT, STFT, and spectral audio analysis for `moritzbrantner-video-analysis`.
+Compatibility package and runtime surface for FFT, STFT, and spectral audio analysis.
+
+Reusable spectral computation is owned by `audio_analysis_core::spectral`; this crate re-exports that API so existing imports and Fourier operation IDs remain stable.
 
 ## Feature flags
 

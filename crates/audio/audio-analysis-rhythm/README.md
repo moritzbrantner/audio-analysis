@@ -10,7 +10,7 @@ Onset, tempo, beat, downbeat, and rhythmic-section analysis for music and media 
 
 `track::analyze_rhythm_track` is the production path for music and DJ preparation. It keeps the older deterministic onset helpers available for compatibility, but replaces their simple interval estimator with a fuller pipeline:
 
-1. Hann-window STFT analysis through `audio-analysis-fourier`.
+1. Hann-window STFT analysis through `audio-analysis-core::spectral`.
 2. Log-compressed, frequency-weighted spectral flux with local adaptive whitening.
 3. Ranked tempo candidates from onset-envelope autocorrelation. Alternative candidates remain visible so half/double-tempo ambiguity is not hidden.
 4. Dynamic-programming beat tracking around the selected beat period.

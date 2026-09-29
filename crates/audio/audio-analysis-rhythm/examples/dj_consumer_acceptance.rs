@@ -10,10 +10,8 @@ const PHASE_SECONDS: f64 = 0.5;
 const TIME_TOLERANCE: f64 = 0.07;
 
 fn provenance() -> Value {
-    serde_json::from_str(include_str!(
-        "../tests/fixtures/consumer-scenarios.v1.json"
-    ))
-    .expect("consumer provenance manifest")
+    serde_json::from_str(include_str!("../tests/fixtures/consumer-scenarios.v1.json"))
+        .expect("consumer provenance manifest")
 }
 
 // Beat times and chord notes are authored independently of the estimators.
@@ -101,6 +99,15 @@ fn dj_party_loops() -> Value {
     json!({"id": "dj-party-analyzed-quantized-loops", "bpm": analysis.bpm, "loops": loops})
 }
 
+fn key_config() -> HarmonicKeyConfig {
+    HarmonicKeyConfig {
+        fft_size: 1024,
+        hop_size: 256,
+        max_frequency_hz: 3_000.0,
+        ..HarmonicKeyConfig::default()
+    }
+}
+
 fn media_player_transition() -> Value {
     let tracks = [(120.0, 0.0, "C major"), (128.0, 7.0, "G major")].map(|(bpm, shift, label)| {
         let samples = authored_track(bpm, Some(shift));
@@ -108,12 +115,7 @@ fn media_player_transition() -> Value {
         let key = estimate_musical_key(
             &samples,
             SAMPLE_RATE,
-            HarmonicKeyConfig {
-                fft_size: 1024,
-                hop_size: 256,
-                max_frequency_hz: 3_000.0,
-                ..HarmonicKeyConfig::default()
-            },
+            key_config(),
         ).expect("public key analysis").expect("authored tonal progression");
         assert_eq!(key.label(), label);
         assert!(key.confidence.is_finite() && (0.0..=1.0).contains(&key.confidence));
@@ -176,17 +178,8 @@ mod tests {
 fn media_player_g_major_with_clicks_retains_key() {
     let mut samples = authored_track(128.0, Some(7.0));
     samples.truncate(((PHASE_SECONDS + 16.0 * 60.0 / 128.0) * SAMPLE_RATE as f64) as usize);
-    let key = estimate_musical_key(
-        &samples,
-        SAMPLE_RATE,
-        HarmonicKeyConfig {
-            fft_size: 1024,
-            hop_size: 256,
-            max_frequency_hz: 3000.0,
-            ..HarmonicKeyConfig::default()
-        },
-    )
-    .unwrap()
-    .unwrap();
+    let key = estimate_musical_key(&samples, SAMPLE_RATE, key_config())
+        .unwrap()
+        .unwrap();
     assert_eq!(key.label(), "G major");
 }

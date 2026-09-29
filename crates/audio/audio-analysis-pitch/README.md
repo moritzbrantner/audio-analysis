@@ -24,7 +24,7 @@ let estimate = detector.estimate_samples(&samples, 48_000)?;
 1. computes Hann-window STFT frames through `audio-analysis-core::spectral`;
 2. extracts significant local spectral peaks between the configured frequency bounds;
 3. estimates the track's global tuning offset relative to A440 and corrects it before pitch-class folding;
-4. averages measured tonal peak energy across each resolution band's frames, combines the bands, and then normalizes the folded 12-bin chroma vector; and
+4. averages measured tonal peak weights across each resolution band's frames, combines the bands, and then normalizes the folded 12-bin chroma vector; and
 5. scores all 24 major/minor candidates using Krumhansl-Kessler, Temperley, or an ensemble of both profile correlations.
 
 The result contains the best key, runner-up, profile strength, ambiguity confidence, tuning offset, and the underlying chroma vector. A low-confidence estimate should remain low-confidence rather than being promoted to authoritative metadata.

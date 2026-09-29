@@ -214,7 +214,7 @@ pub fn harmonic_chroma(
     let mut contributing_frames = 0_usize;
     let mut peak_count = 0_usize;
 
-    // Keep measured peak energy until bands are combined. Normalizing every
+    // Keep measured peak weights until bands are combined. Normalizing every
     // active frame/band separately amplifies weak transient-only bands to the
     // same weight as sustained tonal evidence. Mean over all frames (including
     // empty ones) accounts for different FFT-pyramid hop sizes.

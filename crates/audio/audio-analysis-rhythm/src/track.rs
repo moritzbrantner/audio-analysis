@@ -353,8 +353,14 @@ fn infer_beat_trajectory(
         anchor_bpm,
         config.beat_tightness,
     );
-    let beat_frames = track_beat_frames_with_tempo_path(
+    let supported_novelty = adjacent_pulse_support(
         tracking_novelty,
+        frame_rate,
+        &tempo_path.bpm_by_frame,
+        anchor_bpm,
+    );
+    let beat_frames = track_beat_frames_with_tempo_path(
+        &supported_novelty,
         frame_rate,
         &tempo_path.bpm_by_frame,
         anchor_bpm,
@@ -1072,6 +1078,47 @@ fn track_beat_frames_with_tempo_path(
     }
 }
 
+// An isolated strong anticipation must not earn the same beat reward as an
+// onset supported by neighboring pulses at the selected local tempo. This
+// scores onset evidence; the tempo trajectory still owns the expected period.
+fn adjacent_pulse_support(
+    novelty: &[f32],
+    frame_rate: f32,
+    tempo_path: &[f32],
+    fallback_bpm: f32,
+) -> Vec<f32> {
+    novelty
+        .iter()
+        .enumerate()
+        .map(|(index, strength)| {
+            let bpm = tempo_path
+                .get(index)
+                .copied()
+                .filter(|value| value.is_finite() && *value > 0.0)
+                .unwrap_or(fallback_bpm);
+            let period = frame_rate * 60.0 / bpm;
+            let gap = period.round() as isize;
+            // Same onset-alignment tolerance used by beat-path recall.
+            let radius = (period * 0.18).round().max(1.0) as isize;
+            let mut support = 0.0_f32;
+            let mut neighbors = 0;
+            for center in [index as isize - gap, index as isize + gap] {
+                let start = (center - radius).max(0) as usize;
+                let end = (center + radius + 1).max(0).min(novelty.len() as isize) as usize;
+                if start < end {
+                    support += novelty[start..end].iter().copied().fold(0.0_f32, f32::max);
+                    neighbors += 1;
+                }
+            }
+            if neighbors > 0 {
+                strength * support / neighbors as f32
+            } else {
+                0.0
+            }
+        })
+        .collect()
+}
+
 fn build_tempo_map_with_path(
     beat_frames: &[usize],
     timestamps: &[f64],
@@ -1429,6 +1476,66 @@ mod tests {
         let early = path.bpm_by_frame[600];
         let late = path.bpm_by_frame[1_800];
         assert!(late > early + 20.0, "early={early}, late={late}");
+    }
+
+    #[test]
+    fn isolated_anticipation_does_not_displace_a_supported_beat() {
+        // Independent authored grid: nine pulses at 120 BPM, 100 frames/s.
+        let expected = (0..=400).step_by(50).collect::<Vec<_>>();
+        for extra_frame in [238, 262] {
+            let mut novelty = vec![0.0; 401];
+            for frame in &expected {
+                novelty[*frame] = 0.5;
+            }
+            novelty[extra_frame] = 1.0;
+            // Isolate beat placement from both onset extraction and tempo
+            // inference: the old DP displaces frame 250 onto the extra pulse.
+            let supported = adjacent_pulse_support(&novelty, 100.0, &[], 120.0);
+            let beats = track_beat_frames(&supported, 100.0, 120.0, 1.25);
+            assert_eq!(beats, expected, "extra frame={extra_frame}");
+        }
+    }
+
+    #[test]
+    fn whole_track_keeps_authored_grid_under_one_loud_syncopated_pulse() {
+        let sample_rate = 24_000;
+        let config = TrackRhythmConfig::default();
+        let expected = (0..9)
+            .map(|index| 0.5 + index as f64 * 0.5)
+            .collect::<Vec<_>>();
+        // An anticipation, a delayed accent, and an offbeat must all preserve
+        // the same independently authored 120-BPM quarter-note grid.
+        for offset in [-0.12, 0.12, 0.24] {
+            let mut samples = vec![0.0_f32; sample_rate as usize * 5];
+            let mut pulse = |time: f64, amplitude: f32| {
+                let start = (time * sample_rate as f64).round() as usize;
+                let width = (0.08 * sample_rate as f64).round() as usize;
+                for frame in 0..width {
+                    let seconds = frame as f32 / sample_rate as f32;
+                    samples[start + frame] += amplitude
+                        * (-6.0 * seconds / 0.08).exp()
+                        * (2.0 * std::f32::consts::PI * 70.0 * seconds).sin();
+                }
+            };
+            for time in &expected {
+                pulse(*time, 0.2);
+            }
+            pulse(expected[5] + offset, 0.8);
+            let analysis = analyze_rhythm_track(&samples, sample_rate, config).unwrap();
+            assert!(
+                (analysis.bpm.unwrap() - 120.0).abs() < 3.0,
+                "offset={offset}"
+            );
+            assert_eq!(analysis.beats.len(), expected.len(), "offset={offset}");
+            let tolerance = 2.0 * config.hop_size as f64 / sample_rate as f64;
+            for (beat, time) in analysis.beats.iter().zip(&expected) {
+                assert!(
+                    (beat.timestamp_seconds - time).abs() <= tolerance,
+                    "offset={offset}, beat={}, expected={time}",
+                    beat.timestamp_seconds
+                );
+            }
+        }
     }
 
     #[test]

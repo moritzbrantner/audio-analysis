@@ -186,6 +186,21 @@ def ready_to_flush(output: str, track_count: int) -> bool:
     return output.count("AnalyzerBeats plugin detected") == track_count
 
 
+def desktop_key(window: str, key: str, env: dict) -> bool:
+    # Startup dialogs can disappear between discovery and focus. Retry from a
+    # fresh window snapshot; never send a key after focus failed.
+    focused = subprocess.run(["xdotool", "windowfocus", "--sync", window],
+                             env=env, capture_output=True, timeout=5)
+    if focused.returncode:
+        if b"BadWindow" in focused.stderr:
+            return False
+        raise subprocess.CalledProcessError(focused.returncode, focused.args,
+                                            output=focused.stdout, stderr=focused.stderr)
+    subprocess.run(["xdotool", "key", "--clearmodifiers", key],
+                   env=env, check=True, timeout=5)
+    return True
+
+
 def run_batch(paths: list[str], fixed_tempo: bool, directory: pathlib.Path, env: dict) -> list[dict]:
     directory.mkdir()
     config = f"""[Config]
@@ -219,23 +234,22 @@ AnalyserKeyPluginID qm-keydetector:2
             while time.monotonic() < deadline:
                 if process.poll() is not None:
                     raise RuntimeError(f"Mixxx exited before capture; see {log_path}")
-                windows = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", "."], env=env, capture_output=True, text=True)
+                windows = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", "."], env=env, capture_output=True, text=True, timeout=5)
                 main = None
                 modal = False
                 for window in windows.stdout.splitlines():
-                    title = subprocess.run(["xdotool", "getwindowname", window], env=env, capture_output=True, text=True).stdout.strip()
+                    title = subprocess.run(["xdotool", "getwindowname", window], env=env, capture_output=True, text=True, timeout=5).stdout.strip()
                     if title == "Mixxx":
                         main = window
                     elif title in {"Choose music library directory", "No Output Devices", "Allow Mixxx to hide the menu bar?"}:
                         modal = True
-                        subprocess.run(["xdotool", "windowfocus", "--sync", window], env=env, check=True)
-                        subprocess.run(["xdotool", "key", "Escape" if title == "Choose music library directory" else "Return"], env=env, check=True)
+                        desktop_key(window, "Escape" if title == "Choose music library directory" else "Return", env)
                 output = log_path.read_text(errors="replace")
                 if main and not modal and ready_to_flush(output, len(paths)):
                     # All PCM was processed. Graceful GUI quit joins workers
                     # and flushes dirty tracks; forced termination is never evidence.
-                    subprocess.run(["xdotool", "windowfocus", "--sync", main], env=env, check=True)
-                    subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+q"], env=env, check=True)
+                    if not desktop_key(main, "ctrl+q", env):
+                        continue
                     if process.wait(timeout=30) != 0:
                         raise RuntimeError(f"Mixxx failed to shut down cleanly; see {log_path}")
                     verify_settings(directory / "mixxx.cfg", fixed_tempo)
@@ -249,7 +263,7 @@ AnalyserKeyPluginID qm-keydetector:2
                     process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     process.kill()
-                    process.wait()
+                    process.wait(timeout=5)
 
 
 def capture_job(job_path: pathlib.Path) -> None:
@@ -261,16 +275,16 @@ def capture_job(job_path: pathlib.Path) -> None:
                 raise RuntimeError(f"Mixxx input changed: {case['name']}")
 
     verify_inputs()
-    package_version = subprocess.check_output(["dpkg-query", "-W", "-f=${Version}", "mixxx"], text=True)
+    package_version = subprocess.check_output(["dpkg-query", "-W", "-f=${Version}", "mixxx"], text=True, timeout=10)
     if package_version != job["config"]["mixxxPackageVersion"]:
         raise RuntimeError("Mixxx package does not match the benchmark pin")
-    packages = subprocess.check_output(["dpkg-query", "-W", "-f=${Package}=${Version}\n"], text=True)
+    packages = subprocess.check_output(["dpkg-query", "-W", "-f=${Package}=${Version}\n"], text=True, timeout=10)
     runtime = {
         "mixxxPackageVersion": package_version,
         "mixxxBinarySha256": hashlib.sha256(pathlib.Path("/usr/bin/mixxx").read_bytes()).hexdigest(),
         "packagesSha256": hashlib.sha256(packages.encode()).hexdigest(),
         "packages": packages.splitlines(),
-        "architecture": subprocess.check_output(["dpkg", "--print-architecture"], text=True).strip(),
+        "architecture": subprocess.check_output(["dpkg", "--print-architecture"], text=True, timeout=10).strip(),
     }
     output = job_path.parent
     env = dict(os.environ, DISPLAY=":99", QT_QPA_PLATFORM="xcb", QT_QUICK_BACKEND="software", LANG="C.UTF-8")
@@ -296,4 +310,8 @@ def capture_job(job_path: pathlib.Path) -> None:
             (output / "capture.json").write_text(json.dumps(dict(runtime=runtime, captures=captures), indent=2) + "\n")
         finally:
             display.terminate()
-            display.wait(timeout=5)
+            try:
+                display.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                display.kill()
+                display.wait(timeout=5)

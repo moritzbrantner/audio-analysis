@@ -24,8 +24,10 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import pathlib
 import re
+import signal
 import statistics
 import subprocess
 import sys
@@ -395,7 +397,7 @@ def sha256(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
-def rust_analysis(path: pathlib.Path, *, release: bool = False) -> dict[str, Any]:
+def rust_analysis(path: pathlib.Path, *, release: bool = False, timeout: float = 600) -> dict[str, Any]:
     command = [
         "cargo",
         "run",
@@ -410,13 +412,24 @@ def rust_analysis(path: pathlib.Path, *, release: bool = False) -> dict[str, Any
     ]
     if release:
         command.insert(2, "--release")
-    completed = subprocess.run(
-        command,
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    process = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True, start_new_session=True)
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except BaseException:
+        # Cargo owns compiler/analyzer descendants. Cancellation must stop the
+        # whole isolated group, including children holding captured pipes.
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass  # The group already completed before cancellation.
+        try:
+            process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.communicate(timeout=5)
+        raise
+    completed = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
     if completed.returncode != 0:
         if completed.stdout:
             print(completed.stdout, file=sys.stderr, end="")

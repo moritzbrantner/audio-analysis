@@ -165,15 +165,26 @@ def summarize(rows: list[dict]) -> list[dict]:
     return summaries
 
 
+def run_capture(command: list[str], name: str) -> None:
+    try:
+        subprocess.run(command, check=True, timeout=30 * 60)
+    except BaseException:
+        # Killing the Docker client does not stop the container. Stop only this
+        # capture's unique name; --rm removes its state after shutdown.
+        subprocess.run(["docker", "stop", "--time", "5", name],
+                       check=False, timeout=15, capture_output=True)
+        raise
+
+
 def capture_references(cases: list[dict], config: dict, image: str, output: pathlib.Path) -> dict:
-    inspected = json.loads(subprocess.check_output(["docker", "image", "inspect", image], text=True))[0]
+    inspected = json.loads(subprocess.check_output(["docker", "image", "inspect", image], text=True, timeout=30))[0]
     # Resolve a tag once and execute only that immutable local image ID.
     image_id = inspected["Id"]
     directory = pathlib.Path(tempfile.mkdtemp(prefix="capture-", dir=output))
     job = dict(config=config, cases=[dict(name=case["name"], sha256=case["sha256"], containerPath="/repo/" + str(pathlib.Path(case["path"]).relative_to(ROOT))) for case in cases])
     (directory / "job.json").write_text(json.dumps(job, indent=2) + "\n")
     command = [
-        "docker", "run", "--rm", "--network", "none", "--read-only",
+        "docker", "run", "--rm", "--name", "audio-mixxx-" + directory.name, "--network", "none", "--read-only",
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         "--user", f"{os.getuid()}:{os.getgid()}", "--cpus", "2", "--memory", "2g", "--pids-limit", "256",
         "--tmpfs", "/tmp:rw,nosuid,size=512m",
@@ -181,7 +192,7 @@ def capture_references(cases: list[dict], config: dict, image: str, output: path
         "--mount", f"type=bind,source={directory},target=/output",
         image_id, "python3", "/repo/scripts/evaluate-dj-mixxx.py", "--capture-job", "/output/job.json",
     ]
-    subprocess.run(command, check=True)
+    run_capture(command, "audio-mixxx-" + directory.name)
     captured = json.loads((directory / "capture.json").read_text())
     captured["runtime"].update(imageId=image_id, declaredBaseImage=config["baseImage"],
                                mixxxUpstreamRevision=config["mixxxSourceRevision"], cpuLimit=2, memoryLimitBytes=2 * 1024 ** 3)
@@ -201,18 +212,18 @@ def source_identity() -> dict:
         raise RuntimeError("benchmark requires one exact Foundation revision")
     for item in patches:
         checkout = ROOT / item["localPath"]
-        actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=checkout, text=True).strip()
-        dirty = subprocess.check_output(["git", "status", "--porcelain"], cwd=checkout, text=True)
+        actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=checkout, text=True, timeout=30).strip()
+        dirty = subprocess.check_output(["git", "status", "--porcelain"], cwd=checkout, text=True, timeout=30)
         if actual != item["rev"] or dirty:
             raise RuntimeError("benchmark Foundation checkout is not clean at its exact pin")
-    library_diff = subprocess.check_output(["git", "diff", "HEAD", "--", "crates", "packages"], cwd=ROOT, text=True)
+    library_diff = subprocess.check_output(["git", "diff", "HEAD", "--", "crates", "packages"], cwd=ROOT, text=True, timeout=30)
     harness = ["scripts/evaluate-dj-mixxx.py", "scripts/dj_mixxx_reference.py", "scripts/dj_benchmark_cases.py",
                "scripts/dj_mixxx_baseline.py", "scripts/evaluate-dj-goldens.py", "scripts/mixxx/Dockerfile"]
     return dict(
-        revision=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        revision=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, timeout=30).strip(),
         libraryDiffSha256=hashlib.sha256(library_diff.encode()).hexdigest(), libraryDirty=bool(library_diff),
         pythonVersion=platform.python_version(), cargoLockSha256=source_lock, buildProfile="release",
-        rustCompiler=subprocess.check_output(["rustc", "-vV"], text=True).strip(),
+        rustCompiler=subprocess.check_output(["rustc", "-vV"], text=True, timeout=30).strip(),
         foundationRevision=next(iter(revisions)),
         harnessSha256={path: goldens.sha256(ROOT / path) for path in harness},
         manifestSha256=goldens.sha256(MANIFEST), corpusManifestSha256=goldens.sha256(goldens.CORPUS_MANIFEST),
@@ -298,8 +309,8 @@ def main() -> int:
     failures = []
     for case in cases:
         print(f"Rust analysis: {case['name']}", file=sys.stderr, flush=True)
-        rust = goldens.rust_analysis(pathlib.Path(case["path"]), release=True)
-        rust_repeat = goldens.rust_analysis(pathlib.Path(case["path"]), release=True)
+        rust = goldens.rust_analysis(pathlib.Path(case["path"]), release=True, timeout=600)
+        rust_repeat = goldens.rust_analysis(pathlib.Path(case["path"]), release=True, timeout=600)
         if rust != rust_repeat:
             failures.append(f"{case['name']}: fresh Rust repeats differ")
         if goldens.sha256(pathlib.Path(case["path"])) != case["sha256"] or source_identity() != source:

@@ -5,9 +5,12 @@ import copy
 import json
 import pathlib
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
+import time
+import os
 import wave
 from unittest.mock import patch
 
@@ -15,7 +18,7 @@ from unittest.mock import patch
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 from dj_benchmark_cases import generate_case
-from dj_mixxx_reference import decode_beats, read_database, ready_to_flush
+from dj_mixxx_reference import decode_beats, read_database, ready_to_flush, desktop_key
 from dj_mixxx_baseline import establish_baseline, compare_baseline
 
 SPEC = importlib.util.spec_from_file_location("dj_mixxx_benchmark", ROOT / "scripts/evaluate-dj-mixxx.py")
@@ -25,6 +28,47 @@ SPEC.loader.exec_module(benchmark)
 # Captured from actual Mixxx 2.5.4 whole-track Queen Mary analysis of Choice.
 # BPM 136, first beat at frame 228, mono/stereo frame positions are not samples.
 CAPTURED_GRID = bytes.fromhex("0a09090000000000006140120308e401")
+
+
+class CaptureLifecycleTests(unittest.TestCase):
+    def test_cargo_timeout_closes_descendant_pipes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cargo = pathlib.Path(temporary) / "cargo"
+            cargo.write_text(f"#!{sys.executable}\nimport subprocess, sys, time\nsubprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\ntime.sleep(30)\n")
+            cargo.chmod(0o755)
+            start = time.monotonic()
+            with patch.dict(os.environ, {"PATH": temporary + os.pathsep + os.environ["PATH"]}):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    benchmark.goldens.rust_analysis(pathlib.Path("unused.wav"), timeout=0.2)
+            self.assertLess(time.monotonic() - start, 5)
+
+    def test_disappeared_dialog_never_receives_a_key(self):
+        result = subprocess.CompletedProcess([], 1, stdout=b"", stderr=b"BadWindow")
+        with patch("dj_mixxx_reference.subprocess.run", return_value=result) as run:
+            self.assertFalse(desktop_key("stale-window", "Return", {}))
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(run.call_args.kwargs["timeout"], 5)
+
+    def test_other_focus_failures_propagate(self):
+        result = subprocess.CompletedProcess([], 1, stdout=b"", stderr=b"unavailable display")
+        with patch("dj_mixxx_reference.subprocess.run", return_value=result):
+            with self.assertRaises(subprocess.CalledProcessError):
+                desktop_key("window", "Return", {})
+
+    def test_stalled_focus_propagates_without_sending_a_key(self):
+        with patch("dj_mixxx_reference.subprocess.run", side_effect=subprocess.TimeoutExpired("xdotool", 5)) as run:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                desktop_key("window", "Return", {})
+            self.assertEqual(run.call_count, 1)
+
+    def test_container_is_stopped_on_timeout_and_cancellation(self):
+        for failure in [subprocess.TimeoutExpired("docker", 1800), KeyboardInterrupt()]:
+            with self.subTest(failure=type(failure)), patch.object(benchmark.subprocess, "run", side_effect=[failure, subprocess.CompletedProcess([], 0)]) as run:
+                with self.assertRaises(type(failure)):
+                    benchmark.run_capture(["docker", "run"], "audio-mixxx-owned")
+                self.assertEqual(run.call_args_list[0].kwargs["timeout"], 1800)
+                self.assertEqual(run.call_args_list[1].args[0], ["docker", "stop", "--time", "5", "audio-mixxx-owned"])
+                self.assertEqual(run.call_args_list[1].kwargs["timeout"], 15)
 
 
 class MixxxWireTests(unittest.TestCase):

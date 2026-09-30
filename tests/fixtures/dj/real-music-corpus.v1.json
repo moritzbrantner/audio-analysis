@@ -280,6 +280,72 @@
       "assertTempo": false,
       "sourceBytes": 558882,
       "sourceSha1": "1a97d0ee955dbb2173a781c67b2e301e05daf5d7"
+    },
+    {
+      "name": "karissa-hobbs-lets-go-fishin",
+      "filename": "Karissa_Hobbs_-_Lets_Go_Fishin.ogg",
+      "sha256": "27b3667c396c1831511aa3c415fcf582b6e8be560cafb844c5b67b76b72c1cb3",
+      "license": "CC-BY-3.0",
+      "category": "singer-songwriter",
+      "coverage": [
+        "pop-rock",
+        "acoustic"
+      ],
+      "focus": [
+        "sung-vocals",
+        "acoustic-accompaniment"
+      ],
+      "assertTempo": false
+    },
+    {
+      "name": "sorohanro-trumpet-loop",
+      "filename": "sorohanro_-_solo-trumpet-06.ogg",
+      "sha256": "8374466fd3951d24509da6e799b132a0db0bdeda69d99c69d989a6888d3d727d",
+      "license": "CC-BY-3.0",
+      "category": "trumpet-loop",
+      "coverage": [
+        "acoustic"
+      ],
+      "focus": [
+        "author-declared-90-bpm",
+        "blues-dorian",
+        "weak-percussion"
+      ],
+      "assertTempo": false,
+      "referenceBpm": 90,
+      "referenceBpmSource": "Creator description preserved in librosa/data@38f4b06556fa0ff1acda5e677d8ba05d1bc0fff0/audio/sorohanro_-_solo-trumpet-06.txt (Freesound 77711)"
+    },
+    {
+      "name": "drese-wind-ensemble",
+      "filename": "drese-midi.ogg",
+      "sha256": "e38dab530f50de8f79873fefbca3e0a5af454eb5906c06b84287d7c2e936dd19",
+      "license": "CC-BY-4.0",
+      "category": "wind-ensemble-mixed-source",
+      "coverage": [
+        "acoustic"
+      ],
+      "focus": [
+        "five-channel-downmix",
+        "wind-recordings-and-synthesized-parts"
+      ],
+      "assertTempo": false
+    },
+    {
+      "name": "drese-expressive-trumpet",
+      "filename": "drese-tempo.ogg",
+      "sha256": "bbaa7f8984266f289d7aaabfba4ba78f48f084cb0d1a03a6a84957f223b3030e",
+      "license": "CC-BY-4.0",
+      "category": "expressive-trumpet",
+      "coverage": [
+        "acoustic",
+        "tempo-drift"
+      ],
+      "focus": [
+        "wind-instrument",
+        "expressive-timing",
+        "weak-percussion"
+      ],
+      "assertTempo": false
     }
   ]
 }

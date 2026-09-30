@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "audio-analysis-mixxx-benchmark/v1",
+  "mixxxVersion": "2.5.4",
+  "mixxxPackageVersion": "2.5.4+dfsg-1build1",
+  "mixxxSourceRevision": "073e5ff876b6d1ed2cb6843f618cafaa6597daed",
+  "baseImage": "ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78",
+  "repetitions": 2,
+  "beatToleranceSeconds": 0.07,
+  "tempoToleranceRelative": 0.035,
+  "profiles": [
+    {"name": "whole-track-constant", "fixedTempo": true},
+    {"name": "whole-track-variable", "fixedTempo": false}
+  ],
+  "authoredCases": [
+    {"name": "authored-steady-120", "pattern": "steady", "bpm": 120, "beatCount": 48, "startSeconds": 0.5},
+    {"name": "authored-half-time-accents", "pattern": "half-time", "bpm": 120, "beatCount": 48, "startSeconds": 0.5},
+    {"name": "authored-weak-intro", "pattern": "weak-intro", "bpm": 120, "beatCount": 48, "startSeconds": 0.5},
+    {"name": "authored-offbeat-intro", "pattern": "offbeat", "bpm": 124, "beatCount": 48, "startSeconds": 0.75},
+    {"name": "authored-four-against-three", "pattern": "syncopated", "bpm": 124, "beatCount": 48, "startSeconds": 0.5},
+    {"name": "authored-sparse-breakdown", "pattern": "sparse", "bpm": 120, "beatCount": 48, "startSeconds": 0.5},
+    {"name": "authored-accelerating-100-163", "pattern": "drift", "bpm": 100, "endBpm": 163, "beatCount": 64, "startSeconds": 0.5},
+    {"name": "authored-g-major-128", "pattern": "major-chords", "bpm": 128, "beatCount": 32, "startSeconds": 0.5, "key": "G major"}
+  ]
+}

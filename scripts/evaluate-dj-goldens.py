@@ -395,7 +395,7 @@ def sha256(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
-def rust_analysis(path: pathlib.Path) -> dict[str, Any]:
+def rust_analysis(path: pathlib.Path, *, release: bool = False) -> dict[str, Any]:
     command = [
         "cargo",
         "run",
@@ -408,6 +408,8 @@ def rust_analysis(path: pathlib.Path) -> dict[str, Any]:
         "--",
         str(path),
     ]
+    if release:
+        command.insert(2, "--release")
     completed = subprocess.run(
         command,
         cwd=ROOT,

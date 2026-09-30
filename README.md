@@ -43,7 +43,39 @@ The reference workflow pins Python 3.12.13; the pinned Essentia release has no P
 
 Analyzer disagreement remains evidence rather than ground truth. Analyzer-derived key references declare their source and remain non-gating unless a fixture explicitly enables `assertKey` against an independently justified reference. Coverage completeness means the declared scenario families are represented; it does not by itself establish Mixxx-class accuracy.
 
-Independent creator tempo references use numeric `referenceBpm` and sourced `referenceBpmSource` fields. The report compares Rust and both reference analyzers with that tempo, allowing explicit half/double-time equivalence. `assertTempo` gates an independent tempo reference when present; otherwise it gates analyzer comparisons. Solarity's creator-declared 124 BPM is recorded as evidence of the current defect until a separately verified analysis fix enables its assertion.
+### Direct Mixxx comparison benchmark
+
+The local benchmark requires Docker, Python 3, the declared Rust toolchain, and `ffmpeg`/`ffprobe` on `PATH` for the Rust decoder.
+
+`scripts/evaluate-dj-mixxx.py` compares the 18 checksum-pinned corpus inputs and eight independently authored PCM scenarios with **actual Mixxx 2.5.4**, using its packaged Queen Mary beat/key plugins. Both whole-track profiles are captured: constant tempo (the default assumption) and variable tempo. Fast analysis is disabled. Each profile uses a fresh library/settings directory twice; Rust's public whole-track example also runs twice per input in release mode. A complete run therefore contains 26 inputs, 52 comparisons, 104 Mixxx captures, and 52 Rust captures. The corpus includes synthetic stress and mixed-source material; its size is not a count of independently annotated real songs.
+
+Prepare the declared exact Foundation source checkout, activate source mode, and run:
+
+```sh
+bash scripts/source-deps activate
+bash scripts/check-agent-readiness.sh --with-source
+docker build --tag audio-analysis-mixxx:2.5.4 scripts/mixxx
+python3 scripts/evaluate-dj-mixxx.py
+```
+
+The host evaluator needs Python's standard library and Docker. The evaluation image pins the Ubuntu base digest and Mixxx package version; it records the installed dependency versions, Mixxx binary checksum, immutable local image ID, and runtime fingerprint rather than assuming that later image builds have identical dependencies. The runtime has no network access, reads inputs through a read-only mount, and writes only its isolated captures. It loads two tracks into normal decks, closes only known startup dialogs, waits for PCM processing, and quits cleanly so Mixxx flushes its own database. The adapter reads the versioned beat grid/map and normalized chromatic key IDs; it does not substitute a reimplementation of Mixxx's analyzer. Database plugin provenance and persisted profile settings must match the requested whole-track analysis.
+
+JSON and Markdown reports are written to `target/dj-goldens/mixxx/report.{json,md}`. Raw repeated captures, settings, databases, and process logs stay in the ignored target directory. Reports record exact input checksums, harness checksums, source/toolchain/lock provenance, missing outputs, repeated-run consistency, exact and half/double-time BPM agreement, beat F1 at 70 ms, and dominant-key agreement. Authored beat/key/tempo correctness and beat-interval tempo errors are separate from model agreement. Constant grids are expanded over `[0, duration)`; variable maps use their stored beat positions inside the same horizon. No inferred bar phase is manufactured from Mixxx's first beat.
+
+Both whole-track pipelines receive the identical encoded file bytes and own their native decoding/downmixing. Differences can therefore include frontend behavior, especially for the five-channel wind fixture; this is not an isolated comparison of algorithms receiving identical decoded PCM. The authored cases deliberately target known failure modes, so their aggregate is a regression workload, not a representative song-accuracy leaderboard.
+
+For a focused probe, use `--fixture <corpus-name>` and optionally `--no-authored`; the report explicitly marks that coverage incomplete. Validate manifest/adapter regressions without downloading audio or launching Mixxx:
+
+```sh
+python3 -m unittest discover -s tests/dj -p 'test_*.py'
+python3 scripts/evaluate-dj-mixxx.py --check-manifest
+```
+
+The **DJ Mixxx Benchmark** workflow can be dispatched manually or enabled for a PR with the `dj-mixxx-benchmark` label. It prepares the exact source graph and uploads the report and repeated reference captures. A successful run proves capture integrity and repeat consistency; it does not mean every output is accurate. Mixxx agreement is not real beat/key ground truth, and this benchmark makes no Mixxx-parity, structure, waveform, downbeat, confidence-calibration, or speed claim. The adapter's wire-format reference is [Mixxx 2.5.4's beat schema](https://github.com/mixxxdj/mixxx/blob/073e5ff876b6d1ed2cb6843f618cafaa6597daed/src/proto/beats.proto); the two tempo assumptions are described in the [Mixxx manual](https://manual.mixxx.org/2.5/en/chapters/preferences/beat_detection).
+
+The committed `mixxx-baseline.v1.json` keeps measured known matches and failures. Full runs gate regressions only against independently authored beats/key/tempo and the creator-described numeric tempo references. Beat F1 may fall by at most the larger of 0.02 absolute or 3% relative before failing; beat-interval tempo error uses 1 BPM absolute or 5% relative. Losing an established tempo/key match also fails. Equivalent inputs, oracles, harness, compiler, build profile, and dependency lock are required. Mixxx runtime changes are recorded separately and its agreement scores never become ground truth. A deliberate `--establish-baseline tests/fixtures/dj/mixxx-baseline.v1.json` update requires a complete, repeat-consistent run and should be reviewed with the resulting metric changes. Focused probes do not apply a whole-corpus accuracy gate. For drifting PCM, the authored scalar BPM convention is the median of instantaneous tempi; different whole-track summary conventions should be assessed alongside the actual beat grid and interval error.
+
+Independent creator tempo references use numeric `referenceBpm` and sourced `referenceBpmSource` fields. The report compares Rust and both reference analyzers with that tempo, allowing explicit half/double-time equivalence. `assertTempo` gates an independent tempo reference when present; otherwise it gates analyzer comparisons. Solarity's creator-declared 124 BPM is asserted after the shared pulse-family fix. The added trumpet loop's creator-described 90 BPM remains a non-gating diagnostic reference; its declared blues/Dorian tonality is not guessed into a major/minor key oracle.
 
 ## Development surface
 

@@ -57,6 +57,12 @@ jobs:
           git -C ../moenarch-foundation fetch --depth=1 https://github.com/moritzbrantner/moenarch-foundation.git "$FOUNDATION_REV"
           git -C ../moenarch-foundation checkout --detach FETCH_HEAD
           bash scripts/source-deps activate
+      - name: Install and verify Rust audio decoder tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+          ffprobe -version
+          ffmpeg -version
       - name: Validate offline benchmark contracts
         run: |
           python3 -m unittest discover -s tests/dj -p 'test_*.py'

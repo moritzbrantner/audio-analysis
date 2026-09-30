@@ -45,6 +45,8 @@ Analyzer disagreement remains evidence rather than ground truth. Analyzer-derive
 
 ### Direct Mixxx comparison benchmark
 
+The local benchmark requires Docker, Python 3, the declared Rust toolchain, and `ffmpeg`/`ffprobe` on `PATH` for the Rust decoder.
+
 `scripts/evaluate-dj-mixxx.py` compares the 18 checksum-pinned corpus inputs and eight independently authored PCM scenarios with **actual Mixxx 2.5.4**, using its packaged Queen Mary beat/key plugins. Both whole-track profiles are captured: constant tempo (the default assumption) and variable tempo. Fast analysis is disabled. Each profile uses a fresh library/settings directory twice; Rust's public whole-track example also runs twice per input in release mode. A complete run therefore contains 26 inputs, 52 comparisons, 104 Mixxx captures, and 52 Rust captures. The corpus includes synthetic stress and mixed-source material; its size is not a count of independently annotated real songs.
 
 Prepare the declared exact Foundation source checkout, activate source mode, and run:

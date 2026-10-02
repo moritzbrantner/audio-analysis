@@ -21,7 +21,7 @@ This is the capability repository for audio analysis and generation packages.
 - Do not create another per-capability CLI/server/WASM/app shell. If a genuinely new transport surface is required, prefer one repository-level adapter and reuse the library-owned operation contracts.
 - Do not mechanically update compatibility shells when only implementation internals change. Touch them when their public operation/transport contract actually changes.
 - Use `bash scripts/check-fast.sh` for the repeated local library loop. It validates the active lockfile, workspace Clippy, and workspace tests without expanding into adapter/distribution checks.
-- Before handing work to review, run `bash scripts/check-handoff.sh` once. It runs diff hygiene, verifies the active environment/source profile, and then runs the fast library gate. `.agent-loop.toml` owns this handoff tier.
+- Before handing work to review, run `bash scripts/check-handoff.sh` once. It runs diff hygiene, verifies the active environment/source profile, and then runs the fast library gate.
 - `bash scripts/check-preflight.sh` is the exhaustive CPU/distribution gate: it adds adapter feature combinations, docs, and packageability. Hosted CI owns this tier; do not replay it after every edit.
 - Run `bash scripts/check-adapters.sh` directly only when adapter shells change or when distribution compatibility is being investigated before the full preflight.
 - CUDA is resource-backed. Do not enable workspace `--all-features` on ordinary CPU CI and then treat missing `nvcc` as an application failure. Run `bash scripts/check-cuda.sh` on a CUDA-equipped machine and keep CPU and CUDA evidence distinct.

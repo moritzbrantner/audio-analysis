@@ -8,7 +8,6 @@ audio-tools/
 .test-corpora/
 test-corpora/
 .model-runtime/
-.agent-loop/
 .env
 .env.*
 !.env.example

@@ -7,7 +7,6 @@ project_kinds = ["library", "cli", "application", "native-processing"]
 verification_surface_globs = [
   ".harness/**",
   ".github/workflows/**",
-  ".agent-loop.toml",
   "AGENTS.md",
   "Cargo.toml",
   "Cargo.lock",

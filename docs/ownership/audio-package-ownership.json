@@ -1814,9 +1814,9 @@
     "known_consumer_repositories": [
       "moritzbrantner/media-similarity",
       "moritzbrantner/native-whisperx",
-      "moritzbrantner/stutter-tracker",
       "moritzbrantner/subtitle-merger",
-      "moritzbrantner/video-analysis-studio"
+      "moritzbrantner/video-analysis-studio",
+      "moritzbrantner/vox"
     ],
     "excluded_authorities": [
       {

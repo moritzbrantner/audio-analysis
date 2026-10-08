@@ -2,11 +2,11 @@
   "schemaVersion": "audio-analysis-dj-mixxx-baseline/v1",
   "claimBoundary": "These are measured independent-oracle results, including known failures. Model agreement is not an accuracy gate.",
   "source": {
-    "revision": "f6cafb7976f57dc4d843d244a0ca3cf7f64a4547",
+    "revision": "802cf0566bf2108d2dd55d50159247985d2107cc",
     "libraryDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "libraryDirty": false,
-    "pythonVersion": "3.12.13",
-    "cargoLockSha256": "41fb5a7e6846c905f7e7e1f1cec8440cad454e79faba477d3ce3b28791e948bd",
+    "pythonVersion": "3.14.4",
+    "cargoLockSha256": "4508d46fe4f5e197492ae43bef92b01de5e36723600f5579b14e0d9238a3d40d",
     "buildProfile": "release",
     "rustCompiler": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.95.0\nLLVM version: 22.1.2",
     "foundationRevision": "fb51ab465ecd4d8086ac37ad0a9a2268b570e09f",
@@ -20,7 +20,7 @@
     },
     "manifestSha256": "5054c38d70656bbf21415e5aa60cb9d9d5758f6e26b1b1c7f6a2189de26118f9",
     "corpusManifestSha256": "e8b13433df759089851f320d824055cb581263fa15ea713cd478f3d6a1d105e7",
-    "baselineSha256": null
+    "baselineSha256": "b5376dde6a6495c72df3b5e93be44b5570419bd7634be2175f6b9b003aaaee92"
   },
   "referenceRuntime": {
     "mixxxPackageVersion": "2.5.4+dfsg-1build1",
@@ -170,7 +170,7 @@
       "tempoComparableCount": 17,
       "tempoExactMatches": 10,
       "tempoFamilyMatches": 13,
-      "meanBeatF1Mixxx": 0.5547909174510643,
+      "meanBeatF1Mixxx": 0.5485217697179086,
       "beatComparableCount": 18,
       "keyMatches": 10,
       "keyComparableCount": 17
@@ -208,7 +208,7 @@
       "tempoComparableCount": 17,
       "tempoExactMatches": 10,
       "tempoFamilyMatches": 13,
-      "meanBeatF1Mixxx": 0.6436690381875866,
+      "meanBeatF1Mixxx": 0.6440187550308017,
       "beatComparableCount": 18,
       "keyMatches": 10,
       "keyComparableCount": 17

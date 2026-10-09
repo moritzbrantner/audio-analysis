@@ -7,8 +7,9 @@ use runtime_core::{
 };
 
 use crate::{
-    mean_absolute, peak, rms, samples_to_seconds, seconds_to_samples, summarize_feature_series,
-    windowed_level_series, zero_crossing_rate, FrameSpec, WindowFunction,
+    capture_metrics, mean_absolute, peak, rms, samples_to_seconds, seconds_to_samples,
+    summarize_feature_series, windowed_level_series, zero_crossing_rate, CaptureMetricsConfig,
+    FrameSpec, WindowFunction,
 };
 
 const MAX_SAMPLES: usize = 192_000;
@@ -40,6 +41,12 @@ pub fn package_surface() -> PackageSurface {
                 serde_json::json!({"samples": [0.0, 0.5, -0.5, 0.25], "sampleRate": 48000, "channels": 1, "frameSize": 2, "hopSize": 1}),
             ),
             operation(
+                "audio.captureMetrics",
+                "Capture metrics",
+                "Measures clipping, no-input and activity over interleaved samples with declared thresholds.",
+                serde_json::json!({"samples": [0.0, 0.0, 0.5, -1.0, 0.0, 0.001], "sampleRate": 10, "channels": 1, "options": {"frameSeconds": 0.1}}),
+            ),
+            operation(
                 "audio.timestamps",
                 "Audio timestamps",
                 "Converts between seconds, samples, and timestamp ticks for a sample rate.",
@@ -59,6 +66,7 @@ fn operation(
     let curation = match id {
         "audio.levels" => SurfaceOperationCuration::workflow(10).primary(),
         "audio.frames" => SurfaceOperationCuration::workflow(20),
+        "audio.captureMetrics" => SurfaceOperationCuration::workflow(30),
         "audio.timestamps" => SurfaceOperationCuration::debug(910),
         "describe" => SurfaceOperationCuration::debug(900),
         _ => SurfaceOperationCuration::from_operation_id(id),
@@ -93,6 +101,7 @@ pub fn run_surface_operation(request: SurfaceRequest) -> Result<SurfaceResponse,
         "describe" => return Ok(describe_surface_response(&package_surface(), request)),
         "audio.levels" => levels_value(request.input)?,
         "audio.frames" => frames_value(request.input)?,
+        "audio.captureMetrics" => capture_metrics_value(request.input)?,
         "audio.timestamps" => timestamps_value(request.input)?,
         operation => {
             return Err(
@@ -127,6 +136,17 @@ fn response(operation: runtime_core::OperationId, value: serde_json::Value) -> S
                 "frameSize": value.get("frameSize").cloned().unwrap_or(serde_json::Value::Null),
                 "hopSize": value.get("hopSize").cloned().unwrap_or(serde_json::Value::Null),
                 "frameCount": value.get("frameCount").cloned().unwrap_or(serde_json::Value::Null)
+            }),
+        ),
+        "audio.captureMetrics" => (
+            "Audio capture metrics",
+            "Measured clipped samples, no-input frames and activity frames at the declared thresholds.",
+            serde_json::json!({
+                "durationSeconds": value.get("durationSeconds").cloned().unwrap_or(serde_json::Value::Null),
+                "clippedSampleRatio": value.get("clippedSampleRatio").cloned().unwrap_or(serde_json::Value::Null),
+                "noInputSeconds": value.get("noInputSeconds").cloned().unwrap_or(serde_json::Value::Null),
+                "longestNoInputSeconds": value.get("longestNoInputSeconds").cloned().unwrap_or(serde_json::Value::Null),
+                "activitySeconds": value.get("activitySeconds").cloned().unwrap_or(serde_json::Value::Null)
             }),
         ),
         "audio.timestamps" => (
@@ -215,6 +235,33 @@ fn frames_value(input: serde_json::Value) -> Result<serde_json::Value, String> {
         "frameCount": frame_spec.frame_count(samples.len()),
         "frames": summaries
     }))
+}
+
+fn capture_metrics_value(input: serde_json::Value) -> Result<serde_json::Value, String> {
+    // An empty capture is a valid measurement (zero duration), as in the library and WASM APIs.
+    let samples = match input.get("samples").and_then(serde_json::Value::as_array) {
+        Some(values) if values.is_empty() => Vec::new(),
+        _ => sample_array(&input, "samples")?,
+    };
+    // Defaults apply only to omitted fields; a supplied malformed or null format is an error, so the data
+    // is never measured as a format it is not.
+    for field in ["sampleRate", "channels"] {
+        if let Some(value) = input.get(field) {
+            if value.as_u64().is_none() {
+                return Err(format!("{field} must be a positive integer"));
+            }
+        }
+    }
+    let sample_rate = sample_rate(&input)?;
+    let channels = channels(&input)?;
+    let config = match input.get("options") {
+        None | Some(serde_json::Value::Null) => CaptureMetricsConfig::default(),
+        Some(options) => serde_json::from_value(options.clone())
+            .map_err(|error| format!("options are invalid: {error}"))?,
+    };
+    let metrics = capture_metrics(&samples, sample_rate, channels, &config)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(metrics).map_err(|error| error.to_string())
 }
 
 fn timestamps_value(input: serde_json::Value) -> Result<serde_json::Value, String> {
@@ -351,6 +398,7 @@ mod tests {
         assert!(ids.contains(&"audio.levels"));
         assert!(ids.contains(&"audio.frames"));
         assert!(ids.contains(&"audio.timestamps"));
+        assert!(ids.contains(&"audio.captureMetrics"));
     }
 
     #[test]
@@ -382,6 +430,60 @@ mod tests {
             assert!(response.value["title"].is_string());
             assert!(response.value["summary"].is_object());
             assert!(response.value["result"].is_object());
+        }
+    }
+
+    #[test]
+    fn capture_metrics_operation_reports_declared_thresholds() {
+        let response = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("audio.captureMetrics"),
+            input: serde_json::json!({
+                "samples": [0.0, 0.0, 1.0, 0.5],
+                "sampleRate": 4,
+                "channels": 1,
+                "options": {"frameSeconds": 0.25, "clipLevel": 0.9}
+            }),
+        })
+        .expect("capture metrics");
+        assert_eq!(response.value["clippedSampleCount"], 1);
+        assert_eq!(response.value["noInputSeconds"], 0.5);
+        assert_eq!(response.value["activitySeconds"], 0.5);
+        assert_eq!(response.value["config"]["clipLevel"], 0.9);
+        assert_eq!(response.value["config"]["noInputRms"], 1.0e-4);
+
+        let error = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("audio.captureMetrics"),
+            input: serde_json::json!({"samples": [0.0], "options": {"clipLvl": 1.0}}),
+        })
+        .unwrap_err();
+        assert!(error.contains("options"));
+
+        let empty = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("audio.captureMetrics"),
+            input: serde_json::json!({"samples": [], "sampleRate": 16000, "channels": 1}),
+        })
+        .expect("empty capture");
+        assert_eq!(empty.value["frameCount"], 0);
+        assert_eq!(empty.value["durationSeconds"], 0.0);
+
+        for input in [
+            serde_json::json!({"samples": [], "sampleRate": -1}),
+            serde_json::json!({"samples": [], "sampleRate": 16000.5}),
+            serde_json::json!({"samples": [], "sampleRate": "16000"}),
+            serde_json::json!({"samples": [], "channels": -2}),
+            serde_json::json!({"samples": [], "channels": 0}),
+            serde_json::json!({"samples": [], "channels": 70000}),
+            serde_json::json!({"samples": [], "sampleRate": null}),
+            serde_json::json!({"samples": [], "channels": null}),
+        ] {
+            assert!(
+                run_surface_operation(SurfaceRequest {
+                    operation: OperationId::new("audio.captureMetrics"),
+                    input: input.clone(),
+                })
+                .is_err(),
+                "{input}"
+            );
         }
     }
 

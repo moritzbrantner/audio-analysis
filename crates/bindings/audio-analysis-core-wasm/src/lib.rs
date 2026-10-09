@@ -1,6 +1,7 @@
 //! WASM bindings for `audio-analysis-core`.
 
 use runtime_core::SurfaceRequest;
+use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(js_name = packageSurface)]
@@ -15,6 +16,32 @@ pub fn run_operation(request: JsValue) -> Result<JsValue, JsValue> {
     let response =
         audio_analysis_core::surface::run_surface_operation(request).map_err(into_js_error)?;
     serde_wasm_bindgen::to_value(&response).map_err(into_js_error)
+}
+
+/// Measures clipping, no-input and activity over interleaved samples (a `Float32Array`) without
+/// the surface's sample-count limit, so whole captures can be measured. `options` is an optional
+/// object with `frameSeconds`, `clipLevel`, `noInputRms` and `activityRms`.
+#[wasm_bindgen(js_name = captureMetrics)]
+pub fn capture_metrics(
+    samples: &[f32],
+    sample_rate: u32,
+    channels: u16,
+    options: JsValue,
+) -> Result<JsValue, JsValue> {
+    let config = if options.is_undefined() || options.is_null() {
+        audio_analysis_core::CaptureMetricsConfig::default()
+    } else {
+        // Through a JSON value, so unknown option names are rejected rather than ignored.
+        let options: serde_json::Value =
+            serde_wasm_bindgen::from_value(options).map_err(into_js_error)?;
+        serde_json::from_value(options)
+            .map_err(|error| into_js_error(format!("options are invalid: {error}")))?
+    };
+    let metrics = audio_analysis_core::capture_metrics(samples, sample_rate, channels, &config)
+        .map_err(into_js_error)?;
+    metrics
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(into_js_error)
 }
 
 fn into_js_error(error: impl std::fmt::Display) -> JsValue {

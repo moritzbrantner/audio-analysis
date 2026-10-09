@@ -243,11 +243,11 @@ fn capture_metrics_value(input: serde_json::Value) -> Result<serde_json::Value, 
         Some(values) if values.is_empty() => Vec::new(),
         _ => sample_array(&input, "samples")?,
     };
-    // Defaults apply only to omitted fields; a supplied malformed format is an error, so the data
+    // Defaults apply only to omitted fields; a supplied malformed or null format is an error, so the data
     // is never measured as a format it is not.
     for field in ["sampleRate", "channels"] {
         if let Some(value) = input.get(field) {
-            if !value.is_null() && value.as_u64().is_none() {
+            if value.as_u64().is_none() {
                 return Err(format!("{field} must be a positive integer"));
             }
         }
@@ -473,6 +473,8 @@ mod tests {
             serde_json::json!({"samples": [], "channels": -2}),
             serde_json::json!({"samples": [], "channels": 0}),
             serde_json::json!({"samples": [], "channels": 70000}),
+            serde_json::json!({"samples": [], "sampleRate": null}),
+            serde_json::json!({"samples": [], "channels": null}),
         ] {
             assert!(
                 run_surface_operation(SurfaceRequest {

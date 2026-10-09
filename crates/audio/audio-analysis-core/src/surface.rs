@@ -243,6 +243,15 @@ fn capture_metrics_value(input: serde_json::Value) -> Result<serde_json::Value, 
         Some(values) if values.is_empty() => Vec::new(),
         _ => sample_array(&input, "samples")?,
     };
+    // Defaults apply only to omitted fields; a supplied malformed format is an error, so the data
+    // is never measured as a format it is not.
+    for field in ["sampleRate", "channels"] {
+        if let Some(value) = input.get(field) {
+            if !value.is_null() && value.as_u64().is_none() {
+                return Err(format!("{field} must be a positive integer"));
+            }
+        }
+    }
     let sample_rate = sample_rate(&input)?;
     let channels = channels(&input)?;
     let config = match input.get("options") {
@@ -456,6 +465,24 @@ mod tests {
         .expect("empty capture");
         assert_eq!(empty.value["frameCount"], 0);
         assert_eq!(empty.value["durationSeconds"], 0.0);
+
+        for input in [
+            serde_json::json!({"samples": [], "sampleRate": -1}),
+            serde_json::json!({"samples": [], "sampleRate": 16000.5}),
+            serde_json::json!({"samples": [], "sampleRate": "16000"}),
+            serde_json::json!({"samples": [], "channels": -2}),
+            serde_json::json!({"samples": [], "channels": 0}),
+            serde_json::json!({"samples": [], "channels": 70000}),
+        ] {
+            assert!(
+                run_surface_operation(SurfaceRequest {
+                    operation: OperationId::new("audio.captureMetrics"),
+                    input: input.clone(),
+                })
+                .is_err(),
+                "{input}"
+            );
+        }
     }
 
     #[test]

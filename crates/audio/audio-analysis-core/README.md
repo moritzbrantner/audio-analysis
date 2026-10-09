@@ -48,6 +48,18 @@ metadata. It supports sample/second slicing, timeline splitting, concat, and
 mixing. Format-changing concat is explicit through `ConcatPolicy::ResampleToFirst`;
 mixing still requires matching sample rate and channels.
 
+## Capture metrics
+
+`capture_metrics(interleaved, sample_rate, channels, &CaptureMetricsConfig)` measures generic
+capture quality: duration, channel count, clipped-sample ratio at a declared clip level, seconds of
+no-input frames (frame RMS below a floor) and the longest continuous no-input run, and seconds of
+activity frames (frame RMS above a floor). Frame RMS spans all channels of the frame. Defaults are
+20 ms frames, clip level 0.999, no-input floor 1e-4 and activity floor 0.01; the result echoes the
+configuration used. Interpretation (what is usable for a purpose) belongs to the consumer.
+
+`tests/fixtures/capture-metrics.json` holds shared fixtures that the Rust library and the
+`@moritzbrantner/audio-analysis-core-wasm` `captureMetrics` export must both reproduce.
+
 ## Package surface
 
 Primary workflow: `audio.levels`.
@@ -56,6 +68,7 @@ Workflow operations:
 
 - `audio.levels`: Returns deterministic level metrics for normalized audio samples.
 - `audio.frames`: Summarizes fixed-size analysis frames over normalized samples.
+- `audio.captureMetrics`: Measures clipping, no-input and activity over interleaved samples with declared thresholds.
 - `audio.timestamps`: Converts between seconds, samples, and timestamp ticks for a sample rate.
 
 Debug operations:

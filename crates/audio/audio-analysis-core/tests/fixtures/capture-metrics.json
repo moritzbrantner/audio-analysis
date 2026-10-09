@@ -1,0 +1,154 @@
+{
+  "description": "Shared capture-metrics fixtures. Every runtime (Rust library, surface operation, WASM/TypeScript) must reproduce `expected` within 1e-9.",
+  "tolerance": 1e-09,
+  "cases": [
+    {
+      "name": "mono silence, activity, clipping and a quiet frame",
+      "sampleRate": 10,
+      "channels": 1,
+      "samples": [
+        0.0,
+        0.0,
+        0.5,
+        -1.0,
+        0.0,
+        0.001
+      ],
+      "options": {
+        "frameSeconds": 0.1
+      },
+      "expected": {
+        "samplesPerChannel": 6,
+        "durationSeconds": 0.6,
+        "clippedSampleCount": 1,
+        "clippedSampleRatio": 0.16666666666666666,
+        "frameSamples": 1,
+        "frameCount": 6,
+        "noInputSeconds": 0.3,
+        "longestNoInputSeconds": 0.2,
+        "activitySeconds": 0.2
+      }
+    },
+    {
+      "name": "opposite-phase stereo is input, not silence",
+      "sampleRate": 2,
+      "channels": 2,
+      "samples": [
+        0.5,
+        -0.5,
+        0.5,
+        -0.5
+      ],
+      "options": {
+        "frameSeconds": 1.0
+      },
+      "expected": {
+        "samplesPerChannel": 2,
+        "durationSeconds": 1.0,
+        "clippedSampleCount": 0,
+        "clippedSampleRatio": 0.0,
+        "frameSamples": 2,
+        "frameCount": 1,
+        "noInputSeconds": 0.0,
+        "longestNoInputSeconds": 0.0,
+        "activitySeconds": 1.0
+      }
+    },
+    {
+      "name": "default 20 ms frames with a partial last frame",
+      "sampleRate": 1000,
+      "channels": 1,
+      "samples": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "expected": {
+        "samplesPerChannel": 50,
+        "durationSeconds": 0.05,
+        "clippedSampleCount": 0,
+        "clippedSampleRatio": 0.0,
+        "frameSamples": 20,
+        "frameCount": 3,
+        "noInputSeconds": 0.03,
+        "longestNoInputSeconds": 0.02,
+        "activitySeconds": 0.02
+      }
+    },
+    {
+      "name": "declared clip level and floors",
+      "sampleRate": 4,
+      "channels": 1,
+      "samples": [
+        0.95,
+        -0.95,
+        5e-05,
+        0.02
+      ],
+      "options": {
+        "frameSeconds": 0.25,
+        "clipLevel": 0.9,
+        "noInputRms": 0.0001,
+        "activityRms": 0.05
+      },
+      "expected": {
+        "samplesPerChannel": 4,
+        "durationSeconds": 1.0,
+        "clippedSampleCount": 2,
+        "clippedSampleRatio": 0.5,
+        "frameSamples": 1,
+        "frameCount": 4,
+        "noInputSeconds": 0.25,
+        "longestNoInputSeconds": 0.25,
+        "activitySeconds": 0.5
+      }
+    }
+  ]
+}

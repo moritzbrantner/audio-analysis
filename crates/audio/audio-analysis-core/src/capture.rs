@@ -59,7 +59,7 @@ impl CaptureMetricsConfig {
         Ok(())
     }
 
-    /// Samples per channel in one analysis frame at `sample_rate`.
+    /// Samples per channel in one analysis frame at `sample_rate` (saturating at `usize::MAX`).
     pub fn frame_samples(&self, sample_rate: u32) -> usize {
         ((self.frame_seconds * f64::from(sample_rate)).round() as usize).max(1)
     }
@@ -119,6 +119,10 @@ pub fn capture_metrics(
 
     let samples_per_channel = interleaved.len() / channel_count;
     let frame_samples = config.frame_samples(sample_rate);
+    // On 32-bit targets (WASM) a long frame of many channels can exceed usize.
+    let interleaved_frame_len = frame_samples
+        .checked_mul(channel_count)
+        .ok_or_else(|| invalid("frameSeconds × sampleRate × channels is too large"))?;
     let clipped_sample_count = interleaved
         .iter()
         .filter(|sample| f64::from(sample.abs()) >= config.clip_level)
@@ -129,7 +133,7 @@ pub fn capture_metrics(
     let mut longest_no_input_samples = 0usize;
     let mut current_no_input_samples = 0usize;
     let mut activity_samples = 0usize;
-    for frame in interleaved.chunks(frame_samples * channel_count) {
+    for frame in interleaved.chunks(interleaved_frame_len) {
         frame_count += 1;
         let frame_len = frame.len() / channel_count;
         let sum_squares = frame
@@ -241,5 +245,10 @@ mod tests {
             ..default
         };
         assert!(capture_metrics(&[0.0], 10, 1, &negative_floor).is_err());
+        let huge_frame = CaptureMetricsConfig {
+            frame_seconds: f64::MAX,
+            ..default
+        };
+        assert!(capture_metrics(&[], 48_000, 2, &huge_frame).is_err());
     }
 }

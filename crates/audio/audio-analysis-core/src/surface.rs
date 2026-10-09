@@ -238,7 +238,11 @@ fn frames_value(input: serde_json::Value) -> Result<serde_json::Value, String> {
 }
 
 fn capture_metrics_value(input: serde_json::Value) -> Result<serde_json::Value, String> {
-    let samples = sample_array(&input, "samples")?;
+    // An empty capture is a valid measurement (zero duration), as in the library and WASM APIs.
+    let samples = match input.get("samples").and_then(serde_json::Value::as_array) {
+        Some(values) if values.is_empty() => Vec::new(),
+        _ => sample_array(&input, "samples")?,
+    };
     let sample_rate = sample_rate(&input)?;
     let channels = channels(&input)?;
     let config = match input.get("options") {
@@ -444,6 +448,14 @@ mod tests {
         })
         .unwrap_err();
         assert!(error.contains("options"));
+
+        let empty = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("audio.captureMetrics"),
+            input: serde_json::json!({"samples": [], "sampleRate": 16000, "channels": 1}),
+        })
+        .expect("empty capture");
+        assert_eq!(empty.value["frameCount"], 0);
+        assert_eq!(empty.value["durationSeconds"], 0.0);
     }
 
     #[test]

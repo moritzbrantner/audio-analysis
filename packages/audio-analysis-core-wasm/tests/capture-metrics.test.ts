@@ -48,6 +48,15 @@ test.skipIf(!built)("captureMetrics rejects unknown options and invalid audio", 
   await expect(captureMetrics([Number.NaN], 16_000, 1)).rejects.toThrow();
 });
 
+test("captureMetrics rejects sample rates and channel counts the WASM types would wrap", async () => {
+  const { captureMetrics } = await import("../index.js");
+  await expect(captureMetrics([], -1, 1)).rejects.toThrow(RangeError);
+  await expect(captureMetrics([], 2 ** 32, 1)).rejects.toThrow(RangeError);
+  await expect(captureMetrics([], 16_000.5, 1)).rejects.toThrow(RangeError);
+  await expect(captureMetrics([], 16_000, 65_537)).rejects.toThrow(RangeError);
+  await expect(captureMetrics([], 16_000, 0)).rejects.toThrow(RangeError);
+});
+
 test("exports captureMetrics", async () => {
   const entry = await import("../index.js");
   expect(typeof entry.captureMetrics).toBe("function");

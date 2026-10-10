@@ -1,3 +1,9 @@
+import { xToTime } from "./waveform-viewport.js";
+
+// The inspector announces the detailed waveform's visible window with this event on `#waveform`
+// (detail: { startSeconds, endSeconds, durationSeconds }); the overlays follow it.
+export const WAVEFORM_VIEWPORT_EVENT = "waveform-viewport-change";
+
 const BEAT_TOGGLE_ID = "beat-overlay-toggle";
 const SECTION_TOGGLE_ID = "section-overlay-toggle";
 const TIME_EPSILON_SECONDS = 1e-6;
@@ -282,6 +288,12 @@ function setupWaveformOverlay() {
   structureRail.setAttribute("aria-label", "Detected musical structure. Select a section to seek to its start.");
   stage.append(structureRail);
 
+  // Sections are laid out over the whole file inside this track; the track is positioned so the
+  // visible window fills the rail, like the beat and boundary layers over the waveform.
+  const structureTrack = document.createElement("div");
+  structureTrack.className = "waveform-structure-track";
+  structureRail.append(structureTrack);
+
   const contextHud = document.createElement("div");
   contextHud.id = "waveform-context-hud";
   contextHud.className = "waveform-context-hud";
@@ -313,6 +325,21 @@ function setupWaveformOverlay() {
     activeSectionIndex: null,
     pointerInspecting: false,
     railInspecting: false,
+    viewport: null,
+  };
+
+  const applyViewport = () => {
+    const placement = viewportPlacement(state.viewport);
+    for (const layer of [beatLayer, sectionLayer, structureTrack]) {
+      layer.style.left = placement.left;
+      layer.style.width = placement.width;
+    }
+    // Keep each section's label centred in the part of the section that is in view.
+    for (const segment of structureTrack.children) {
+      const padding = visibleSegmentPadding(state.viewport, segment.dataset.sectionStartSeconds, segment.dataset.sectionEndSeconds);
+      segment.style.paddingLeft = padding.left;
+      segment.style.paddingRight = padding.right;
+    }
   };
 
   const syncActiveSection = (sectionIndex) => {
@@ -351,7 +378,7 @@ function setupWaveformOverlay() {
     renderBeatLayer(beatLayer, state.report, state.beats);
     renderSectionBoundaries(sectionLayer, state.report, state.sections);
     state.activeSectionIndex = null;
-    renderStructureRail(structureRail, state.report, state.sections, {
+    renderStructureRail(structureTrack, state.report, state.sections, {
       inspect: (timeSeconds) => {
         state.railInspecting = true;
         syncContext(timeSeconds);
@@ -380,6 +407,7 @@ function setupWaveformOverlay() {
       "Toggle the musical structure rail and section boundaries.",
     );
     syncVisibility();
+    applyViewport();
     syncContext(Number(player.currentTime) || 0);
   };
 
@@ -396,7 +424,13 @@ function setupWaveformOverlay() {
     if (duration === null || duration <= 0 || rect.width <= 0) return;
     const x = clamp((Number(event.clientX) || 0) - rect.left, 0, rect.width);
     state.pointerInspecting = true;
-    syncContext((x / rect.width) * duration);
+    const viewport = state.viewport;
+    syncContext(viewport ? clamp(xToTime(viewport, x, rect.width), 0, duration) : (x / rect.width) * duration);
+  });
+
+  waveform.addEventListener(WAVEFORM_VIEWPORT_EVENT, (event) => {
+    state.viewport = event.detail ?? null;
+    applyViewport();
   });
 
   waveform.addEventListener("pointerleave", () => {
@@ -411,6 +445,33 @@ function setupWaveformOverlay() {
   const reportObserver = new MutationObserver(refreshReport);
   reportObserver.observe(rawJson, { childList: true, characterData: true, subtree: true });
   if (rawJson.textContent.trim()) refreshReport();
+}
+
+// Places a layer that is laid out over the whole file (percentages of the duration) so that the
+// visible window exactly fills its container.
+export function viewportPlacement(viewport) {
+  const start = finite(viewport?.startSeconds);
+  const end = finite(viewport?.endSeconds);
+  const duration = finite(viewport?.durationSeconds);
+  if (start === null || end === null || duration === null || duration <= 0 || end <= start) {
+    return { left: "0%", width: "100%" };
+  }
+  const span = end - start;
+  return { left: `${(-start / span) * 100}%`, width: `${(duration / span) * 100}%` };
+}
+
+// Padding (relative to the whole-file track) that hides the out-of-view parts of a section.
+export function visibleSegmentPadding(viewport, startSeconds, endSeconds) {
+  const viewStart = finite(viewport?.startSeconds);
+  const viewEnd = finite(viewport?.endSeconds);
+  const duration = finite(viewport?.durationSeconds);
+  const start = finite(startSeconds);
+  const end = finite(endSeconds);
+  if ([viewStart, viewEnd, duration, start, end].includes(null) || duration <= 0) return { left: "", right: "" };
+  const hiddenLeft = clamp(viewStart - start, 0, Math.max(0, end - start));
+  const hiddenRight = clamp(end - viewEnd, 0, Math.max(0, end - start - hiddenLeft));
+  const toPadding = (seconds) => (seconds > 0 ? `calc(${(seconds / duration) * 100}% + 4px)` : "");
+  return { left: toPadding(hiddenLeft), right: toPadding(hiddenRight) };
 }
 
 function createOverlayToggle(id, text) {

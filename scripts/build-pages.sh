@@ -25,6 +25,9 @@ node --check "$ROOT_DIR/site/analysis-player.js"
 node --check "$ROOT_DIR/site/waveform-overlay.js"
 node --check "$ROOT_DIR/site/whole-track-analysis.js"
 node --check "$ROOT_DIR/site/whole-track-worker.js"
+node --check "$ROOT_DIR/site/waveform-viewport.js"
+node --check "$ROOT_DIR/site/waveform-peaks.js"
+node --check "$ROOT_DIR/site/waveform-peaks-worker.js"
 python3 -m json.tool "$ROOT_DIR/site/analysis-capabilities.json" >/dev/null
 
 rm -rf "$OUTPUT_DIR"

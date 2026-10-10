@@ -11,6 +11,19 @@ const NEAR_SILENCE_THRESHOLD = 0.001;
 const WHOLE_TRACK_MAX_SECONDS = 15 * 60;
 const WHOLE_TRACK_WORKER_URL = "./whole-track-worker.js";
 const WHOLE_TRACK_MODULE_URL = "./whole-track-analysis.js";
+// Zoomable waveform (#140): pure viewport math and the min/max peak pyramid, built in a worker.
+const WAVEFORM_VIEWPORT_MODULE_URL = "./waveform-viewport.js";
+const WAVEFORM_PEAKS_MODULE_URL = "./waveform-peaks.js";
+const WAVEFORM_PEAKS_WORKER_URL = "./waveform-peaks-worker.js";
+// Keep in sync with WAVEFORM_VIEWPORT_EVENT in waveform-overlay.js.
+const WAVEFORM_VIEWPORT_EVENT = "waveform-viewport-change";
+const WAVEFORM_BUTTON_ZOOM_FACTOR = 2;
+// One mouse-wheel notch (120 px) zooms by 1.25×; trackpad and pinch deltas scale continuously.
+const WAVEFORM_WHEEL_ZOOM_PER_PIXEL = Math.log(1.25) / 120;
+const WAVEFORM_MAX_WHEEL_FACTOR = 4;
+const WAVEFORM_DRAG_THRESHOLD_PX = 4;
+// While playing, a playhead that leaves the zoomed window pages the view to keep it in sight.
+const WAVEFORM_FOLLOW_LEAD = 0.1;
 
 const analyzerDefinitions = {
   core: {
@@ -43,6 +56,14 @@ const state = {
   spectralFrameIndex: null,
   playbackAnimationFrame: null,
   wholeTrackWorker: null,
+  waveformKit: null,
+  waveformViewport: null,
+  waveformPeaks: null,
+  waveformPeaksWorker: null,
+  waveformPointers: new Map(),
+  waveformGesture: null,
+  overviewGesture: null,
+  suppressWaveformClick: false,
 };
 
 const elements = {
@@ -64,6 +85,13 @@ const elements = {
   audioPlayer: document.querySelector("#audio-player"),
   waveform: document.querySelector("#waveform"),
   waveformReadout: document.querySelector("#waveform-readout"),
+  waveformZoomIn: document.querySelector("#waveform-zoom-in"),
+  waveformZoomOut: document.querySelector("#waveform-zoom-out"),
+  waveformViewRange: document.querySelector("#waveform-view-range"),
+  waveformOverview: document.querySelector("#waveform-overview"),
+  waveformOverviewCanvas: document.querySelector("#waveform-overview-canvas"),
+  waveformOverviewWindow: document.querySelector("#waveform-overview-window"),
+  waveformOverviewPlayhead: document.querySelector(".waveform-overview-playhead"),
   spectralTimeline: document.querySelector("#spectral-timeline"),
   spectralReadout: document.querySelector("#spectral-readout"),
   statisticsCoverage: document.querySelector("#statistics-coverage"),
@@ -130,12 +158,14 @@ function wireUi() {
   elements.chooseAnother.addEventListener("click", resetInspector);
 
   wireWaveformInteraction();
+  wireWaveformZoom();
   wireSpectralInteraction();
   wireReportNavigation();
 
   window.addEventListener("resize", () => {
     if (!state.audioBuffer || !state.report) return;
     drawWaveform(elements.waveform, state.audioBuffer);
+    drawWaveformOverview();
     drawSpectralTimeline(elements.spectralTimeline, state.report.spectrogram);
   });
 }
@@ -173,8 +203,13 @@ function wireReportNavigation() {
 }
 
 function wireWaveformInteraction() {
+  elements.waveform.addEventListener("pointerdown", startWaveformGesture);
+  elements.waveform.addEventListener("pointerup", endWaveformGesture);
+  elements.waveform.addEventListener("pointercancel", endWaveformGesture);
+
   elements.waveform.addEventListener("pointermove", (event) => {
     if (!state.audioBuffer) return;
+    if (moveWaveformGesture(event)) return;
     state.waveformHoverTime = canvasTimeFromEvent(event, elements.waveform, state.audioBuffer.duration);
     updateWaveformReadout(state.waveformHoverTime);
     drawWaveform(elements.waveform, state.audioBuffer);
@@ -188,6 +223,11 @@ function wireWaveformInteraction() {
 
   elements.waveform.addEventListener("click", (event) => {
     if (!state.audioBuffer) return;
+    // A drag or pinch pans/zooms the view; only a click without movement seeks.
+    if (state.suppressWaveformClick) {
+      state.suppressWaveformClick = false;
+      return;
+    }
     const time = canvasTimeFromEvent(event, elements.waveform, state.audioBuffer.duration);
     seekAudioToTime(time);
   });
@@ -201,9 +241,20 @@ function wireWaveformInteraction() {
     if (event.key === "ArrowRight") next = current + step;
     if (event.key === "Home") next = 0;
     if (event.key === "End") next = state.audioBuffer.duration;
+    if ((event.key === "+" || event.key === "=") && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      zoomWaveformAroundPlayhead(WAVEFORM_BUTTON_ZOOM_FACTOR);
+      return;
+    }
+    if ((event.key === "-" || event.key === "_") && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      zoomWaveformAroundPlayhead(1 / WAVEFORM_BUTTON_ZOOM_FACTOR);
+      return;
+    }
     if (next === null) return;
     event.preventDefault();
     seekAudioToTime(next);
+    revealWaveformTime(Number(elements.audioPlayer.currentTime) || 0);
   });
 
   elements.waveform.addEventListener("focus", () => {
@@ -265,6 +316,7 @@ function wireSpectralInteraction() {
 async function analyzeFile(file) {
   const generation = ++state.analysisGeneration;
   cancelWholeTrackAnalysis();
+  cancelWaveformPeaks();
   setAnalyzing(true);
   clearError();
   setProgressStage("decode");
@@ -291,7 +343,13 @@ async function analyzeFile(file) {
     state.audioBuffer = decoded;
     state.waveformHoverTime = null;
     state.spectralFrameIndex = null;
+    state.waveformViewport = null;
+    state.waveformPeaks = null;
     replacePlayerSource(file);
+
+    state.waveformKit ??= await loadWaveformKit();
+    if (!isCurrentAnalysis(generation)) return;
+    startWaveformPeaks(generation, decoded);
 
     setProgressStage("analyze");
     setLoading(true, "Analyzing the signal…", "Computing levels, spectrum, pitch, key, and rhythm with Rust/WASM.");
@@ -981,12 +1039,14 @@ function renderReport(report, buffer) {
   renderProvenance(report.runtime.packages);
 
   elements.rawJson.textContent = JSON.stringify(report, null, 2);
+  setWaveformViewport(state.waveformKit ? state.waveformKit.viewport.wholeFileViewport(buffer.duration) : null);
   updateWaveformAria();
   updateWaveformReadout(0, true);
   elements.spectralReadout.textContent = "Hover or focus the chart to inspect spectral frames.";
 
   requestAnimationFrame(() => {
     drawWaveform(elements.waveform, buffer);
+    drawWaveformOverview();
     drawSpectralTimeline(elements.spectralTimeline, report.spectrogram);
     elements.reportTitle.focus?.({ preventScroll: true });
     elements.report.scrollIntoView?.({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
@@ -1191,37 +1251,14 @@ function renderProvenance(packages) {
 
 function drawWaveform(canvas, buffer) {
   const { context, width, height } = prepareWaveformCanvas(canvas);
+  const view = currentWaveformView(buffer);
   context.clearRect(0, 0, width, height);
   context.fillStyle = "#111a1f";
   context.fillRect(0, 0, width, height);
   context.strokeStyle = "#2dd4bf";
   context.lineWidth = 1;
-
-  const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index));
-  const framesPerPixel = Math.max(1, Math.floor(buffer.length / width));
   const mid = height / 2;
-  const amplitude = height * 0.43;
-
-  context.beginPath();
-  for (let x = 0; x < width; x += 1) {
-    const start = Math.min(buffer.length - 1, x * framesPerPixel);
-    const end = Math.min(buffer.length, start + framesPerPixel);
-    let min = 1;
-    let max = -1;
-    const sampleStride = Math.max(1, Math.floor((end - start) / 64));
-    for (let frame = start; frame < end; frame += sampleStride) {
-      let sample = 0;
-      for (const channel of channels) sample += channel[frame] ?? 0;
-      sample /= channels.length;
-      min = Math.min(min, sample);
-      max = Math.max(max, sample);
-    }
-    const y1 = mid - max * amplitude;
-    const y2 = mid - min * amplitude;
-    context.moveTo(x + 0.5, y1);
-    context.lineTo(x + 0.5, y2);
-  }
-  context.stroke();
+  strokeWaveformColumns(context, waveformColumns(buffer, view, width), mid, height * 0.43);
 
   context.strokeStyle = "rgba(255,255,255,0.18)";
   context.beginPath();
@@ -1229,16 +1266,72 @@ function drawWaveform(canvas, buffer) {
   context.lineTo(width, mid + 0.5);
   context.stroke();
 
-  drawWaveformCursor(context, width, height, buffer.duration, Number(elements.audioPlayer.currentTime) || 0, "rgba(255,255,255,0.9)");
+  drawWaveformCursor(context, width, height, view, Number(elements.audioPlayer.currentTime) || 0, "rgba(255,255,255,0.9)");
   if (state.waveformHoverTime !== null) {
-    drawWaveformCursor(context, width, height, buffer.duration, state.waveformHoverTime, "rgba(251,191,36,0.9)");
+    drawWaveformCursor(context, width, height, view, state.waveformHoverTime, "rgba(251,191,36,0.9)");
   }
 }
 
-function drawWaveformCursor(context, width, height, duration, time, color) {
-  if (!Number.isFinite(duration) || duration <= 0) return;
-  const normalized = clamp(time / duration, 0, 1);
-  const x = Math.round(normalized * width) + 0.5;
+// The persistent whole-file overview: same peaks, always the complete file, no moving parts on the
+// canvas (the playhead and the visible-window indicator are DOM elements above it).
+function drawWaveformOverview() {
+  const buffer = state.audioBuffer;
+  const canvas = elements.waveformOverviewCanvas;
+  if (!buffer || !canvas?.getContext) return;
+  const { context, width, height } = prepareSizedCanvas(canvas, 1, 1);
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = "#111a1f";
+  context.fillRect(0, 0, width, height);
+  context.strokeStyle = "rgba(45,212,191,0.8)";
+  context.lineWidth = 1;
+  strokeWaveformColumns(context, waveformColumns(buffer, { startSeconds: 0, endSeconds: buffer.duration }, width), height / 2, height * 0.45);
+}
+
+function strokeWaveformColumns(context, columns, mid, amplitude) {
+  context.beginPath();
+  for (let x = 0; x < columns.min.length; x += 1) {
+    context.moveTo(x + 0.5, mid - columns.max[x] * amplitude);
+    context.lineTo(x + 0.5, mid - columns.min[x] * amplitude);
+  }
+  context.stroke();
+}
+
+// One min/max pair per pixel column of the view: from the peak pyramid once the worker delivered
+// it, otherwise from a bounded sparse scan (at most 64 frames per column) of the decoded PCM.
+function waveformColumns(buffer, view, width) {
+  const peaks = state.waveformPeaks;
+  if (peaks?.buffer === buffer && state.waveformKit) {
+    return state.waveformKit.peaks.viewportPeaks(peaks.pyramid, view.startSeconds, view.endSeconds, width);
+  }
+  const min = new Float32Array(width);
+  const max = new Float32Array(width);
+  const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index));
+  const startFrame = Math.max(0, Math.floor(view.startSeconds * buffer.sampleRate));
+  const frameCount = Math.max(1, Math.min(buffer.length - startFrame, Math.round((view.endSeconds - view.startSeconds) * buffer.sampleRate)));
+  const framesPerPixel = Math.max(1, Math.floor(frameCount / width));
+  for (let x = 0; x < width; x += 1) {
+    const start = Math.min(buffer.length - 1, startFrame + x * framesPerPixel);
+    const end = Math.min(buffer.length, start + framesPerPixel);
+    let low = 1;
+    let high = -1;
+    const sampleStride = Math.max(1, Math.floor((end - start) / 64));
+    for (let frame = start; frame < end; frame += sampleStride) {
+      let sample = 0;
+      for (const channel of channels) sample += channel[frame] ?? 0;
+      sample /= channels.length;
+      low = Math.min(low, sample);
+      high = Math.max(high, sample);
+    }
+    min[x] = low;
+    max[x] = high;
+  }
+  return { min, max };
+}
+
+function drawWaveformCursor(context, width, height, view, time, color) {
+  const span = view.endSeconds - view.startSeconds;
+  if (!Number.isFinite(span) || span <= 0 || time < view.startSeconds || time > view.endSeconds) return;
+  const x = Math.round(clamp(waveformTimeToX(view, time, width), 0, width)) + 0.5;
   context.strokeStyle = color;
   context.lineWidth = 1;
   context.beginPath();
@@ -1248,10 +1341,14 @@ function drawWaveformCursor(context, width, height, duration, time, color) {
 }
 
 function prepareWaveformCanvas(canvas) {
+  return prepareSizedCanvas(canvas, 320, 140);
+}
+
+function prepareSizedCanvas(canvas, minWidth, minHeight) {
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   const rect = canvas.getBoundingClientRect();
-  const width = Math.max(320, Math.floor(rect.width));
-  const height = Math.max(140, Math.floor(rect.height));
+  const width = Math.max(minWidth, Math.floor(rect.width));
+  const height = Math.max(minHeight, Math.floor(rect.height));
   const backingWidth = Math.max(1, Math.round(width * dpr));
   const backingHeight = Math.max(1, Math.round(height * dpr));
   if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
@@ -1267,7 +1364,9 @@ function canvasTimeFromEvent(event, canvas, duration) {
   const rect = canvas.getBoundingClientRect();
   const width = Math.max(1, rect.width);
   const x = clamp((Number(event.clientX) || 0) - (rect.left || 0), 0, width);
-  return clamp((x / width) * duration, 0, duration);
+  const view = state.waveformKit && state.waveformViewport;
+  const time = view ? state.waveformKit.viewport.xToTime(view, x, width) : (x / width) * duration;
+  return clamp(time, 0, duration);
 }
 
 function waveformSampleAtTime(buffer, time) {
@@ -1292,6 +1391,9 @@ function seekAudioToTime(time) {
 function updateWaveformAria() {
   const duration = state.audioBuffer?.duration ?? 0;
   const current = clamp(Number(elements.audioPlayer.currentTime) || 0, 0, duration || 0);
+  if (elements.waveformOverviewPlayhead?.style) {
+    elements.waveformOverviewPlayhead.style.left = `${duration > 0 ? (current / duration) * 100 : 0}%`;
+  }
   elements.waveform.setAttribute("aria-valuemax", String(duration));
   elements.waveform.setAttribute("aria-valuenow", String(current));
   elements.waveform.setAttribute("aria-valuetext", `${formatDuration(current)} of ${formatDuration(duration)}`);
@@ -1317,6 +1419,7 @@ function startPlaybackAnimation() {
     }
     updateWaveformAria();
     if (state.waveformHoverTime === null) updateWaveformReadout(elements.audioPlayer.currentTime || 0, true);
+    followPlayback(Number(elements.audioPlayer.currentTime) || 0);
     drawWaveform(elements.waveform, state.audioBuffer);
     state.playbackAnimationFrame = requestAnimationFrame(tick);
   };
@@ -1329,6 +1432,298 @@ function stopPlaybackAnimation() {
   }
   state.playbackAnimationFrame = null;
   if (state.audioBuffer) drawWaveform(elements.waveform, state.audioBuffer);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Zoom and pan (#140)
+// ---------------------------------------------------------------------------------------------
+
+async function loadWaveformKit() {
+  try {
+    const [viewport, peaks] = await Promise.all([import(WAVEFORM_VIEWPORT_MODULE_URL), import(WAVEFORM_PEAKS_MODULE_URL)]);
+    return { viewport, peaks };
+  } catch {
+    // Without the modules the waveform stays a whole-file view drawn from a bounded scan.
+    return null;
+  }
+}
+
+// The peak pyramid is O(n) over the file, so it is built in a worker (or deferred when workers are
+// unavailable); until it arrives the waveform is drawn from the bounded sparse scan.
+function startWaveformPeaks(generation, buffer) {
+  cancelWaveformPeaks();
+  const kit = state.waveformKit;
+  if (!kit) return;
+  const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index));
+  const accept = (summary) => {
+    if (!isCurrentAnalysis(generation) || state.audioBuffer !== buffer) return;
+    state.waveformPeaks = { buffer, pyramid: kit.peaks.peakPyramidFromLevels(summary, channels) };
+    drawWaveform(elements.waveform, buffer);
+    drawWaveformOverview();
+  };
+
+  if (typeof Worker !== "function") {
+    setTimeout(() => {
+      if (isCurrentAnalysis(generation)) accept(kit.peaks.buildPeakLevels(channels, buffer.sampleRate));
+    }, 0);
+    return;
+  }
+
+  // Copies keep the AudioBuffer intact for playback and sub-bucket views; the copies are transferred.
+  const copies = channels.map((channel) => channel.slice());
+  const worker = new Worker(WAVEFORM_PEAKS_WORKER_URL, { type: "module" });
+  state.waveformPeaksWorker = worker;
+  const finish = () => {
+    worker.terminate();
+    if (state.waveformPeaksWorker === worker) state.waveformPeaksWorker = null;
+  };
+  worker.addEventListener("message", (event) => {
+    finish();
+    if (event.data?.ok) accept(event.data.summary);
+  });
+  worker.addEventListener("error", finish);
+  worker.postMessage(
+    { id: generation, channels: copies, sampleRate: buffer.sampleRate },
+    copies.map((channel) => channel.buffer),
+  );
+}
+
+function cancelWaveformPeaks() {
+  state.waveformPeaksWorker?.terminate();
+  state.waveformPeaksWorker = null;
+}
+
+function currentWaveformView(buffer) {
+  return state.waveformViewport ?? { startSeconds: 0, endSeconds: buffer.duration };
+}
+
+function waveformTimeToX(view, time, width) {
+  return state.waveformKit
+    ? state.waveformKit.viewport.timeToX(view, time, width)
+    : ((time - view.startSeconds) / (view.endSeconds - view.startSeconds)) * width;
+}
+
+function waveformZoomAvailable() {
+  return Boolean(state.audioBuffer && state.waveformKit && state.waveformViewport);
+}
+
+// Single entry point for every view change: redraws the canvas, moves the overview indicator and
+// tells the overlays (beats, sections, HUD) about the new window.
+function setWaveformViewport(viewport) {
+  state.waveformViewport = viewport;
+  updateWaveformZoomUi();
+  const duration = state.audioBuffer?.duration ?? 0;
+  if (typeof CustomEvent === "function" && elements.waveform.dispatchEvent) {
+    const detail = viewport ? { ...viewport, durationSeconds: duration } : null;
+    elements.waveform.dispatchEvent(new CustomEvent(WAVEFORM_VIEWPORT_EVENT, { detail }));
+  }
+  if (viewport && state.audioBuffer) drawWaveform(elements.waveform, state.audioBuffer);
+}
+
+function updateWaveformZoomUi() {
+  const kit = state.waveformKit;
+  const viewport = state.waveformViewport;
+  const duration = state.audioBuffer?.duration ?? 0;
+  const ready = Boolean(kit && viewport && duration > 0);
+  const whole = !ready || kit.viewport.isWholeFile(viewport, duration);
+  elements.waveformZoomIn.setAttribute("aria-disabled", String(!ready || !kit.viewport.canZoomIn(viewport, duration)));
+  elements.waveformZoomOut.setAttribute("aria-disabled", String(whole));
+
+  const indicator = elements.waveformOverviewWindow;
+  if (!ready || whole) {
+    elements.waveformViewRange.textContent = ready ? `Showing the whole file (${formatDuration(duration)})` : "Showing the whole file";
+    indicator.setAttribute("aria-label", "Visible window: the whole file");
+    if (indicator.style) {
+      indicator.style.left = "0%";
+      indicator.style.width = "100%";
+    }
+    return;
+  }
+  const range = `${formatDuration(viewport.startSeconds)} to ${formatDuration(viewport.endSeconds)}`;
+  const span = viewport.endSeconds - viewport.startSeconds;
+  elements.waveformViewRange.textContent = `Showing ${range} (${formatSpan(span)}) of ${formatDuration(duration)}`;
+  indicator.setAttribute("aria-label", `Visible window: ${range} of ${formatDuration(duration)}`);
+  if (indicator.style) {
+    // A very narrow window keeps a minimum visible width, centred on the window.
+    const widthCss = `max(${(span / duration) * 100}%, 6px)`;
+    const centre = ((viewport.startSeconds + span / 2) / duration) * 100;
+    indicator.style.width = widthCss;
+    indicator.style.left = `calc(${centre}% - ${widthCss} / 2)`;
+  }
+}
+
+function formatSpan(seconds) {
+  return seconds >= 10 ? `${seconds.toFixed(0)} s` : `${seconds.toFixed(seconds >= 1 ? 1 : 2)} s`;
+}
+
+function zoomWaveform(factor, anchorSeconds) {
+  if (!waveformZoomAvailable()) return;
+  const { viewport } = state.waveformKit;
+  setWaveformViewport(viewport.zoomViewport(state.waveformViewport, factor, anchorSeconds, state.audioBuffer.duration));
+}
+
+// Button and keyboard zoom keep the playhead at its screen position (or the window's centre when the
+// playhead is out of view).
+function zoomWaveformAroundPlayhead(factor) {
+  if (!waveformZoomAvailable()) return;
+  const view = state.waveformViewport;
+  const playhead = Number(elements.audioPlayer.currentTime) || 0;
+  const inView = playhead >= view.startSeconds && playhead <= view.endSeconds;
+  zoomWaveform(factor, inView ? playhead : (view.startSeconds + view.endSeconds) / 2);
+}
+
+function panWaveform(deltaSeconds, from = state.waveformViewport) {
+  if (!waveformZoomAvailable()) return;
+  setWaveformViewport(state.waveformKit.viewport.panViewport(from, deltaSeconds, state.audioBuffer.duration));
+}
+
+// Brings a time that left the zoomed window back into view (keyboard seeks).
+function revealWaveformTime(time) {
+  if (!waveformZoomAvailable()) return;
+  const view = state.waveformViewport;
+  if (time >= view.startSeconds && time <= view.endSeconds) return;
+  const span = view.endSeconds - view.startSeconds;
+  panWaveform(time - span / 2 - view.startSeconds);
+}
+
+function followPlayback(time) {
+  if (!waveformZoomAvailable() || state.waveformGesture || state.overviewGesture) return;
+  const view = state.waveformViewport;
+  if (time >= view.startSeconds && time <= view.endSeconds) return;
+  const span = view.endSeconds - view.startSeconds;
+  panWaveform(time - span * WAVEFORM_FOLLOW_LEAD - view.startSeconds);
+}
+
+function wireWaveformZoom() {
+  elements.waveformZoomIn.addEventListener("click", () => {
+    if (elements.waveformZoomIn.getAttribute("aria-disabled") !== "true") zoomWaveformAroundPlayhead(WAVEFORM_BUTTON_ZOOM_FACTOR);
+  });
+  elements.waveformZoomOut.addEventListener("click", () => {
+    if (elements.waveformZoomOut.getAttribute("aria-disabled") !== "true") zoomWaveformAroundPlayhead(1 / WAVEFORM_BUTTON_ZOOM_FACTOR);
+  });
+
+  // Wheel and trackpad: vertical scroll and pinch (Chromium reports it as Ctrl+wheel) zoom around the
+  // pointer; horizontal scroll or Shift+wheel pans. The page neither scrolls nor zooms meanwhile.
+  elements.waveform.addEventListener(
+    "wheel",
+    (event) => {
+      if (!waveformZoomAvailable()) return;
+      event.preventDefault();
+      const rect = elements.waveform.getBoundingClientRect();
+      const width = Math.max(1, rect.width);
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? rect.height || 220 : 1;
+      const deltaX = (Number(event.deltaX) || 0) * unit;
+      const deltaY = (Number(event.deltaY) || 0) * unit;
+      const view = state.waveformViewport;
+      const span = view.endSeconds - view.startSeconds;
+      if (!event.ctrlKey && (event.shiftKey || Math.abs(deltaX) > Math.abs(deltaY))) {
+        panWaveform(((event.shiftKey && !deltaX ? deltaY : deltaX) / width) * span);
+        return;
+      }
+      const factor = clamp(Math.exp(-deltaY * WAVEFORM_WHEEL_ZOOM_PER_PIXEL), 1 / WAVEFORM_MAX_WHEEL_FACTOR, WAVEFORM_MAX_WHEEL_FACTOR);
+      const x = clamp((Number(event.clientX) || 0) - rect.left, 0, width);
+      zoomWaveform(factor, state.waveformKit.viewport.xToTime(view, x, width));
+    },
+    { passive: false },
+  );
+
+  // The overview always shows the whole file: pressing or dragging on it centres the view there.
+  const overview = elements.waveformOverview;
+  const centreViewAt = (event) => {
+    if (!waveformZoomAvailable()) return;
+    const rect = overview.getBoundingClientRect();
+    const time = (clamp((Number(event.clientX) || 0) - rect.left, 0, rect.width) / Math.max(1, rect.width)) * state.audioBuffer.duration;
+    const view = state.waveformViewport;
+    panWaveform(time - (view.startSeconds + view.endSeconds) / 2);
+  };
+  overview.addEventListener("pointerdown", (event) => {
+    if (!waveformZoomAvailable() || (event.pointerType === "mouse" && event.button !== 0)) return;
+    state.overviewGesture = { pointerId: event.pointerId };
+    overview.setPointerCapture?.(event.pointerId);
+    centreViewAt(event);
+  });
+  overview.addEventListener("pointermove", (event) => {
+    if (state.overviewGesture?.pointerId === event.pointerId) centreViewAt(event);
+  });
+  for (const type of ["pointerup", "pointercancel"]) {
+    overview.addEventListener(type, (event) => {
+      if (state.overviewGesture?.pointerId === event.pointerId) state.overviewGesture = null;
+    });
+  }
+
+  if (typeof ResizeObserver === "function") {
+    new ResizeObserver(() => drawWaveformOverview()).observe(overview);
+  }
+}
+
+// Pointer gestures on the detailed waveform: one pointer drags to pan (past a small threshold, so a
+// plain click still seeks); two touch pointers pinch to zoom around the point between the fingers.
+function startWaveformGesture(event) {
+  state.suppressWaveformClick = false;
+  if (!waveformZoomAvailable() || (event.pointerType === "mouse" && event.button !== 0)) return;
+  state.waveformPointers.set(event.pointerId, { x: Number(event.clientX) || 0 });
+  elements.waveform.setPointerCapture?.(event.pointerId);
+  if (state.waveformPointers.size === 2) {
+    const [first, second] = Array.from(state.waveformPointers.values());
+    const rect = elements.waveform.getBoundingClientRect();
+    const midX = (first.x + second.x) / 2;
+    state.waveformGesture = {
+      kind: "pinch",
+      distance: Math.max(1, Math.abs(first.x - second.x)),
+      midX,
+      viewport: state.waveformViewport,
+      anchor: state.waveformKit.viewport.xToTime(state.waveformViewport, midX - rect.left, Math.max(1, rect.width)),
+    };
+  } else if (state.waveformPointers.size === 1) {
+    state.waveformGesture = { kind: "drag", pointerId: event.pointerId, originX: Number(event.clientX) || 0, viewport: state.waveformViewport, moved: false };
+  }
+}
+
+// Returns true when the event belonged to an active pan or pinch.
+function moveWaveformGesture(event) {
+  const pointer = state.waveformPointers.get(event.pointerId);
+  const gesture = state.waveformGesture;
+  if (!pointer || !gesture || !waveformZoomAvailable()) return false;
+  pointer.x = Number(event.clientX) || 0;
+  const rect = elements.waveform.getBoundingClientRect();
+  const width = Math.max(1, rect.width);
+  const { viewport } = state.waveformKit;
+  const duration = state.audioBuffer.duration;
+
+  if (gesture.kind === "pinch") {
+    if (state.waveformPointers.size < 2) return true;
+    const [first, second] = Array.from(state.waveformPointers.values());
+    const distance = Math.max(1, Math.abs(first.x - second.x));
+    const midX = (first.x + second.x) / 2;
+    const zoomed = viewport.zoomViewport(gesture.viewport, distance / gesture.distance, gesture.anchor, duration);
+    const span = zoomed.endSeconds - zoomed.startSeconds;
+    setWaveformViewport(viewport.panViewport(zoomed, ((gesture.midX - midX) / width) * span, duration));
+    return true;
+  }
+
+  if (gesture.kind !== "drag" || gesture.pointerId !== event.pointerId) return gesture.kind !== "drag";
+  const deltaX = pointer.x - gesture.originX;
+  if (!gesture.moved && Math.abs(deltaX) < WAVEFORM_DRAG_THRESHOLD_PX) return false;
+  if (!gesture.moved) {
+    gesture.moved = true;
+    elements.waveform.classList.add("is-panning");
+  }
+  const span = gesture.viewport.endSeconds - gesture.viewport.startSeconds;
+  panWaveform((-deltaX / width) * span, gesture.viewport);
+  return true;
+}
+
+function endWaveformGesture(event) {
+  if (!state.waveformPointers.delete(event.pointerId)) return;
+  const gesture = state.waveformGesture;
+  if (gesture && event.type === "pointerup" && (gesture.kind === "pinch" || gesture.moved)) state.suppressWaveformClick = true;
+  if (gesture?.kind === "pinch") {
+    // The remaining finger does not turn into a drag; the gesture ends when all are lifted.
+    state.waveformGesture = state.waveformPointers.size ? { kind: "pinch-ended" } : null;
+  } else if (!state.waveformPointers.size) {
+    state.waveformGesture = null;
+  }
+  if (!state.waveformGesture) elements.waveform.classList.remove("is-panning");
 }
 
 function drawSpectralTimeline(canvas, spectrogram) {
@@ -1598,6 +1993,7 @@ function exportReport() {
 function resetInspector() {
   state.analysisGeneration += 1;
   cancelWholeTrackAnalysis();
+  cancelWaveformPeaks();
   setAnalyzing(false);
   stopPlaybackAnimation();
   elements.report.hidden = true;
@@ -1605,6 +2001,11 @@ function resetInspector() {
   elements.fileInput.value = "";
   state.audioBuffer = null;
   state.report = null;
+  state.waveformPeaks = null;
+  state.waveformGesture = null;
+  state.overviewGesture = null;
+  state.waveformPointers.clear();
+  setWaveformViewport(null);
   state.waveformHoverTime = null;
   state.spectralFrameIndex = null;
   elements.audioPlayer.pause();

@@ -21,6 +21,7 @@ bash "$ROOT_DIR/packages/audio-analysis-rhythm-wasm/scripts/build-wasm.sh"
 
 node --check "$ROOT_DIR/site/app.js"
 node --check "$ROOT_DIR/site/song-analysis.js"
+node --check "$ROOT_DIR/site/analysis-player.js"
 python3 -m json.tool "$ROOT_DIR/site/analysis-capabilities.json" >/dev/null
 
 rm -rf "$OUTPUT_DIR"

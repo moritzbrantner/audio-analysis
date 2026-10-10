@@ -7,6 +7,11 @@ const RHYTHM_HOP_SIZE = 128;
 const MAX_STAT_FRAMES = 5_000_000;
 const CLIP_THRESHOLD = 0.999;
 const NEAR_SILENCE_THRESHOLD = 0.001;
+// Whole-track structure reuses the Rust whole-song contracts; keep in sync with whole-track-analysis.js.
+const WHOLE_TRACK_RATE = 16_000;
+const WHOLE_TRACK_MAX_SECONDS = 15 * 60;
+const WHOLE_TRACK_WORKER_URL = "./whole-track-worker.js";
+const WHOLE_TRACK_MODULE_URL = "./whole-track-analysis.js";
 
 const analyzerDefinitions = {
   core: {
@@ -38,6 +43,7 @@ const state = {
   waveformHoverTime: null,
   spectralFrameIndex: null,
   playbackAnimationFrame: null,
+  wholeTrackWorker: null,
 };
 
 const elements = {
@@ -259,6 +265,7 @@ function wireSpectralInteraction() {
 
 async function analyzeFile(file) {
   const generation = ++state.analysisGeneration;
+  cancelWholeTrackAnalysis();
   setAnalyzing(true);
   clearError();
   setProgressStage("decode");
@@ -390,6 +397,7 @@ async function analyzeFile(file) {
     if (!isCurrentAnalysis(generation)) return;
     state.report = report;
     renderReport(report, decoded);
+    startWholeTrackAnalysis(generation, decoded);
   } catch (error) {
     if (isCurrentAnalysis(generation)) showError(errorMessage(error));
   } finally {
@@ -398,6 +406,105 @@ async function analyzeFile(file) {
       setLoading(false);
     }
   }
+}
+
+function startWholeTrackAnalysis(generation, buffer) {
+  cancelWholeTrackAnalysis();
+  if (buffer.duration > WHOLE_TRACK_MAX_SECONDS + 0.001) {
+    applyWholeTrack(generation, {
+      status: "skipped",
+      error: `Whole-track structure supports files up to ${WHOLE_TRACK_MAX_SECONDS / 60} minutes.`,
+    });
+    return;
+  }
+
+  // Yield once so the fast representative-window report paints before the full-file PCM is prepared.
+  setTimeout(async () => {
+    if (!isCurrentAnalysis(generation)) return;
+    const analysisSampleRate = Math.min(buffer.sampleRate, WHOLE_TRACK_RATE);
+    try {
+      const samples = mixAndResampleMono(buffer, analysisSampleRate);
+      const { runtime, song, key } = await runWholeTrackAnalysis(samples, analysisSampleRate, buffer.duration);
+      applyWholeTrack(generation, { status: "complete", runtime, analysisSampleRate, song, key });
+    } catch (error) {
+      applyWholeTrack(generation, { status: "failed", analysisSampleRate, error: errorMessage(error) });
+    }
+  }, 0);
+}
+
+function runWholeTrackAnalysis(samples, sampleRate, durationSeconds) {
+  if (typeof Worker !== "function") {
+    return import(WHOLE_TRACK_MODULE_URL)
+      .then((module) => module.analyzeWholeTrack(samples, sampleRate, durationSeconds))
+      .then((result) => ({ runtime: "client-wasm-main-thread", ...result }));
+  }
+
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(WHOLE_TRACK_WORKER_URL, { type: "module" });
+    state.wholeTrackWorker = worker;
+    const finish = () => {
+      worker.terminate();
+      if (state.wholeTrackWorker === worker) state.wholeTrackWorker = null;
+    };
+    worker.addEventListener("message", (event) => {
+      finish();
+      const message = event.data ?? {};
+      if (message.ok) resolve({ runtime: "client-wasm-worker", song: message.song, key: message.key });
+      else reject(new Error(message.error || "Whole-track analysis failed."));
+    });
+    worker.addEventListener("error", (event) => {
+      finish();
+      reject(new Error(event.message || "The whole-track analysis worker failed to start."));
+    });
+    worker.postMessage({ id: 1, samples, sampleRate, durationSeconds }, [samples.buffer]);
+  });
+}
+
+function cancelWholeTrackAnalysis() {
+  state.wholeTrackWorker?.terminate();
+  state.wholeTrackWorker = null;
+}
+
+function applyWholeTrack(generation, update) {
+  if (!isCurrentAnalysis(generation) || !state.report) return;
+  const previous = state.report.wholeTrack ?? {};
+  state.report.wholeTrack = {
+    ...previous,
+    status: update.status,
+    runtime: update.runtime ?? previous.runtime ?? null,
+    analysisSampleRate: update.analysisSampleRate ?? previous.analysisSampleRate ?? null,
+    song: update.song ?? null,
+    key: update.key ?? null,
+    error: update.error ?? null,
+  };
+  renderRhythm(state.report);
+  elements.rawJson.textContent = JSON.stringify(state.report, null, 2);
+}
+
+function mixAndResampleMono(buffer, targetRate) {
+  const scale = buffer.sampleRate / targetRate;
+  const outputLength = Math.max(1, Math.floor(buffer.length / scale));
+  const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index));
+  const output = new Float32Array(outputLength);
+
+  for (let outputIndex = 0; outputIndex < outputLength; outputIndex += 1) {
+    const start = outputIndex * scale;
+    const end = Math.min(buffer.length, (outputIndex + 1) * scale);
+    const first = Math.floor(start);
+    const last = Math.min(buffer.length, Math.ceil(end));
+    let weightedSum = 0;
+    let weight = 0;
+    for (let sourceIndex = first; sourceIndex < last; sourceIndex += 1) {
+      const overlap = Math.min(end, sourceIndex + 1) - Math.max(start, sourceIndex);
+      if (overlap <= 0) continue;
+      let mono = 0;
+      for (const channel of channels) mono += channel[sourceIndex] ?? 0;
+      weightedSum += (mono / channels.length) * overlap;
+      weight += overlap;
+    }
+    output[outputIndex] = weight > 0 ? weightedSum / weight : 0;
+  }
+  return output;
 }
 
 function isCurrentAnalysis(generation) {
@@ -496,6 +603,13 @@ function buildReport({ file, buffer, statistics, representative, rhythmWindow, p
           analysisSampleCount: rhythmWindow.analysisSampleCount,
         },
       },
+      structure: {
+        kind: "whole-file",
+        startSeconds: 0,
+        durationSeconds: buffer.duration,
+        contracts: ["audio-analysis-song/v1", "audio-analysis-key-track"],
+        report: "wholeTrack",
+      },
       rhythm: {
         kind: "representative-center-window-resampled",
         startSeconds: rhythmWindow.startSample / buffer.sampleRate,
@@ -531,6 +645,15 @@ function buildReport({ file, buffer, statistics, representative, rhythmWindow, p
     pitch: pitchValue,
     musicalKey: keyValue,
     rhythm: rhythmValue,
+    wholeTrack: {
+      status: buffer.duration > WHOLE_TRACK_MAX_SECONDS + 0.001 ? "skipped" : "pending",
+      authority: "rust-wasm",
+      runtime: null,
+      analysisSampleRate: null,
+      song: null,
+      key: null,
+      error: null,
+    },
     raw: {
       core: results.core,
       fourier: {
@@ -992,7 +1115,17 @@ function renderRhythm(report) {
   addResultRow(details, "Detected beats", Array.isArray(rhythm?.beats) ? rhythm.beats.length.toLocaleString() : "—");
   addResultRow(details, "Detected downbeats", Array.isArray(rhythm?.downbeats) ? rhythm.downbeats.length.toLocaleString() : "—");
   addResultRow(details, "Downbeat confidence", finiteNumber(rhythm?.downbeatConfidence) === null ? "—" : formatPercent(rhythm.downbeatConfidence * 100));
+  addResultRow(details, "Whole-track structure", wholeTrackStructureSummary(report.wholeTrack));
   elements.rhythmContent.append(lead, note, details);
+}
+
+function wholeTrackStructureSummary(wholeTrack) {
+  if (wholeTrack?.status === "pending") return "Analyzing the full file…";
+  if (wholeTrack?.status === "skipped") return "Not analyzed (file too long)";
+  const sections = Array.isArray(wholeTrack?.song?.sections) ? wholeTrack.song.sections : [];
+  if (wholeTrack?.status !== "complete" || !sections.length) return "Unavailable";
+  const identities = sections.map((section) => section?.identity ?? "?").join(" · ");
+  return `${sections.length.toLocaleString()} section${sections.length === 1 ? "" : "s"} (${identities})`;
 }
 
 function addResultRow(container, label, value) {
@@ -1463,6 +1596,7 @@ function exportReport() {
 
 function resetInspector() {
   state.analysisGeneration += 1;
+  cancelWholeTrackAnalysis();
   setAnalyzing(false);
   stopPlaybackAnimation();
   elements.report.hidden = true;

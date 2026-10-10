@@ -8,6 +8,7 @@ import {
   rhythmCoverage,
   sectionOverlaySegments,
   sectionOverlayStatusText,
+  wholeTrackTimeline,
 } from "../../site/waveform-overlay.js";
 
 const overlaySource = readFileSync(new URL("../../site/waveform-overlay.js", import.meta.url), "utf8");
@@ -188,5 +189,100 @@ describe("waveform rhythm overlays", () => {
     expect(overlaySource).toContain("waveform-beat-layer");
     expect(overlaySource).toContain("waveform-structure-rail");
     expect(overlaySource).toContain("waveform-context-hud");
+  });
+});
+
+describe("whole-track musical timeline", () => {
+  const windowRhythm = {
+    analysisStartSeconds: 0,
+    beats: [{ index: 1, timestampSeconds: 1, downbeat: true }],
+    sections: [{ index: 1, startSeconds: 0, endSeconds: 20, identity: "A" }],
+  };
+
+  function wholeTrackReport({ bBpm = 150, bKey = { tonic: "F#", scale: "major" } } = {}) {
+    return {
+      source: { durationSeconds: 72 },
+      coverage: { rhythm: { startSeconds: 26, sourceDurationSeconds: 20 } },
+      rhythm: windowRhythm,
+      wholeTrack: {
+        status: "complete",
+        song: {
+          schemaVersion: "audio-analysis-song/v1",
+          analysisStartSeconds: 0,
+          analysisEndSeconds: 72,
+          beatsPerBar: 4,
+          bpm: 120,
+          tempoMap: [
+            { timestampSeconds: 2, bpm: 119.8 },
+            { timestampSeconds: 12, bpm: 120.2 },
+            { timestampSeconds: 30, bpm: bBpm },
+            { timestampSeconds: 40, bpm: bBpm },
+            { timestampSeconds: 60, bpm: 120 },
+          ],
+          beats: [
+            { index: 1, timestampSeconds: 0.5, downbeat: true, localBpm: 120, barIndex: 1, beatInBar: 1 },
+            { index: 2, timestampSeconds: 70, downbeat: false, localBpm: 120, barIndex: 36, beatInBar: 2 },
+          ],
+          sections: [
+            { index: 1, identity: "A", label: "section-1", startSeconds: 0, endSeconds: 24, startBoundaryConfidence: 1 },
+            { index: 2, identity: "B", label: "section-2", startSeconds: 24, endSeconds: 48, startBoundaryConfidence: 0.31 },
+            { index: 3, identity: "A", label: "section-3", startSeconds: 48, endSeconds: 72, startBoundaryConfidence: 0.29 },
+          ],
+        },
+        key: {
+          schemaVersion: "audio-analysis-key-track/v2",
+          durationSeconds: 72,
+          segments: [
+            { startSeconds: 0, endSeconds: 24, confidence: 0.6, key: { tonic: "C", scale: "major" } },
+            { startSeconds: 24, endSeconds: 48, confidence: 0.5, key: bKey },
+            { startSeconds: 48, endSeconds: 72, confidence: 0.6, key: { tonic: "C", scale: "major" } },
+          ],
+        },
+      },
+    };
+  }
+
+  test("uses the Rust whole-song sections and beats across the complete file", () => {
+    const report = wholeTrackReport();
+    expect(wholeTrackTimeline(report)).not.toBeNull();
+    expect(rhythmCoverage(report)).toBeNull();
+    expect(beatOverlayEvents(report).map((event) => event.timeSeconds)).toEqual([0.5, 70]);
+    const sections = sectionOverlaySegments(report);
+    expect(sections.map(({ identity, startSeconds, endSeconds }) => [identity, startSeconds, endSeconds])).toEqual([
+      ["A", 0, 24],
+      ["B", 24, 48],
+      ["A", 48, 72],
+    ]);
+    expect(sectionOverlayStatusText(report)).toBe("3 detected sections across the whole track");
+    expect(beatOverlayStatusText(report)).toBe("2 detected beats across the whole track");
+    expect(formatMusicalContext(musicalContextAtTime(report, 71))).toBe("1:11.0 · Section A · Bar 36 · Beat 2/4 · 120.0 BPM");
+  });
+
+  test("annotates sustained tempo and key changes on every neighbouring region", () => {
+    const sections = sectionOverlaySegments(wholeTrackReport());
+    expect(sections.map(({ localBpm, key, tempoChanged, keyChanged }) => [localBpm, key?.label, tempoChanged, keyChanged])).toEqual([
+      [120, "C major", true, true],
+      [150, "F# major", true, true],
+      [120, "C major", true, true],
+    ]);
+  });
+
+  test("does not annotate estimator jitter", () => {
+    const sections = sectionOverlaySegments(wholeTrackReport({ bBpm: 120.5, bKey: { tonic: "C", scale: "major" } }));
+    expect(sections).toHaveLength(3);
+    expect(sections.every((section) => !section.tempoChanged && !section.keyChanged)).toBe(true);
+  });
+
+  test("does not present the rhythm window as structure while the whole track is analyzed", () => {
+    const report = { ...wholeTrackReport(), wholeTrack: { status: "pending" } };
+    expect(sectionOverlaySegments(report)).toEqual([]);
+    expect(sectionOverlayStatusText(report)).toBe("Analyzing whole-track sections");
+    expect(beatOverlayEvents(report).map((event) => event.timeSeconds)).toEqual([27]);
+  });
+
+  test("falls back to the labelled rhythm window when whole-track analysis failed", () => {
+    const report = { ...wholeTrackReport(), wholeTrack: { status: "failed", error: "boom" } };
+    expect(sectionOverlaySegments(report)).toHaveLength(1);
+    expect(sectionOverlayStatusText(report)).toBe("1 detected section in the 20.0 s rhythm window");
   });
 });

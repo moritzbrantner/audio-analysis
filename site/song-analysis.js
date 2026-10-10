@@ -180,7 +180,8 @@ async function analyzeSongFile(file) {
       timelineWindowSeconds: KEY_TIMELINE_WINDOW_SECONDS,
       timelineHopSeconds: KEY_TIMELINE_HOP_SECONDS,
       timelineMinConfidence: 0.1,
-      barBoundariesSeconds: keyBarBoundaries(value.downbeats, audioBuffer.duration),
+      // Rust validates boundaries against the resampled sample duration, which flooring can shorten.
+      barBoundariesSeconds: keyBarBoundaries(value.downbeats, samples.length / analysisRate),
     });
     if (!isCurrent(generation)) return;
     if (!keyValue || typeof keyValue !== "object") {

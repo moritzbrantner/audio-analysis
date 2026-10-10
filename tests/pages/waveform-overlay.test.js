@@ -258,6 +258,14 @@ describe("whole-track musical timeline", () => {
     expect(formatMusicalContext(musicalContextAtTime(report, 71))).toBe("1:11.0 · Section A · Bar 36 · Beat 2/4 · 120.0 BPM");
   });
 
+  test("extends the final region over the resampling remainder of the decoded file", () => {
+    const report = wholeTrackReport();
+    report.source.durationSeconds = 72.00004;
+    const sections = sectionOverlaySegments(report);
+    expect(sections.at(-1).endSeconds).toBe(72.00004);
+    expect(musicalContextAtTime(report, 72.00004)?.sectionIdentity).toBe("A");
+  });
+
   test("annotates sustained tempo and key changes on every neighbouring region", () => {
     const sections = sectionOverlaySegments(wholeTrackReport());
     expect(sections.map(({ localBpm, key, tempoChanged, keyChanged }) => [localBpm, key?.label, tempoChanged, keyChanged])).toEqual([

@@ -1,11 +1,13 @@
-// Module worker that runs the Rust/WASM whole-song analysis off the Audio Inspector UI thread.
-import { analyzeWholeTrack } from "./whole-track-analysis.js";
+// Module worker that prepares the full-file PCM and runs the Rust/WASM whole-song analysis off the
+// Audio Inspector UI thread.
+import { analyzeWholeTrack, prepareWholeTrackSamples } from "./whole-track-analysis.js";
 
 self.addEventListener("message", async (event) => {
-  const { id, samples, sampleRate, durationSeconds } = event.data ?? {};
+  const { id, channels, sourceSampleRate } = event.data ?? {};
   try {
-    const result = await analyzeWholeTrack(samples, sampleRate, durationSeconds);
-    self.postMessage({ id, ok: true, ...result });
+    const { samples, sampleRate } = prepareWholeTrackSamples(channels, sourceSampleRate);
+    const result = await analyzeWholeTrack(samples, sampleRate);
+    self.postMessage({ id, ok: true, analysisSampleRate: sampleRate, ...result });
   } catch (error) {
     self.postMessage({ id, ok: false, error: error instanceof Error ? error.message : String(error) });
   }

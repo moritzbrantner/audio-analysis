@@ -59,7 +59,7 @@ describe("whole-song analysis page", () => {
   });
 
   test("feeds Rust-owned downbeats into the temporal key decoder", () => {
-    expect(source).toContain("barBoundariesSeconds: keyBarBoundaries(value.downbeats, audioBuffer.duration)");
+    expect(source).toContain("barBoundariesSeconds: keyBarBoundaries(value.downbeats, samples.length / analysisRate)");
     expect(source).toContain("function keyBarBoundaries(downbeats, duration)");
     expect(source).toContain("keyBoundaryAligned: keyValue.boundaryAligned === true");
     expect(source).toContain("keySegments: Array.isArray(keyValue.segments) ? keyValue.segments : []");

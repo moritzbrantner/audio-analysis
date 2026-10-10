@@ -5,6 +5,7 @@ const SECTION_TONE_COUNT = 4;
 // A section's local tempo is annotated only when it differs from a neighbour by at least this
 // relative amount, so estimator jitter (about 1%) never reads as a tempo change.
 const MATERIAL_TEMPO_RATIO = 0.04;
+const WHOLE_TRACK_END_SNAP_SECONDS = 0.05;
 
 // The Rust whole-song contracts (`audio-analysis-song/v1` plus the key track) once the inspector's
 // whole-track analysis completed; null while it is pending or when it is unavailable.
@@ -83,7 +84,14 @@ export function sectionOverlaySegments(report) {
       },
     ];
   });
-  return wholeTrack ? annotateSections(segments, wholeTrack) : segments;
+  if (!wholeTrack) return segments;
+  // Rust analyzes the resampled PCM, whose floored sample count can end a few samples before the
+  // decoded file; the final region still owns the remaining sliver of the file.
+  const last = segments.at(-1);
+  if (last && duration - last.endSeconds > 0 && duration - last.endSeconds <= WHOLE_TRACK_END_SNAP_SECONDS) {
+    last.endSeconds = duration;
+  }
+  return annotateSections(segments, wholeTrack);
 }
 
 // Attaches the Rust local tempo and key evidence to each whole-track section and marks the values

@@ -8,7 +8,6 @@ const MAX_STAT_FRAMES = 5_000_000;
 const CLIP_THRESHOLD = 0.999;
 const NEAR_SILENCE_THRESHOLD = 0.001;
 // Whole-track structure reuses the Rust whole-song contracts; keep in sync with whole-track-analysis.js.
-const WHOLE_TRACK_RATE = 16_000;
 const WHOLE_TRACK_MAX_SECONDS = 15 * 60;
 const WHOLE_TRACK_WORKER_URL = "./whole-track-worker.js";
 const WHOLE_TRACK_MODULE_URL = "./whole-track-analysis.js";
@@ -418,51 +417,77 @@ function startWholeTrackAnalysis(generation, buffer) {
     return;
   }
 
-  // Yield once so the fast representative-window report paints before the full-file PCM is prepared.
+  // Yield once so the fast representative-window report paints first. Mixing, resampling and the
+  // Rust analysis all run in the worker; the UI thread only copies the channel PCM for transfer.
   setTimeout(async () => {
     if (!isCurrentAnalysis(generation)) return;
-    const analysisSampleRate = Math.min(buffer.sampleRate, WHOLE_TRACK_RATE);
     try {
-      const samples = mixAndResampleMono(buffer, analysisSampleRate);
-      const { runtime, song, key } = await runWholeTrackAnalysis(samples, analysisSampleRate, buffer.duration);
-      applyWholeTrack(generation, { status: "complete", runtime, analysisSampleRate, song, key });
+      const result = await runWholeTrackAnalysis(generation, buffer);
+      if (result) applyWholeTrack(generation, { status: "complete", ...result });
     } catch (error) {
-      applyWholeTrack(generation, { status: "failed", analysisSampleRate, error: errorMessage(error) });
+      applyWholeTrack(generation, { status: "failed", error: errorMessage(error) });
     }
   }, 0);
 }
 
-function runWholeTrackAnalysis(samples, sampleRate, durationSeconds) {
+// Resolves null when the analysis was superseded or cancelled.
+async function runWholeTrackAnalysis(generation, buffer) {
   if (typeof Worker !== "function") {
-    return import(WHOLE_TRACK_MODULE_URL)
-      .then((module) => module.analyzeWholeTrack(samples, sampleRate, durationSeconds))
-      .then((result) => ({ runtime: "client-wasm-main-thread", ...result }));
+    // Fallback without workers: same pipeline on the main thread, abandoned between stages if a
+    // newer analysis or a reset superseded it.
+    const module = await import(WHOLE_TRACK_MODULE_URL);
+    if (!isCurrentAnalysis(generation)) return null;
+    const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index));
+    const { samples, sampleRate } = module.prepareWholeTrackSamples(channels, buffer.sampleRate);
+    if (!isCurrentAnalysis(generation)) return null;
+    const result = await module.analyzeWholeTrack(samples, sampleRate);
+    if (!isCurrentAnalysis(generation)) return null;
+    return { runtime: "client-wasm-main-thread", analysisSampleRate: sampleRate, ...result };
   }
 
+  // Copies keep the AudioBuffer intact for playback and drawing; the copies are transferred.
+  const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index).slice());
   return new Promise((resolve, reject) => {
     const worker = new Worker(WHOLE_TRACK_WORKER_URL, { type: "module" });
-    state.wholeTrackWorker = worker;
     const finish = () => {
       worker.terminate();
-      if (state.wholeTrackWorker === worker) state.wholeTrackWorker = null;
+      if (state.wholeTrackWorker?.worker === worker) state.wholeTrackWorker = null;
+    };
+    state.wholeTrackWorker = {
+      worker,
+      cancel: () => {
+        finish();
+        resolve(null);
+      },
     };
     worker.addEventListener("message", (event) => {
       finish();
       const message = event.data ?? {};
-      if (message.ok) resolve({ runtime: "client-wasm-worker", song: message.song, key: message.key });
-      else reject(new Error(message.error || "Whole-track analysis failed."));
+      if (message.ok) {
+        resolve({
+          runtime: "client-wasm-worker",
+          analysisSampleRate: message.analysisSampleRate,
+          analyzedDurationSeconds: message.analyzedDurationSeconds,
+          song: message.song,
+          key: message.key,
+        });
+      } else reject(new Error(message.error || "Whole-track analysis failed."));
     });
     worker.addEventListener("error", (event) => {
       finish();
       reject(new Error(event.message || "The whole-track analysis worker failed to start."));
     });
-    worker.postMessage({ id: 1, samples, sampleRate, durationSeconds }, [samples.buffer]);
+    worker.postMessage(
+      { id: generation, channels, sourceSampleRate: buffer.sampleRate },
+      channels.map((channel) => channel.buffer),
+    );
   });
 }
 
 function cancelWholeTrackAnalysis() {
-  state.wholeTrackWorker?.terminate();
+  const active = state.wholeTrackWorker;
   state.wholeTrackWorker = null;
+  active?.cancel();
 }
 
 function applyWholeTrack(generation, update) {
@@ -473,38 +498,13 @@ function applyWholeTrack(generation, update) {
     status: update.status,
     runtime: update.runtime ?? previous.runtime ?? null,
     analysisSampleRate: update.analysisSampleRate ?? previous.analysisSampleRate ?? null,
+    analyzedDurationSeconds: update.analyzedDurationSeconds ?? null,
     song: update.song ?? null,
     key: update.key ?? null,
     error: update.error ?? null,
   };
   renderRhythm(state.report);
   elements.rawJson.textContent = JSON.stringify(state.report, null, 2);
-}
-
-function mixAndResampleMono(buffer, targetRate) {
-  const scale = buffer.sampleRate / targetRate;
-  const outputLength = Math.max(1, Math.floor(buffer.length / scale));
-  const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index));
-  const output = new Float32Array(outputLength);
-
-  for (let outputIndex = 0; outputIndex < outputLength; outputIndex += 1) {
-    const start = outputIndex * scale;
-    const end = Math.min(buffer.length, (outputIndex + 1) * scale);
-    const first = Math.floor(start);
-    const last = Math.min(buffer.length, Math.ceil(end));
-    let weightedSum = 0;
-    let weight = 0;
-    for (let sourceIndex = first; sourceIndex < last; sourceIndex += 1) {
-      const overlap = Math.min(end, sourceIndex + 1) - Math.max(start, sourceIndex);
-      if (overlap <= 0) continue;
-      let mono = 0;
-      for (const channel of channels) mono += channel[sourceIndex] ?? 0;
-      weightedSum += (mono / channels.length) * overlap;
-      weight += overlap;
-    }
-    output[outputIndex] = weight > 0 ? weightedSum / weight : 0;
-  }
-  return output;
 }
 
 function isCurrentAnalysis(generation) {
@@ -650,6 +650,7 @@ function buildReport({ file, buffer, statistics, representative, rhythmWindow, p
       authority: "rust-wasm",
       runtime: null,
       analysisSampleRate: null,
+      analyzedDurationSeconds: null,
       song: null,
       key: null,
       error: null,

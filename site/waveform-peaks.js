@@ -11,44 +11,75 @@
 
 export const BASE_BUCKET_FRAMES = 32;
 
-// O(n) over the file; the inspector runs it in `waveform-peaks-worker.js`. The returned summary
-// holds only typed arrays, so it can be transferred back from the worker.
+// Incremental O(n) builder: PCM can be appended in consecutive chunks of any size (the inspector
+// streams bounded chunks to `waveform-peaks-worker.js`), so no complete copy of the file is needed.
+// `finish()` returns a summary that holds only typed arrays and can be transferred from a worker.
+export function createPeakBuilder(channelCount, length, sampleRate) {
+  const totalFrames = Math.max(0, Math.floor(Number(length) || 0));
+  const channelTotal = Math.max(1, Math.floor(Number(channelCount) || 1));
+  const count = Math.ceil(totalFrames / BASE_BUCKET_FRAMES);
+  const min = new Float32Array(count).fill(Infinity);
+  const max = new Float32Array(count).fill(-Infinity);
+  const scale = 1 / channelTotal;
+  let position = 0;
+
+  return {
+    append(channels) {
+      const sources = Array.from(channels ?? []);
+      if (sources.length !== channelTotal) throw new Error(`expected ${channelTotal} channels, got ${sources.length}`);
+      const frames = Math.min(totalFrames - position, ...sources.map((channel) => channel.length));
+      let offset = 0;
+      while (offset < frames) {
+        const bucket = Math.floor(position / BASE_BUCKET_FRAMES);
+        const stop = Math.min(frames, offset + (bucket + 1) * BASE_BUCKET_FRAMES - position);
+        let low = min[bucket];
+        let high = max[bucket];
+        if (channelTotal === 1) {
+          const channel = sources[0];
+          for (let frame = offset; frame < stop; frame += 1) {
+            const value = channel[frame];
+            if (value < low) low = value;
+            if (value > high) high = value;
+          }
+        } else {
+          for (let frame = offset; frame < stop; frame += 1) {
+            let value = 0;
+            for (const channel of sources) value += channel[frame];
+            value *= scale;
+            if (value < low) low = value;
+            if (value > high) high = value;
+          }
+        }
+        min[bucket] = low;
+        max[bucket] = high;
+        position += stop - offset;
+        offset = stop;
+      }
+    },
+    get appendedFrames() {
+      return position;
+    },
+    finish() {
+      if (position < totalFrames) throw new Error(`peak builder received ${position} of ${totalFrames} frames`);
+      return summarize(min, max, totalFrames, sampleRate);
+    },
+  };
+}
+
+// Builds the summary of complete channels in one pass (tests, and callers that already hold the PCM).
 export function buildPeakLevels(channels, sampleRate) {
   const sources = Array.from(channels ?? []).filter((channel) => channel && typeof channel.length === "number");
   const length = sources.length ? Math.min(...sources.map((channel) => channel.length)) : 0;
+  if (!length) return { sampleRate: Number(sampleRate) || 0, length: 0, levels: [] };
+  const builder = createPeakBuilder(sources.length, length, sampleRate);
+  builder.append(sources);
+  return builder.finish();
+}
+
+function summarize(min, max, length, sampleRate) {
   const levels = [];
   if (!length) return { sampleRate: Number(sampleRate) || 0, length: 0, levels };
-
-  const count = Math.ceil(length / BASE_BUCKET_FRAMES);
-  const min = new Float32Array(count);
-  const max = new Float32Array(count);
-  const scale = 1 / sources.length;
-  for (let bucket = 0; bucket < count; bucket += 1) {
-    const start = bucket * BASE_BUCKET_FRAMES;
-    const end = Math.min(length, start + BASE_BUCKET_FRAMES);
-    let low = Infinity;
-    let high = -Infinity;
-    if (sources.length === 1) {
-      const channel = sources[0];
-      for (let frame = start; frame < end; frame += 1) {
-        const value = channel[frame];
-        if (value < low) low = value;
-        if (value > high) high = value;
-      }
-    } else {
-      for (let frame = start; frame < end; frame += 1) {
-        let value = 0;
-        for (const channel of sources) value += channel[frame];
-        value *= scale;
-        if (value < low) low = value;
-        if (value > high) high = value;
-      }
-    }
-    min[bucket] = low;
-    max[bucket] = high;
-  }
   levels.push({ bucketFrames: BASE_BUCKET_FRAMES, min, max });
-
   while (levels.at(-1).min.length > 1) {
     const previous = levels.at(-1);
     const nextCount = Math.ceil(previous.min.length / 2);

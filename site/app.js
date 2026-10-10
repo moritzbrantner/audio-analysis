@@ -22,6 +22,8 @@ const WAVEFORM_BUTTON_ZOOM_FACTOR = 2;
 const WAVEFORM_WHEEL_ZOOM_PER_PIXEL = Math.log(1.25) / 120;
 const WAVEFORM_MAX_WHEEL_FACTOR = 4;
 const WAVEFORM_DRAG_THRESHOLD_PX = 4;
+// Frames per chunk streamed to the peak worker (2 MiB per channel); a multiple of the peak bucket.
+const WAVEFORM_PEAK_CHUNK_FRAMES = 1 << 19;
 // While playing, a playhead that leaves the zoomed window pages the view to keep it in sight.
 const WAVEFORM_FOLLOW_LEAD = 0.1;
 
@@ -490,23 +492,18 @@ function startWholeTrackAnalysis(generation, buffer) {
 
 // Resolves null when the analysis was superseded or cancelled.
 async function runWholeTrackAnalysis(generation, buffer) {
-  if (typeof Worker !== "function") {
-    // Fallback without workers: same pipeline on the main thread, abandoned between stages if a
-    // newer analysis or a reset superseded it.
-    const module = await import(WHOLE_TRACK_MODULE_URL);
-    if (!isCurrentAnalysis(generation)) return null;
-    const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index));
-    const { samples, sampleRate } = module.prepareWholeTrackSamples(channels, buffer.sampleRate);
-    if (!isCurrentAnalysis(generation)) return null;
-    const result = await module.analyzeWholeTrack(samples, sampleRate);
-    if (!isCurrentAnalysis(generation)) return null;
-    return { runtime: "client-wasm-main-thread", analysisSampleRate: sampleRate, ...result };
+  if (typeof Worker !== "function") return runWholeTrackOnMainThread(generation, buffer);
+  let worker;
+  try {
+    worker = new Worker(WHOLE_TRACK_WORKER_URL, { type: "module" });
+  } catch {
+    // For example a content security policy that rejects module workers.
+    return runWholeTrackOnMainThread(generation, buffer);
   }
 
   // Copies keep the AudioBuffer intact for playback and drawing; the copies are transferred.
   const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index).slice());
   return new Promise((resolve, reject) => {
-    const worker = new Worker(WHOLE_TRACK_WORKER_URL, { type: "module" });
     const finish = () => {
       worker.terminate();
       if (state.wholeTrackWorker?.worker === worker) state.wholeTrackWorker = null;
@@ -535,11 +532,29 @@ async function runWholeTrackAnalysis(generation, buffer) {
       finish();
       reject(new Error(event.message || "The whole-track analysis worker failed to start."));
     });
-    worker.postMessage(
-      { id: generation, channels, sourceSampleRate: buffer.sampleRate },
-      channels.map((channel) => channel.buffer),
-    );
+    try {
+      worker.postMessage(
+        { id: generation, channels, sourceSampleRate: buffer.sampleRate },
+        channels.map((channel) => channel.buffer),
+      );
+    } catch {
+      finish();
+      resolve(runWholeTrackOnMainThread(generation, buffer));
+    }
   });
+}
+
+// Fallback without a usable worker: same pipeline on the main thread, abandoned between stages if a
+// newer analysis or a reset superseded it.
+async function runWholeTrackOnMainThread(generation, buffer) {
+  const module = await import(WHOLE_TRACK_MODULE_URL);
+  if (!isCurrentAnalysis(generation)) return null;
+  const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index));
+  const { samples, sampleRate } = module.prepareWholeTrackSamples(channels, buffer.sampleRate);
+  if (!isCurrentAnalysis(generation)) return null;
+  const result = await module.analyzeWholeTrack(samples, sampleRate);
+  if (!isCurrentAnalysis(generation)) return null;
+  return { runtime: "client-wasm-main-thread", analysisSampleRate: sampleRate, ...result };
 }
 
 function cancelWholeTrackAnalysis() {
@@ -1308,10 +1323,10 @@ function waveformColumns(buffer, view, width) {
   const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index));
   const startFrame = Math.max(0, Math.floor(view.startSeconds * buffer.sampleRate));
   const frameCount = Math.max(1, Math.min(buffer.length - startFrame, Math.round((view.endSeconds - view.startSeconds) * buffer.sampleRate)));
-  const framesPerPixel = Math.max(1, Math.floor(frameCount / width));
   for (let x = 0; x < width; x += 1) {
-    const start = Math.min(buffer.length - 1, startFrame + x * framesPerPixel);
-    const end = Math.min(buffer.length, start + framesPerPixel);
+    // Proportional column boundaries, so the last column ends at the view's final frame.
+    const start = Math.min(buffer.length - 1, startFrame + Math.floor((x * frameCount) / width));
+    const end = Math.min(buffer.length, Math.max(start + 1, startFrame + Math.floor(((x + 1) * frameCount) / width)));
     let low = 1;
     let high = -1;
     const sampleStride = Math.max(1, Math.floor((end - start) / 64));
@@ -1448,8 +1463,9 @@ async function loadWaveformKit() {
   }
 }
 
-// The peak pyramid is O(n) over the file, so it is built in a worker (or deferred when workers are
-// unavailable); until it arrives the waveform is drawn from the bounded sparse scan.
+// The peak pyramid is O(n) over the file, so it is built in a worker that receives the PCM in
+// bounded chunks (one in flight), or in deferred chunks on the UI thread when a worker is unavailable
+// or fails. Until it arrives the waveform is drawn from the bounded sparse scan.
 function startWaveformPeaks(generation, buffer) {
   cancelWaveformPeaks();
   const kit = state.waveformKit;
@@ -1461,31 +1477,82 @@ function startWaveformPeaks(generation, buffer) {
     drawWaveform(elements.waveform, buffer);
     drawWaveformOverview();
   };
+  const fallback = () => buildWaveformPeaksDeferred(generation, buffer, channels, accept);
 
   if (typeof Worker !== "function") {
-    setTimeout(() => {
-      if (isCurrentAnalysis(generation)) accept(kit.peaks.buildPeakLevels(channels, buffer.sampleRate));
-    }, 0);
+    fallback();
     return;
   }
-
-  // Copies keep the AudioBuffer intact for playback and sub-bucket views; the copies are transferred.
-  const copies = channels.map((channel) => channel.slice());
-  const worker = new Worker(WAVEFORM_PEAKS_WORKER_URL, { type: "module" });
+  let worker;
+  try {
+    worker = new Worker(WAVEFORM_PEAKS_WORKER_URL, { type: "module" });
+  } catch {
+    // For example a content security policy that rejects module workers.
+    fallback();
+    return;
+  }
   state.waveformPeaksWorker = worker;
+  const current = () => state.waveformPeaksWorker === worker;
   const finish = () => {
     worker.terminate();
-    if (state.waveformPeaksWorker === worker) state.waveformPeaksWorker = null;
+    if (current()) state.waveformPeaksWorker = null;
+  };
+  const fail = () => {
+    const wasCurrent = current();
+    finish();
+    if (wasCurrent) fallback();
+  };
+  let offset = 0;
+  const sendNext = () => {
+    if (offset >= buffer.length) {
+      worker.postMessage({ type: "finish" });
+      return;
+    }
+    const end = Math.min(buffer.length, offset + WAVEFORM_PEAK_CHUNK_FRAMES);
+    const chunk = channels.map((channel) => channel.slice(offset, end));
+    offset = end;
+    worker.postMessage({ type: "chunk", channels: chunk }, chunk.map((channel) => channel.buffer));
   };
   worker.addEventListener("message", (event) => {
-    finish();
-    if (event.data?.ok) accept(event.data.summary);
+    if (!current()) return;
+    const message = event.data ?? {};
+    if (message.type === "ack") {
+      try {
+        sendNext();
+      } catch {
+        fail();
+      }
+      return;
+    }
+    if (message.type !== "done") return;
+    if (message.ok) {
+      finish();
+      accept(message.summary);
+    } else fail();
   });
-  worker.addEventListener("error", finish);
-  worker.postMessage(
-    { id: generation, channels: copies, sampleRate: buffer.sampleRate },
-    copies.map((channel) => channel.buffer),
-  );
+  worker.addEventListener("error", fail);
+  try {
+    worker.postMessage({ type: "start", channelCount: channels.length, length: buffer.length, sampleRate: buffer.sampleRate });
+    sendNext();
+  } catch {
+    fail();
+  }
+}
+
+// UI-thread fallback: one bounded chunk per task, abandoned when a newer analysis or a reset
+// supersedes it.
+function buildWaveformPeaksDeferred(generation, buffer, channels, accept) {
+  const builder = state.waveformKit.peaks.createPeakBuilder(channels.length, buffer.length, buffer.sampleRate);
+  let offset = 0;
+  const step = () => {
+    if (!isCurrentAnalysis(generation) || state.audioBuffer !== buffer) return;
+    const end = Math.min(buffer.length, offset + WAVEFORM_PEAK_CHUNK_FRAMES);
+    builder.append(channels.map((channel) => channel.subarray(offset, end)));
+    offset = end;
+    if (offset < buffer.length) setTimeout(step, 0);
+    else accept(builder.finish());
+  };
+  setTimeout(step, 0);
 }
 
 function cancelWaveformPeaks() {

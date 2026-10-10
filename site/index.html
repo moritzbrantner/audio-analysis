@@ -153,7 +153,7 @@
             </div>
             <span id="statistics-coverage" class="badge">full-file scan</span>
           </div>
-          <audio id="audio-player" controls preload="metadata"></audio>
+          <audio id="audio-player" preload="metadata"></audio>
           <canvas
             id="waveform"
             class="visualization interactive-visualization"
@@ -170,7 +170,7 @@
           </div>
           <p id="waveform-note" class="figure-note">
             Full-file overview. Click to seek; use Left/Right for 1 second, Shift+Left/Right for 5 seconds, Home/End for
-            the start or end.
+            the start or end; Space or K plays and pauses.
           </p>
         </section>
 
@@ -332,6 +332,7 @@
       <span>Rust-first audio analysis · browser-local by default</span>
     </footer>
 
+    <script type="module" src="./analysis-player.js"></script>
     <script type="module" src="./waveform-overlay.js"></script>
     <script type="module" src="./recording.js"></script>
     <script type="module" src="./app.js"></script>

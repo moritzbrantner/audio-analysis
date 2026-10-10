@@ -82,6 +82,23 @@ try {
   await page.keyboard.press("End");
   assertInRange(await page.locator("#audio-player").evaluate((element) => element.currentTime), 2.9, 3.1, "waveform End key");
 
+  // The integrated transport replaces the native controls and drives the same media element.
+  assert.equal(await page.locator("#audio-player").evaluate((element) => element.controls), false);
+  const transport = page.getByRole("group", { name: "Playback" });
+  assert.match(await transport.locator(".transport-time").innerText(), /\/ 0:03$/);
+  await transport.getByRole("combobox", { name: "Playback speed" }).selectOption("1.5");
+  assert.equal(await page.locator("#audio-player").evaluate((element) => element.playbackRate), 1.5);
+  await transport.getByRole("button", { name: "Mute" }).click();
+  assert.equal(await page.locator("#audio-player").evaluate((element) => element.muted), true);
+  await transport.getByRole("button", { name: "Unmute" }).click();
+  await page.locator("#waveform").focus();
+  await page.keyboard.press("Home");
+  await transport.getByRole("button", { name: "Play" }).click();
+  await page.waitForFunction(() => !document.querySelector("#audio-player").paused);
+  await page.locator("#waveform").focus();
+  await page.keyboard.press("k");
+  await page.waitForFunction(() => document.querySelector("#audio-player").paused);
+
   const spectralBox = await page.locator("#spectral-timeline").boundingBox();
   assert.ok(spectralBox, "expected a rendered spectral timeline");
   await page.locator("#spectral-timeline").hover({

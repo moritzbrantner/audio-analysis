@@ -99,7 +99,7 @@
               <h2 id="song-timeline-title">DJ overview and musical timeline</h2>
             </div>
           </div>
-          <audio id="song-audio-player" controls preload="metadata"></audio>
+          <audio id="song-audio-player" preload="metadata"></audio>
           <canvas
             id="song-timeline"
             class="visualization interactive-visualization"
@@ -120,7 +120,7 @@
             and dashed boundaries are Rust-detected sections. BPM, dominant key, and their confidence are shown in the
             overview header. The colorized waveform is presentation-only: rhythm, key, and structure remain Rust-owned.
             Click to seek; Left/Right moves between beats, Shift+Left/Right moves between section boundaries, and
-            Home/End jumps to the track edges.
+            Home/End jumps to the track edges. Space or K plays and pauses.
           </p>
         </section>
 
@@ -158,6 +158,7 @@
       <span>Rust-first audio analysis · browser-local by default</span>
     </footer>
 
+    <script type="module" src="./analysis-player.js"></script>
     <script type="module" src="./song-analysis.js"></script>
   </body>
 </html>

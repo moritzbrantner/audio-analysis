@@ -501,6 +501,65 @@ h2 {
   margin-bottom: 17px;
 }
 
+/* Compact transport replacing the native audio controls; the waveform below is the scrubber. */
+.analysis-transport {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  font-size: 0.9rem;
+}
+
+.transport-button {
+  min-width: 4.75rem;
+  padding: 6px 12px;
+  border: 1px solid #c9d3d7;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #172026;
+}
+
+.transport-button:not(:disabled):hover {
+  background: #eef3f4;
+}
+
+.transport-play {
+  border-color: #0d9488;
+  background: #0d9488;
+  color: #ffffff;
+}
+
+.transport-play:not(:disabled):hover {
+  background: #0b7d73;
+}
+
+.transport-time {
+  min-width: 7.5rem;
+  font-variant-numeric: tabular-nums;
+  color: #3b4a52;
+}
+
+.transport-volume {
+  width: 7rem;
+  accent-color: #0d9488;
+}
+
+.transport-rate {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #3b4a52;
+}
+
+.transport-rate select {
+  padding: 4px 6px;
+  border: 1px solid #c9d3d7;
+  border-radius: 6px;
+  background: #ffffff;
+  font: inherit;
+}
+
 .visualization {
   display: block;
   width: 100%;

@@ -261,6 +261,120 @@
   font-weight: 650;
 }
 
+.waveform-zoom-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.waveform-zoom-controls {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.waveform-zoom-button {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid #d7dde0;
+  border-radius: 8px;
+  background: #fff;
+  color: #1f2f36;
+  cursor: pointer;
+  font: inherit;
+  font-size: 1.05rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.waveform-zoom-button:hover {
+  border-color: #0f766e;
+  color: #0f766e;
+}
+
+.waveform-zoom-button:focus-visible {
+  outline: 3px solid rgba(13, 148, 136, 0.4);
+  outline-offset: 2px;
+}
+
+.waveform-zoom-button[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.waveform-zoom-button[aria-disabled="true"]:hover {
+  border-color: #d7dde0;
+  color: #1f2f36;
+}
+
+.waveform-view-range {
+  color: #526169;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.waveform-overview {
+  position: relative;
+  height: 44px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #111a1f;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.waveform-overview-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.waveform-overview-window {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  border: 2px solid rgba(251, 191, 36, 0.95);
+  border-radius: 4px;
+  background: rgba(251, 191, 36, 0.16);
+  pointer-events: none;
+}
+
+.waveform-overview-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.85);
+  transform: translateX(-0.5px);
+  pointer-events: none;
+}
+
+.waveform-stage > #waveform.is-panning {
+  cursor: grabbing;
+}
+
+.waveform-beat-layer,
+.waveform-section-layer,
+.waveform-structure-track {
+  right: auto;
+}
+
+.waveform-structure-track {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+}
+
 @media (max-width: 680px) {
   .waveform-heading-actions {
     width: 100%;

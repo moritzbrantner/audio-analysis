@@ -154,6 +154,22 @@
             <span id="statistics-coverage" class="badge">full-file scan</span>
           </div>
           <audio id="audio-player" preload="metadata"></audio>
+          <div class="waveform-zoom-bar">
+            <div class="waveform-zoom-controls" role="group" aria-label="Waveform zoom">
+              <button id="waveform-zoom-out" class="waveform-zoom-button" type="button" aria-label="Zoom out of the waveform" title="Zoom out (−)" aria-disabled="true">
+                <span aria-hidden="true">−</span>
+              </button>
+              <button id="waveform-zoom-in" class="waveform-zoom-button" type="button" aria-label="Zoom in on the waveform around the playhead" title="Zoom in (+)" aria-disabled="true">
+                <span aria-hidden="true">+</span>
+              </button>
+            </div>
+            <span id="waveform-view-range" class="waveform-view-range">Showing the whole file</span>
+          </div>
+          <div id="waveform-overview" class="waveform-overview" role="group" aria-label="Whole-file overview. Select a point to show it in the waveform.">
+            <canvas id="waveform-overview-canvas" class="waveform-overview-canvas" aria-hidden="true"></canvas>
+            <span class="waveform-overview-playhead" aria-hidden="true"></span>
+            <div id="waveform-overview-window" class="waveform-overview-window" role="img" aria-label="Visible window: the whole file"></div>
+          </div>
           <canvas
             id="waveform"
             class="visualization interactive-visualization"
@@ -169,8 +185,9 @@
             Click the waveform or use arrow keys to seek.
           </div>
           <p id="waveform-note" class="figure-note">
-            Full-file overview. Click to seek; use Left/Right for 1 second, Shift+Left/Right for 5 seconds, Home/End for
-            the start or end; Space or K plays and pauses.
+            Click to seek; drag to pan; use the mouse wheel, a trackpad pinch, a two-finger pinch, the zoom buttons or +/−
+            to zoom. Left/Right move 1 second, Shift+Left/Right 5 seconds, Home/End jump to the start or end; Space or K
+            plays and pauses. The overview above always shows the whole file and marks the visible window.
           </p>
         </section>
 

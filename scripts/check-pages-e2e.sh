@@ -28,6 +28,7 @@ fi
 cp "$ROOT_DIR/tests/pages/audio-inspector.e2e.mjs" "$TOOL_DIR/audio-inspector.e2e.mjs"
 cp "$ROOT_DIR/tests/pages/waveform-overlay.e2e.mjs" "$TOOL_DIR/waveform-overlay.e2e.mjs"
 cp "$ROOT_DIR/tests/pages/whole-track-sections.e2e.mjs" "$TOOL_DIR/whole-track-sections.e2e.mjs"
+cp "$ROOT_DIR/tests/pages/waveform-zoom.e2e.mjs" "$TOOL_DIR/waveform-zoom.e2e.mjs"
 cp -R "$ROOT_DIR/tests/pages/fixtures" "$TOOL_DIR/fixtures"
 cat > "$TOOL_DIR/package.json" <<EOF
 {
@@ -80,3 +81,4 @@ fi
 PAGES_E2E_BASE_URL="$BASE_URL" bun "$TOOL_DIR/audio-inspector.e2e.mjs"
 PAGES_E2E_BASE_URL="$BASE_URL" bun "$TOOL_DIR/waveform-overlay.e2e.mjs"
 PAGES_E2E_BASE_URL="$BASE_URL" bun "$TOOL_DIR/whole-track-sections.e2e.mjs"
+PAGES_E2E_BASE_URL="$BASE_URL" bun "$TOOL_DIR/waveform-zoom.e2e.mjs"

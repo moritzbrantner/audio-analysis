@@ -2,13 +2,36 @@ const BEAT_TOGGLE_ID = "beat-overlay-toggle";
 const SECTION_TOGGLE_ID = "section-overlay-toggle";
 const TIME_EPSILON_SECONDS = 1e-6;
 const SECTION_TONE_COUNT = 4;
+// A section's local tempo is annotated only when it differs from a neighbour by at least this
+// relative amount, so estimator jitter (about 1%) never reads as a tempo change.
+const MATERIAL_TEMPO_RATIO = 0.04;
+const WHOLE_TRACK_END_SNAP_SECONDS = 0.05;
+
+// The Rust whole-song contracts (`audio-analysis-song/v1` plus the key track) once the inspector's
+// whole-track analysis completed; null while it is pending or when it is unavailable.
+export function wholeTrackTimeline(report) {
+  const wholeTrack = report?.wholeTrack;
+  const song = wholeTrack?.song;
+  if (wholeTrack?.status !== "complete" || !song || !Array.isArray(song.sections) || !song.sections.length) return null;
+  return { song, key: wholeTrack.key && typeof wholeTrack.key === "object" ? wholeTrack.key : null };
+}
+
+function wholeTrackPending(report) {
+  return report?.wholeTrack?.status === "pending";
+}
+
+function rhythmSource(report) {
+  const timeline = wholeTrackTimeline(report);
+  if (timeline) return { contract: timeline.song, timestampOffset: 0, wholeTrack: timeline };
+  return { contract: report?.rhythm ?? null, timestampOffset: rhythmTimestampOffset(report), wholeTrack: null };
+}
 
 export function beatOverlayEvents(report) {
   const duration = finite(report?.source?.durationSeconds);
-  const beats = Array.isArray(report?.rhythm?.beats) ? report.rhythm.beats : [];
+  const { contract, timestampOffset } = rhythmSource(report);
+  const beats = Array.isArray(contract?.beats) ? contract.beats : [];
   if (duration === null || duration <= 0 || !beats.length) return [];
 
-  const timestampOffset = rhythmTimestampOffset(report);
   return beats.flatMap((beat, index) => {
     const timestamp = finite(beat?.timestampSeconds);
     if (timestamp === null) return [];
@@ -33,11 +56,13 @@ export function beatOverlayEvents(report) {
 
 export function sectionOverlaySegments(report) {
   const duration = finite(report?.source?.durationSeconds);
-  const sections = Array.isArray(report?.rhythm?.sections) ? report.rhythm.sections : [];
+  // While the whole-track analysis runs, the bounded rhythm window is not presented as structure.
+  if (!wholeTrackTimeline(report) && wholeTrackPending(report)) return [];
+  const { contract, timestampOffset, wholeTrack } = rhythmSource(report);
+  const sections = Array.isArray(contract?.sections) ? contract.sections : [];
   if (duration === null || duration <= 0 || !sections.length) return [];
 
-  const timestampOffset = rhythmTimestampOffset(report);
-  return sections.flatMap((section, index) => {
+  const segments = sections.flatMap((section, index) => {
     const start = finite(section?.startSeconds);
     const end = finite(section?.endSeconds);
     if (start === null || end === null || end <= start) return [];
@@ -59,9 +84,92 @@ export function sectionOverlaySegments(report) {
       },
     ];
   });
+  if (!wholeTrack) return segments;
+  // Rust analyzes the resampled PCM, whose floored sample count can end a few samples before the
+  // decoded file; the final region still owns the remaining sliver of the file.
+  const last = segments.at(-1);
+  if (last && duration - last.endSeconds > 0 && duration - last.endSeconds <= WHOLE_TRACK_END_SNAP_SECONDS) {
+    last.endSeconds = duration;
+  }
+  return annotateSections(segments, wholeTrack);
+}
+
+// Attaches the Rust local tempo and key evidence to each whole-track section and marks the values
+// that materially differ from a neighbouring section. This is presentation only: tempo comes from
+// the Rust tempo map (or beat-local tempo) and key from the Rust key segments.
+export function annotateSections(segments, { song, key }) {
+  const tempoPoints = (Array.isArray(song?.tempoMap) && song.tempoMap.length ? song.tempoMap : song?.beats ?? [])
+    .map((point) => ({
+      timeSeconds: finite(point?.timestampSeconds),
+      bpm: finite(point?.bpm ?? point?.localBpm),
+    }))
+    .filter((point) => point.timeSeconds !== null && point.bpm !== null && point.bpm > 0);
+  const keySegments = (Array.isArray(key?.segments) ? key.segments : []).filter(
+    (segment) => finite(segment?.startSeconds) !== null && finite(segment?.endSeconds) !== null && segment?.key,
+  );
+
+  const annotated = segments.map((segment, index) => {
+    const finalSegment = index === segments.length - 1;
+    const bpms = tempoPoints
+      .filter(
+        (point) =>
+          point.timeSeconds >= segment.startSeconds - TIME_EPSILON_SECONDS &&
+          (point.timeSeconds < segment.endSeconds - TIME_EPSILON_SECONDS ||
+            (finalSegment && point.timeSeconds <= segment.endSeconds + TIME_EPSILON_SECONDS)),
+      )
+      .map((point) => point.bpm);
+    return { ...segment, localBpm: median(bpms), key: dominantKeySegment(keySegments, segment) };
+  });
+
+  return annotated.map((segment, index) => {
+    const neighbours = [annotated[index - 1], annotated[index + 1]].filter(Boolean);
+    const tempoChanged =
+      segment.localBpm !== null &&
+      neighbours.some((neighbour) => neighbour.localBpm !== null && materialTempoChange(segment.localBpm, neighbour.localBpm));
+    const keyChanged =
+      segment.key !== null &&
+      neighbours.some((neighbour) => neighbour.key !== null && neighbour.key.label !== segment.key.label);
+    return { ...segment, tempoChanged, keyChanged };
+  });
+}
+
+function materialTempoChange(left, right) {
+  return Math.abs(left - right) / Math.min(left, right) >= MATERIAL_TEMPO_RATIO;
+}
+
+function dominantKeySegment(keySegments, section) {
+  let best = null;
+  let bestOverlap = 0;
+  for (const segment of keySegments) {
+    const overlap =
+      Math.min(section.endSeconds, Number(segment.endSeconds)) - Math.max(section.startSeconds, Number(segment.startSeconds));
+    if (overlap > bestOverlap) {
+      best = segment;
+      bestOverlap = overlap;
+    }
+  }
+  // A key needs to cover at least half of the section before it is shown as the section's key.
+  if (!best || bestOverlap < (section.endSeconds - section.startSeconds) / 2) return null;
+  const tonic = nonemptyString(best.key?.tonic);
+  const scale = nonemptyString(best.key?.scale);
+  const label = tonic && scale ? `${tonic} ${scale}` : nonemptyString(best.key?.label);
+  if (!label) return null;
+  return { label, confidence: finite(best.confidence ?? best.key?.confidence) };
+}
+
+function median(values) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+export function formatSectionTempo(bpm) {
+  return `${Math.round(bpm)} BPM`;
 }
 
 export function rhythmCoverage(report) {
+  if (wholeTrackTimeline(report)) return null;
   const duration = finite(report?.source?.durationSeconds);
   const start = finite(report?.coverage?.rhythm?.startSeconds);
   const length = finite(report?.coverage?.rhythm?.sourceDurationSeconds);
@@ -89,8 +197,9 @@ export function musicalContextAtTime(
       timeSeconds <= coverage.endSeconds + TIME_EPSILON_SECONDS);
   const section = inCoverage ? sectionAtTime(sections, timeSeconds) : null;
   const beat = inCoverage ? beatAtOrBefore(beats, timeSeconds) : null;
-  const beatsPerBar = positiveInteger(report?.rhythm?.beatsPerBar) ?? 4;
-  const bpm = finite(beat?.localBpm) ?? finite(report?.rhythm?.bpm);
+  const { contract } = rhythmSource(report);
+  const beatsPerBar = positiveInteger(contract?.beatsPerBar) ?? 4;
+  const bpm = finite(beat?.localBpm) ?? finite(section?.localBpm) ?? finite(contract?.bpm);
 
   return {
     timeSeconds,
@@ -121,13 +230,20 @@ export function formatMusicalContext(context) {
 
 export function beatOverlayStatusText(report, events = beatOverlayEvents(report)) {
   if (!events.length) return "Beat overlay unavailable for this analysis";
+  if (wholeTrackTimeline(report)) {
+    return `${events.length.toLocaleString()} detected beat${events.length === 1 ? "" : "s"} across the whole track`;
+  }
   const coverage = rhythmCoverage(report);
   const scope = coverage ? ` from the ${formatSeconds(coverage.endSeconds - coverage.startSeconds)} rhythm window` : "";
   return `${events.length.toLocaleString()} detected beat${events.length === 1 ? "" : "s"}${scope}`;
 }
 
 export function sectionOverlayStatusText(report, sections = sectionOverlaySegments(report)) {
+  if (!sections.length && wholeTrackPending(report)) return "Analyzing whole-track sections";
   if (!sections.length) return "Section overlay unavailable for this analysis";
+  if (wholeTrackTimeline(report)) {
+    return `${sections.length.toLocaleString()} detected section${sections.length === 1 ? "" : "s"} across the whole track`;
+  }
   const coverage = rhythmCoverage(report);
   const scope = coverage ? ` in the ${formatSeconds(coverage.endSeconds - coverage.startSeconds)} rhythm window` : "";
   return `${sections.length.toLocaleString()} detected section${sections.length === 1 ? "" : "s"}${scope}`;
@@ -366,9 +482,10 @@ function renderStructureRail(rail, report, sections, handlers) {
   const duration = finite(report?.source?.durationSeconds);
   if (duration === null || duration <= 0 || !sections.length) return;
 
+  const tones = sectionTones(sections);
   for (const section of sections) {
     const segment = document.createElement("button");
-    const tone = sectionTone(section.identity, section.index);
+    const tone = tones.get(section) ?? 0;
     segment.type = "button";
     segment.className = `waveform-section-segment waveform-section-tone-${tone}`;
     segment.style.left = `${percentage(section.startSeconds, duration)}%`;
@@ -381,14 +498,28 @@ function renderStructureRail(rail, report, sections, handlers) {
     const labelText = section.identity ?? section.label;
     const confidenceText =
       section.boundaryConfidence === null ? "" : ` Boundary confidence ${Math.round(section.boundaryConfidence * 100)}%.`;
-    const accessibleLabel = `${labelText}, ${formatTimelineTime(section.startSeconds)} to ${formatTimelineTime(section.endSeconds)}.${confidenceText} Seek to section start.`;
+    const annotations = [];
+    if (section.tempoChanged) annotations.push(formatSectionTempo(section.localBpm));
+    if (section.keyChanged) annotations.push(section.key.label);
+    const localText = sectionLocalDescription(section);
+    const accessibleLabel = `${labelText}, ${formatTimelineTime(section.startSeconds)} to ${formatTimelineTime(section.endSeconds)}.${confidenceText}${localText} Seek to section start.`;
     segment.setAttribute("aria-label", accessibleLabel);
     segment.title = accessibleLabel;
+    if (section.localBpm !== undefined && section.localBpm !== null) {
+      segment.dataset.sectionLocalBpm = section.localBpm.toFixed(2);
+    }
+    if (section.key) segment.dataset.sectionKey = section.key.label;
 
     const label = document.createElement("span");
     label.className = "waveform-section-label";
     label.textContent = labelText;
     segment.append(label);
+    if (annotations.length) {
+      const meta = document.createElement("span");
+      meta.className = "waveform-section-meta";
+      meta.textContent = annotations.join(" · ");
+      segment.append(meta);
+    }
 
     const inspectTime = Math.min(section.endSeconds, section.startSeconds + TIME_EPSILON_SECONDS);
     segment.addEventListener("pointerenter", () => handlers.inspect(inspectTime));
@@ -462,13 +593,29 @@ function boundaryConfidenceClass(confidence) {
   return "waveform-section-boundary-soft";
 }
 
-function sectionTone(identity, index) {
-  if (!identity) return Math.abs(index - 1) % SECTION_TONE_COUNT;
-  let hash = 0;
-  for (let offset = 0; offset < identity.length; offset += 1) {
-    hash = (hash * 31 + identity.charCodeAt(offset)) >>> 0;
+function sectionLocalDescription(section) {
+  const parts = [];
+  if (section.localBpm !== undefined && section.localBpm !== null) {
+    parts.push(`Local tempo ${section.localBpm.toFixed(1)} BPM`);
   }
-  return hash % SECTION_TONE_COUNT;
+  if (section.key) {
+    const confidence = section.key.confidence === null ? "" : ` (key confidence ${Math.round(section.key.confidence * 100)}%)`;
+    parts.push(`key ${section.key.label}${confidence}`);
+  }
+  return parts.length ? ` ${parts.join(", ")}.` : "";
+}
+
+// Repeated identities share a tone; distinct identities get distinct tones in order of first
+// appearance (cycling only after SECTION_TONE_COUNT identities).
+function sectionTones(sections) {
+  const byIdentity = new Map();
+  const tones = new Map();
+  for (const section of sections) {
+    const key = section.identity ?? `#${section.index}`;
+    if (!byIdentity.has(key)) byIdentity.set(key, byIdentity.size % SECTION_TONE_COUNT);
+    tones.set(section, byIdentity.get(key));
+  }
+  return tones;
 }
 
 function percentage(value, duration) {

@@ -71,6 +71,8 @@ export function setupAnalysisPlayer(media, doc = media.ownerDocument) {
   rateLabel.append(rate);
 
   transport.append(playButton, time, muteButton, volume, rateLabel);
+  // Some platforms (iOS Safari) leave media volume to the device: offer no slider that cannot work.
+  volume.hidden = !isVolumeSettable(media);
   media.after(transport);
 
   const hasSource = () => Boolean(media.currentSrc || media.getAttribute("src"));
@@ -78,15 +80,14 @@ export function setupAnalysisPlayer(media, doc = media.ownerDocument) {
   function sync() {
     const playing = !media.paused && !media.ended;
     playButton.textContent = playing ? "Pause" : "Play";
+    // The accessible name names the action; no aria-pressed, which would contradict it.
     playButton.setAttribute("aria-label", playing ? "Pause" : "Play");
-    playButton.setAttribute("aria-pressed", String(playing));
     const loaded = hasSource();
     playButton.disabled = !loaded;
     time.textContent = transportTimeText(Number(media.currentTime) || 0, Number(media.duration));
     const muted = media.muted || media.volume === 0;
     muteButton.textContent = muted ? "Unmute" : "Mute";
     muteButton.setAttribute("aria-label", muted ? "Unmute" : "Mute");
-    muteButton.setAttribute("aria-pressed", String(muted));
     volume.value = String(media.muted ? 0 : media.volume);
     rate.value = String(normalizePlaybackRate(media.playbackRate));
   }
@@ -169,9 +170,23 @@ export function setupAnalysisPlayer(media, doc = media.ownerDocument) {
   };
 }
 
+/** Whether assigning `media.volume` takes effect; restores the original level. */
+export function isVolumeSettable(media) {
+  const original = media.volume;
+  const probe = original === 1 ? 0.5 : 1;
+  try {
+    media.volume = probe;
+    const settable = media.volume === probe;
+    media.volume = original;
+    return settable;
+  } catch {
+    return false;
+  }
+}
+
 /** Space and K toggle playback from the waveform scrubber, as in common media players. */
 export function isPlaybackToggleKey(event) {
-  return (event.key === " " || event.key === "k" || event.key === "K") && !event.altKey && !event.ctrlKey && !event.metaKey;
+  return (event.key === " " || event.key === "k" || event.key === "K") && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
 }
 
 function setupPage() {

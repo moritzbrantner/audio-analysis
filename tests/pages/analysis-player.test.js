@@ -125,7 +125,7 @@ describe("analysis player transport", () => {
     await Promise.resolve();
     expect(media.paused).toBe(false);
     expect(play.getAttribute("aria-label")).toBe("Pause");
-    expect(play.getAttribute("aria-pressed")).toBe("true");
+    expect(play.getAttribute("aria-pressed")).toBeNull();
 
     // A waveform seek writes the same media time the transport shows.
     media.currentTime = 42;
@@ -161,6 +161,16 @@ describe("analysis player transport", () => {
     expect(play.getAttribute("aria-label")).toBe("Play");
   });
 
+  test("hides the volume slider where media volume cannot be set", () => {
+    const { media } = fakeMedia();
+    Object.defineProperty(media, "volume", { get: () => 1, set: () => {} });
+    const player = setupAnalysisPlayer(media, doc);
+    expect(controls(player.element).volume.hidden).toBe(true);
+    const { media: desktop } = fakeMedia();
+    expect(controls(setupAnalysisPlayer(desktop, doc).element).volume.hidden).toBe(false);
+    expect(desktop.volume).toBe(1);
+  });
+
   test("survives a refused play() and detaches cleanly", async () => {
     const { media, panel } = fakeMedia();
     media.currentSrc = "blob:track";
@@ -181,6 +191,8 @@ describe("analysis player transport", () => {
     expect(isPlaybackToggleKey({ key: "k" })).toBe(true);
     expect(isPlaybackToggleKey({ key: "K" })).toBe(true);
     expect(isPlaybackToggleKey({ key: " ", ctrlKey: true })).toBe(false);
+    expect(isPlaybackToggleKey({ key: " ", shiftKey: true })).toBe(false);
+    expect(isPlaybackToggleKey({ key: "K", shiftKey: true })).toBe(false);
     expect(isPlaybackToggleKey({ key: "ArrowRight" })).toBe(false);
   });
 

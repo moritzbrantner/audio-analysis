@@ -2,7 +2,9 @@
 
 This is the capability repository for audio analysis and generation packages.
 
-Read `README.md` for the current package surfaces and `CONTEXT.md` for the exact audio/foundation/NLP authority boundary referenced by `.harness/invariants.md`. For extraction/release decisions consult the accepted `docs/adr/0012-capability-repository-split.md` and `docs/PROVENANCE.md`, not a second domain-guide document. Apply the installed `conventions.json`, `conventions.lock.json` and `.conventions/` versions; do not refresh those managed files as part of documentation cleanup.
+- Read `README.md` for package surfaces and `CONTEXT.md` for the audio/foundation/NLP boundary cited by `.harness/invariants.md`.
+- Consult `docs/adr/0012-capability-repository-split.md` and `docs/PROVENANCE.md` for extraction and release authority.
+- Apply the installed `conventions.json`, `conventions.lock.json` and `.conventions/` versions; do not refresh managed files in documentation cleanup.
 
 - Keep reusable Rust code under `crates/` and focused package surfaces under `packages/`.
 - Do not reintroduce sibling paths, moving Git dependencies, visual-analysis dependencies, or NLP implementation dependencies into committed package manifests.

@@ -3,7 +3,7 @@
 This is the capability repository for audio analysis and generation packages.
 
 - Read `README.md` for package surfaces and `CONTEXT.md` for the audio/foundation/NLP boundary cited by `.harness/invariants.md`.
-- Read `docs/decisions/atlas.md` before choosing product capability priorities or interpreting open product questions. It owns append-only product Decisions/Questions, not architecture, implementation status, or issue tracking. Ask one consequential unresolved owner question at a time; preserve existing ADR and ownership authority.
+- Read `docs/decisions/atlas.md` to determine **approved behavior and acceptance** for the chosen issue, not product-category execution priority. [Decision 1.9.2](docs/decisions/atlas.md) supersedes the old speech-first, Vox-before-diarization, DJ/music deferral and new-runtime scheduling language; those historical entries retain their product-contract meaning only. A defined issue is actionable when its **own actual dependencies and required human inputs** are satisfied, regardless of feature family. Ask the owner **only if a missing consequential decision actually blocks that issue**; otherwise do not start another prioritization interview. Preserve append-only Atlas IDs and existing architecture authority.
 - Consult `docs/adr/0012-capability-repository-split.md` and `docs/PROVENANCE.md` for extraction and release authority.
 - Apply the installed `conventions.json`, `conventions.lock.json` and `.conventions/` versions; do not refresh managed files in documentation cleanup.
 

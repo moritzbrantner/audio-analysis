@@ -182,7 +182,7 @@ jobs:
     secrets: inherit
 
   merge-ready:
-    name: merge-ready
+    name: ${{ github.event_name == 'pull_request' && 'merge-ready' || 'validation-summary' }}
     if: ${{ always() }}
     needs: ["verification", "validate-dj-generated-evidence", "validate-dj-mixxx-benchmark", "validate-dj-real-music-evidence", "validate-environment-v1", "validate-pages", "validate-runtime-evidence", "validate-structural-ci", "validation-scope"]
     runs-on: ubuntu-latest

@@ -43,5 +43,11 @@
     "test:e2e:smoke",
     "test:accessibility",
     "benchmark:smoke"
-  ]
+  ],
+  "merge": {
+    "authority": "hosted",
+    "requiredChecks": [
+      "merge-ready"
+    ]
+  }
 }

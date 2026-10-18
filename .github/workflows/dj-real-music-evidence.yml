@@ -1,8 +1,7 @@
 name: DJ Real Music Evidence
 
 on:
-  pull_request:
-    types: [labeled, synchronize]
+  workflow_call:
   workflow_dispatch:
     inputs:
       fixture:

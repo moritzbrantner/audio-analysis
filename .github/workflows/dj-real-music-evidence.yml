@@ -14,9 +14,6 @@ permissions:
 
 jobs:
   evidence:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      contains(github.event.pull_request.labels.*.name, 'dj-real-music-evidence')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

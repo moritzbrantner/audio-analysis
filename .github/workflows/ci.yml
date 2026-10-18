@@ -18,6 +18,9 @@ env:
 
 jobs:
   validation-scope:
+    permissions:
+      contents: read
+      pull-requests: read
     runs-on: ubuntu-latest
     outputs:
       validate-dj-generated-evidence: ${{ steps.scope.outputs.validate-dj-generated-evidence }}
@@ -34,6 +37,8 @@ jobs:
           fetch-depth: 0
       - id: scope
         shell: python
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           import fnmatch
           import json
@@ -46,7 +51,12 @@ jobs:
                   pull_request = json.load(source)["pull_request"]
               revision = pull_request["base"]["sha"] + "..." + pull_request["head"]["sha"]
               paths = subprocess.check_output(["git", "diff", "--no-renames", "--name-only", "-z", revision]).decode().split("\0")
-              labels = {label["name"] for label in pull_request.get("labels", [])}
+              current = json.loads(subprocess.check_output([
+                  "gh", "api", f"repos/{os.environ['GITHUB_REPOSITORY']}/pulls/{pull_request['number']}"
+              ]))
+              if current["head"]["sha"] != pull_request["head"]["sha"]:
+                  raise RuntimeError("PR head changed; this validation scope is stale")
+              labels = {label["name"].casefold() for label in current["labels"]}
               selected = {
                   job: (not rule["paths"] or any(fnmatch.fnmatchcase(path, pattern) for path in paths for pattern in rule["paths"]))
                   and (not rule["branches"] or any(fnmatch.fnmatchcase(pull_request["base"]["ref"], branch) for branch in rule["branches"]))

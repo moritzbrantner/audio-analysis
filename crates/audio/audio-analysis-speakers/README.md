@@ -154,3 +154,49 @@ Successful responses use the shared package-surface shape with `operation`,
 deterministic, local-first, and do not download models, write persistent files,
 or execute external tools unless an operation explicitly documents native or
 external-tool execution.
+
+## Canonical library transfer
+
+`SpeakerLibrary::export_new` writes a complete, validated canonical `library.json`
+copy to a new destination. It preserves stable IDs, labels, metadata and embeddings,
+never overwrites an existing path, and creates private files on Unix. Destination
+folders must already exist. An empty portable library has `profiles: []` and
+`embedding_model: null`; it does not invent a model. Existing populated JSON and
+the populated `SpeakerLibrarySnapshot` Rust API remain compatible. The existing
+`save` operation still removes an empty library; explicit export can materialize
+one for a user's New/portable-library workflow.
+
+`prepare_import` produces a non-mutating plan and a vector-free summary. Merge
+retains identical identities, adds compatible new ones, and rejects conflicting
+IDs or exact labels. Replace is an explicit whole-library decision. Both modes
+reject incompatible model family/name/version/dimensions. Neither operation
+changes draft/confirmed metadata or compares incompatible embedding vectors.
+
+After the caller presents the summary and obtains its product-specific consent,
+`plan.commit(active_path, new_backup_path)` verifies the active identities still
+match the reviewed baseline. It preserves an existing document in a new backup
+before atomically promoting the validated replacement. A stale preview or an
+occupied backup path fails without replacing active content. An identical import
+is a no-op: it creates no backup and does not rewrite the library.
+
+All canonical writers coordinate through a persistent `.<filename>.lock` sidecar;
+busy writers fail rather than wait indefinitely. The file is intentionally kept
+across atomic renames. Speaker Directory selection, consent, backup naming,
+cancellation before commit, and `speaker-trace.json` remain consumer-owned.
+Transfer methods never upload or log embeddings, and plan debugging prints only
+the safe count summary.
+
+```rust,no_run
+use audio_analysis_speakers::{SpeakerLibrary, SpeakerLibraryImportMode};
+# fn example() -> Result<(), Box<dyn std::error::Error>> {
+let incoming = SpeakerLibrary::load("portable-library.json")?;
+let active = SpeakerLibrary::load("speakers/library.json")?;
+let plan = active.prepare_import(&incoming, SpeakerLibraryImportMode::Merge)?;
+let summary = plan.summary(); // counts only; the product presents its consent UI
+# let _ = summary;
+// Only after explicit confirmation, with a fresh, non-existing backup path:
+let receipt = plan.commit("speakers/library.json", "speakers/library.before-import")?;
+# let _ = receipt;
+# Ok(())
+# }
+```

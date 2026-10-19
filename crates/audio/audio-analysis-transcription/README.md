@@ -235,6 +235,14 @@ bounds are requested, diagnostics include
 reached because too few usable speech spans exist, diagnostics include
 `diarizationSpeakerBoundsSaturated=true`.
 
+The pipeline attaches aligned words and characters by stable segment ID before
+ordering complete segments chronologically. Independently aligned overlapping
+ASR intervals may exchange start order; measured timestamps, segment IDs, text,
+speaker metadata, and word/character associations remain attached to their
+original segment. When order changes, aggregate text follows the resulting
+segment order. Equal starts retain their source order; untimed segments retain
+their relative order before timed segments when reordering is necessary.
+
 CTC alignment validates local wav2vec2 bundle files, config, tokenizer
 vocabulary, and preprocessor metadata. Tokenizer discovery accepts
 `tokenizer.json` and `vocab.json`; CTC blank resolution can use `pad_token_id`

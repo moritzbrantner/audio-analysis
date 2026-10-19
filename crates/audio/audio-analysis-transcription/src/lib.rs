@@ -2950,6 +2950,7 @@ pub fn run_transcription_pipeline_with_observer(
         ensure_pipeline_active(observer)?;
         apply_alignment_words(&mut transcript, &alignment_response.words)?;
         apply_alignment_chars(&mut transcript, &alignment_response.chars)?;
+        order_aligned_segments(&mut transcript);
         alignment_summary = Some(AlignmentSummary {
             provider: provider.provider_id().to_string(),
             model_id: alignment_response.model_id,
@@ -4193,6 +4194,36 @@ fn apply_alignment_words(
         )?;
     }
     Ok(())
+}
+
+// Independently aligned overlapping ASR intervals can change their relative starts.
+// Restore chronology only after attaching every word/character by stable segment ID:
+// move complete segments, never timestamps or text independently.
+fn order_aligned_segments(transcript: &mut TranscriptionContract) {
+    if transcript
+        .segments
+        .iter()
+        .filter_map(|segment| segment.start_seconds())
+        .is_sorted_by(|previous, next| previous <= next)
+    {
+        return;
+    }
+    transcript.segments.sort_by(|left, right| {
+        match (left.start_seconds(), right.start_seconds()) {
+            (Some(left), Some(right)) => left.total_cmp(&right),
+            (None, Some(_)) => std::cmp::Ordering::Less,
+            (Some(_), None) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+    });
+    transcript.text = Some(
+        transcript
+            .segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
 }
 
 fn apply_alignment_chars(
@@ -7102,6 +7133,132 @@ mod tests {
         assert_eq!(response.segments.len(), 1);
         assert!(response.segments[0].start_seconds < 0.07);
         assert!(response.segments[0].end_seconds > 0.30);
+    }
+
+    #[test]
+    fn pipeline_preserves_aligned_segment_associations_in_chronological_order() {
+        struct OverlappingAsr;
+        impl AudioTranscriptionProvider for OverlappingAsr {
+            fn provider_id(&self) -> &str {
+                "frozen-overlapping-asr"
+            }
+            fn transcribe(&mut self, request: AsrRequest) -> Result<AsrResponse> {
+                let mut segments = Vec::new();
+                for (index, text, start, end) in [
+                    (164, "And...", 0.0, 0.5),
+                    (165, "It's probably just a-", 0.26, 1.3),
+                ] {
+                    let mut segment = TranscriptSegmentContract::new(index, text)
+                        .with_time_range(Some(start), Some(end))?;
+                    segment.attributes.insert("timing".into(), "global".into());
+                    segment.speaker = Some(format!("speaker-{index}"));
+                    segments.push(segment);
+                }
+                Ok(AsrResponse {
+                    model_id: request.model_id,
+                    language: Some("en".into()),
+                    transcript: transcription_from_segments(
+                        request.audio.source,
+                        Some("en".into()),
+                        segments,
+                    )?,
+                    diagnostics: Vec::new(),
+                })
+            }
+        }
+        struct OverlappingAlignment;
+        impl ForcedAlignmentProvider for OverlappingAlignment {
+            fn provider_id(&self) -> &str {
+                "frozen-ctc"
+            }
+            fn align(&mut self, request: AlignmentRequest) -> Result<AlignmentResponse> {
+                // Relative timings from Native WhisperX #372's minimized real CTC result.
+                Ok(AlignmentResponse {
+                    model_id: request.model_id,
+                    words: vec![
+                        AlignedWord {
+                            segment_index: 164,
+                            word_index: 0,
+                            text: "And...".into(),
+                            start_seconds: 0.35416666666669,
+                            end_seconds: 0.47916666666669,
+                            confidence: None,
+                        },
+                        AlignedWord {
+                            segment_index: 165,
+                            word_index: 0,
+                            text: "It's".into(),
+                            start_seconds: 0.34156862745098,
+                            end_seconds: 0.45,
+                            confidence: None,
+                        },
+                    ],
+                    chars: vec![AlignedChar {
+                        segment_index: 164,
+                        char_index: 0,
+                        character: "A".into(),
+                        start_seconds: Some(0.35416666666669),
+                        end_seconds: Some(0.4),
+                        confidence: None,
+                    }],
+                    diagnostics: Vec::new(),
+                })
+            }
+        }
+        let mut request = sample_request();
+        request.source = TranscriptionSource::Samples {
+            samples: vec![0.1; 32_000],
+            sample_rate: 16_000,
+            channels: 1,
+            source: Some("overlap.wav".into()),
+        };
+        request.alignment.enabled = true;
+        let mut vad = FixedVadProvider {
+            segments: vec![SpeechActivitySegment::new(0.0, 2.0, 1.0).unwrap()],
+        };
+        let result = run_transcription_pipeline(
+            request,
+            &mut vad,
+            &mut OverlappingAsr,
+            Some(&mut OverlappingAlignment),
+            None,
+        )
+        .expect("overlapping alignment must produce valid chronological segments");
+        let transcript = result.transcript;
+        transcript.validate_strict().unwrap();
+        assert_eq!(
+            transcript
+                .segments
+                .iter()
+                .map(|segment| segment.index)
+                .collect::<Vec<_>>(),
+            vec![165, 164]
+        );
+        assert_eq!(transcript.segments[0].text, "It's probably just a-");
+        assert_eq!(transcript.segments[0].words()[0].text, "It's");
+        assert_eq!(
+            transcript.segments[0].start_seconds(),
+            Some(0.34156862745098)
+        );
+        assert_eq!(
+            transcript.segments[0].speaker.as_deref(),
+            Some("speaker-165")
+        );
+        assert_eq!(transcript.segments[1].text, "And...");
+        assert_eq!(transcript.segments[1].words()[0].text, "And...");
+        assert_eq!(transcript.segments[1].chars()[0].character, "A");
+        assert_eq!(
+            transcript.segments[1].start_seconds(),
+            Some(0.35416666666669)
+        );
+        assert_eq!(
+            transcript.segments[1].speaker.as_deref(),
+            Some("speaker-164")
+        );
+        assert_eq!(
+            transcript.text.as_deref(),
+            Some("It's probably just a- And...")
+        );
     }
 
     #[test]

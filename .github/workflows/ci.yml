@@ -76,3 +76,22 @@ jobs:
       - name: Deactivate source dependencies
         if: always()
         run: bash scripts/source-deps deactivate
+
+  structural-validation:
+    uses: ./.github/workflows/structural-ci.yml
+
+  runtime-validation:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/runtime-evidence.yml
+
+  merge-ready:
+    name: ${{ github.event_name == 'pull_request' && 'merge-ready' || 'validation-summary' }}
+    if: ${{ always() }}
+    needs: [verification, structural-validation, runtime-validation]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: moritzbrantner/reusable-workflows/.github/actions/merge-ready@b0f25f241d76af2584dfc9e375084ff5c5cb97da
+        with:
+          needs: ${{ toJSON(needs) }}
+          required: '["verification", "structural-validation", "runtime-validation"]'
+          allow-skipped: ${{ github.event_name == 'pull_request' && '[]' || '["runtime-validation"]' }}

@@ -1,8 +1,7 @@
 name: Runtime evidence and Moonlight
 
 on:
-  pull_request:
-    branches: [main]
+  workflow_call:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}

@@ -16,6 +16,18 @@ const BROWSER_TRANSCRIPTION_MODELS = Object.freeze([
   }),
 ]);
 const DEFAULT_BROWSER_MODEL_ID = BROWSER_TRANSCRIPTION_MODELS[0].id;
+// lang_to_id shared by the three curated multilingual Whisper generation configs.
+const BROWSER_TRANSCRIPTION_LANGUAGES = Object.freeze([
+  "af", "am", "ar", "as", "az", "ba", "be", "bg", "bn", "bo", "br", "bs",
+  "ca", "cs", "cy", "da", "de", "el", "en", "es", "et", "eu", "fa", "fi",
+  "fo", "fr", "gl", "gu", "ha", "haw", "he", "hi", "hr", "ht", "hu", "hy",
+  "id", "is", "it", "ja", "jw", "ka", "kk", "km", "kn", "ko", "la", "lb",
+  "ln", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms", "mt",
+  "my", "ne", "nl", "nn", "no", "oc", "pa", "pl", "ps", "pt", "ro", "ru",
+  "sa", "sd", "si", "sk", "sl", "sn", "so", "sq", "sr", "su", "sv", "sw",
+  "ta", "te", "tg", "th", "tk", "tl", "tr", "tt", "uk", "ur", "uz", "vi",
+  "yi", "yo", "zh",
+]);
 const TRANSFORMERS_MODULE_URL =
   "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1";
 const BROWSER_SAMPLE_RATE_HZ = 16_000;
@@ -58,12 +70,28 @@ export function browserTranscriptionModels() {
   return BROWSER_TRANSCRIPTION_MODELS.map((model) => ({ ...model }));
 }
 
+export function browserTranscriptionLanguages() {
+  return [...BROWSER_TRANSCRIPTION_LANGUAGES];
+}
+
+function resolveBrowserLanguage(raw) {
+  if (raw == null) return null;
+  if (typeof raw !== "string") throw new TypeError("Browser transcription language must be a language code.");
+  const language = raw.trim().toLowerCase();
+  if (!language) return null;
+  if (!BROWSER_TRANSCRIPTION_LANGUAGES.includes(language)) {
+    throw new RangeError(`Unsupported browser transcription language: ${language}. Choose a supported Whisper language or automatic detection.`);
+  }
+  return language;
+}
+
 export function browserTranscriptionCapabilities() {
   return {
     runtime: BROWSER_RUNTIME_ID,
     requiredAcceleration: "webgpu",
     modelId: DEFAULT_BROWSER_MODEL_ID,
     models: browserTranscriptionModels(),
+    languages: browserTranscriptionLanguages(),
     modelProvisioning: "browser-cache",
     modelLifecycle: {
       maxIdleResidentModels: 1,
@@ -221,7 +249,8 @@ export async function transcribeAudioBlob(source, options = {}) {
 export async function transcribeAudioSamples(samples, options = {}) {
   validatePcmSamples(samples);
   const model = resolveBrowserModel(options.modelId);
-  const modelOptions = { ...options, modelId: model.id };
+  const language = resolveBrowserLanguage(options.language);
+  const modelOptions = { ...options, modelId: model.id, language };
   const lease = await acquireTranscriber(modelOptions);
 
   try {
@@ -234,12 +263,14 @@ export async function transcribeAudioSamples(samples, options = {}) {
       stride_length_s: DEFAULT_STRIDE_SECONDS,
       return_timestamps: true,
       task: "transcribe",
+      ...(language ? { language } : {}),
     });
     return normalizeBrowserTranscriptionOutput(output, {
       durationSeconds:
         finiteOrNull(options.durationSeconds) ?? samples.length / BROWSER_SAMPLE_RATE_HZ,
       source: typeof options.source === "string" ? options.source : "browser-audio",
       modelId: model.id,
+      language,
     });
   } finally {
     await lease.release();
@@ -469,7 +500,8 @@ export function createBrowserDecodedAudioTranscriptionSession(options = {}) {
 export function createBrowserTranscriptionSession(options = {}) {
   const plan = browserTranscriptionWindowPlan(options);
   const model = resolveBrowserModel(options.modelId);
-  const modelOptions = { ...options, modelId: model.id };
+  const language = resolveBrowserLanguage(options.language);
+  const modelOptions = { ...options, modelId: model.id, language };
   const source = typeof options.source === "string" ? options.source : "browser-pcm-stream";
   const queue = createPcmQueue();
   const committedSegments = [];
@@ -507,6 +539,7 @@ export function createBrowserTranscriptionSession(options = {}) {
         stride_length_s: 0,
         return_timestamps: true,
         task: "transcribe",
+        ...(language ? { language } : {}),
       });
     } finally {
       await lease.release();
@@ -516,6 +549,7 @@ export function createBrowserTranscriptionSession(options = {}) {
       offsetSeconds: windowStartSeconds,
       source,
       modelId: model.id,
+      language,
     });
     const commitUntilSeconds = final ? Infinity : windowStartSeconds + plan.stepSeconds;
     const stitched = stitchBrowserTranscriptionWindow(normalized.segments, {
@@ -589,7 +623,7 @@ export function createBrowserTranscriptionSession(options = {}) {
 
     return {
       text: committedSegments.map((segment) => segment.text).join(" ").trim(),
-      language: null,
+      language,
       segments: committedSegments.slice(),
       source,
       attributes: {
@@ -849,6 +883,7 @@ export async function createBrowserMediaStreamTranscriptionSession(stream, optio
 }
 
 export function normalizeBrowserTranscriptionOutput(output, context = {}) {
+  const language = resolveBrowserLanguage(context.language);
   const model = resolveBrowserModel(context.modelId);
   const text = normalizeBrowserTranscriptText(output?.text);
   const durationSeconds = finiteOrNull(context.durationSeconds);
@@ -867,7 +902,7 @@ export function normalizeBrowserTranscriptionOutput(output, context = {}) {
         startSeconds: addOffset(finiteOrNull(timestamp[0]), offsetSeconds),
         endSeconds: addOffset(finiteOrNull(timestamp[1]), offsetSeconds),
         text: segmentText,
-        language: null,
+        language,
         speaker: null,
         confidence: null,
         isFinal: true,
@@ -884,7 +919,7 @@ export function normalizeBrowserTranscriptionOutput(output, context = {}) {
 
   return {
     text: text || segments.map((segment) => segment.text).join(" "),
-    language: null,
+    language,
     segments,
     source: typeof context.source === "string" ? context.source : "browser-audio",
     attributes: {

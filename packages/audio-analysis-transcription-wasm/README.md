@@ -95,3 +95,19 @@ capabilities rather than being approximated in this browser adapter.
 bun run --cwd packages/audio-analysis-transcription-wasm build
 bun run --cwd packages/audio-analysis-transcription-wasm test
 ```
+
+## Explicit source language
+
+`browserTranscriptionLanguages()` returns the 99 language codes shared by the
+curated Tiny/Base/Small multilingual models' `generation_config.json` `lang_to_id`
+registries. Pass one as `language` to a finite or bounded transcription request,
+for example `{ language: "ja" }`. Omit it or pass a blank string for automatic
+detection. Unsupported codes fail before model acquisition. Language is a per-call
+choice, so a resident model can serve different languages without retaining the
+previous request's setting. Returned language is the explicit requested code;
+automatic results remain `null` because this adapter does not receive detected
+language metadata from its current provider.
+
+The browser entry remains the existing single-file JavaScript distribution
+surface consumed directly by static consumers. Its TypeScript declarations cover
+the new option and catalog; this change does not introduce a parallel runtime.

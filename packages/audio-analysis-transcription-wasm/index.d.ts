@@ -41,6 +41,8 @@ export type BrowserTranscriptionModel = {
 };
 
 export type BrowserTranscriptionOptions = {
+  /** ISO language code from browserTranscriptionLanguages(); omitted/blank enables detection. */
+  language?: string;
   source?: string;
   durationSeconds?: number;
   modelId?: string;
@@ -88,6 +90,7 @@ export type BrowserTranscriptionWindowPlan = {
 };
 
 export type BrowserTranscriptionCapabilities = {
+  languages: string[];
   runtime: string;
   requiredAcceleration: "webgpu";
   modelId: string;
@@ -164,6 +167,7 @@ export function init(): Promise<unknown>;
 export function packageSurface(): Promise<PackageSurface>;
 export function runOperation(request: SurfaceRequest): Promise<SurfaceResponse>;
 export function browserTranscriptionModels(): BrowserTranscriptionModel[];
+export function browserTranscriptionLanguages(): string[];
 export function browserTranscriptionCapabilities(): BrowserTranscriptionCapabilities;
 export function browserTranscriptionWindowPlan(
   options?: BrowserTranscriptionWindowOptions,
@@ -215,6 +219,7 @@ export function normalizeBrowserTranscriptionOutput(
   context?: {
     durationSeconds?: number;
     offsetSeconds?: number;
+    language?: string;
     source?: string;
     modelId?: string;
   },

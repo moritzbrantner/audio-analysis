@@ -9,7 +9,8 @@
     "index.d.ts",
     "index.js",
     "pkg",
-    "README.md"
+    "README.md",
+    "alignment.ts"
   ],
   "main": "./index.js",
   "types": "./index.d.ts",
@@ -18,10 +19,16 @@
       "types": "./index.d.ts",
       "import": "./index.js",
       "default": "./index.js"
-    }
+    },
+    "./alignment": "./alignment.ts"
   },
   "scripts": {
     "build": "bash scripts/build-wasm.sh",
-    "test": "bash -lc 'bun test --parallel=\"${BUN_TEST_WORKERS:-${TEST_MAX_WORKERS:-2}}\" --max-concurrency=\"${BUN_TEST_MAX_CONCURRENCY:-${TEST_MAX_CONCURRENCY:-2}}\" tests'"
+    "test": "bun run typecheck:alignment && bash -lc 'bun test --parallel=\"${BUN_TEST_WORKERS:-${TEST_MAX_WORKERS:-2}}\" --max-concurrency=\"${BUN_TEST_MAX_CONCURRENCY:-${TEST_MAX_CONCURRENCY:-2}}\" tests'",
+    "typecheck:alignment": "tsc --noEmit -p tsconfig.alignment.json"
+  },
+  "devDependencies": {
+    "onnxruntime-web": "1.30.0",
+    "typescript": "7.0.2"
   }
 }

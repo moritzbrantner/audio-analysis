@@ -1,13 +1,17 @@
 #![doc = include_str!("../README.md")]
 
+mod library_transfer;
+pub use library_transfer::{
+    SpeakerLibraryImportMode, SpeakerLibraryImportPlan, SpeakerLibraryImportReceipt,
+    SpeakerLibraryImportSummary,
+};
+
 #[cfg(feature = "pyannote-diarization")]
 pub mod pyannote;
 pub mod surface;
 use std::collections::BTreeMap;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use audio_analysis_core::{interleaved_to_mono, rms, zero_pad_to, ChannelMix, FrameSpec};
 pub use audio_analysis_recognition::AudioRuntime;
@@ -1131,15 +1135,16 @@ impl SpeakerLibrary {
 
     /// Converts this value to JSON string.
     pub fn to_json_string(&self) -> Result<String> {
+        if self.is_empty() {
+            return library_transfer::empty_document_json();
+        }
         serde_json::to_string_pretty(&self.to_snapshot()?)
             .map_err(|err| DetectError::Source(err.to_string()))
     }
 
     /// Builds this value from JSON str.
     pub fn from_json_str(json: &str) -> Result<Self> {
-        let snapshot = serde_json::from_str::<SpeakerLibrarySnapshot>(json)
-            .map_err(|err| DetectError::Source(err.to_string()))?;
-        Self::from_snapshot(snapshot)
+        library_transfer::parse_document(json)
     }
 
     /// Loads and validates a canonical Speaker Library snapshot from a caller-owned path.
@@ -1171,71 +1176,7 @@ impl SpeakerLibrary {
 
     /// Serializes, validates, and atomically promotes this library at a caller-owned path.
     pub fn save(&self, path: impl AsRef<Path>) -> Result<()> {
-        let path = path.as_ref();
-        if self.is_empty() {
-            return match fs::remove_file(path) {
-                Ok(()) => Ok(()),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                Err(error) => Err(DetectError::Source(format!(
-                    "failed to remove empty Speaker Library `{}`: {error}",
-                    path.display()
-                ))),
-            };
-        }
-        let json = self.to_json_string()?;
-        let _ = Self::from_json_str(&json)?;
-        let parent = path.parent().ok_or_else(|| {
-            DetectError::InvalidArgument(
-                "Speaker Library path must have a parent directory".to_string(),
-            )
-        })?;
-        fs::create_dir_all(parent).map_err(|error| {
-            DetectError::Source(format!(
-                "failed to create Speaker Library directory `{}`: {error}",
-                parent.display()
-            ))
-        })?;
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|error| {
-                DetectError::Source(format!(
-                    "failed to create Speaker Library temporary name: {error}"
-                ))
-            })?
-            .as_nanos();
-        let temporary = parent.join(format!(
-            ".{}.{}.tmp",
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("library"),
-            nonce
-        ));
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)
-            .map_err(|error| {
-                DetectError::Source(format!(
-                    "failed to create Speaker Library temporary file `{}`: {error}",
-                    temporary.display()
-                ))
-            })?;
-        file.write_all(json.as_bytes())
-            .and_then(|_| file.sync_all())
-            .map_err(|error| {
-                let _ = fs::remove_file(&temporary);
-                DetectError::Source(format!(
-                    "failed to write Speaker Library `{}`: {error}",
-                    path.display()
-                ))
-            })?;
-        fs::rename(&temporary, path).map_err(|error| {
-            let _ = fs::remove_file(&temporary);
-            DetectError::Source(format!(
-                "failed to atomically save Speaker Library `{}`: {error}",
-                path.display()
-            ))
-        })
+        library_transfer::save_legacy(self, path.as_ref())
     }
 
     fn validate_model(&self, model: &SpeakerEmbeddingModel) -> Result<()> {
@@ -1248,7 +1189,8 @@ impl SpeakerLibrary {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-/// Stable serialized speaker library format.
+/// Stable populated speaker library snapshot. Canonical JSON additionally
+/// supports an empty library with no embedding model.
 pub struct SpeakerLibrarySnapshot {
     /// Snapshot format version.
     pub version: u32,

@@ -17,6 +17,7 @@
     "crates/bindings/audio-analysis-core-wasm",
     "crates/bindings/audio-analysis-pitch-wasm",
     "crates/bindings/audio-analysis-rhythm-wasm",
+    "crates/bindings/audio-analysis-speakers-wasm",
     "crates/bindings/audio-analysis-transcription-wasm",
     "packages/audio-analysis-core-app",
     "packages/audio-analysis-core-wasm",
@@ -61,6 +62,7 @@
     "packages/audio-analysis-transcription-wasm": "destination policy makes the active Native WhisperX source-closure WASM package private until an independent npm consumer justifies publication",
     "crates/audio/audio-analysis-core": "owns reusable FFT/STFT/spectral computation for pitch, rhythm, and recognition while Fourier preserves its existing compatibility surface; adds destination-owned generic capture-quality metrics (clipping, no-input, activity) for capture-quality consumers",
     "crates/bindings/audio-analysis-core-wasm": "adds the destination-owned typed capture-metrics PCM bridge (no surface sample limit) while delegating measurement to audio_analysis_core::capture_metrics",
-    "crates/bindings/audio-analysis-transcription-wasm": "exposes the destination-owned portable CTC alignment operation to browser consumers while preserving native algorithm ownership"
+    "crates/bindings/audio-analysis-transcription-wasm": "exposes the destination-owned portable CTC alignment operation to browser consumers while preserving native algorithm ownership",
+    "crates/bindings/audio-analysis-speakers-wasm": "exposes approved community diarization masking, PLDA/VBx and reconstruction through portable destination-owned Rust operations"
   }
 }

@@ -1,0 +1,28 @@
+{
+  "donors": {
+    "segmentation-community-1.onnx": {
+      "url": "https://huggingface.co/altunenes/speaker-diarization-community-1-onnx/resolve/e2e09da94ae093a56cd5a60a09b138ae3da1959c/segmentation-community-1.onnx",
+      "sha256": "62d59a487d8ba877d0bd1638c53aa06a810bdb104fb776a27ec2204521711006"
+    },
+    "wespeaker.onnx": {
+      "url": "https://huggingface.co/onnx-community/wespeaker-voxceleb-resnet34-LM/resolve/6a61a1833ff2583aabeba044f5c8221f00b67ceb/onnx/model.onnx",
+      "sha256": "3955447b0499dc9e0a4541a895df08b03c69098eba4e56c02b5603e9f7f4fcbb"
+    }
+  },
+  "models": {
+    "segmentation.onnx": {
+      "donor": "segmentation-community-1.onnx",
+      "sha256": "cbfb788c5156fc802ecf2a9772c0dd88e3dadc4ca8645f11b565870749a5259b",
+      "bytes": 5928616,
+      "templateSha256": "87830fd2ac28e9a1aaef1be9d33d3b86a18cc154182447ba5a5aa2676ed33542",
+      "recipeSha256": "569e34f2a5b6fa88832dcb794085c2af23c5ef753a5c87854219ac405e0d4401"
+    },
+    "embedding.onnx": {
+      "donor": "wespeaker.onnx",
+      "sha256": "ea25e8c1c6d08c79e4b812dd00f7044969115f475b5cb94d9601f670ef1d1c47",
+      "bytes": 27225490,
+      "templateSha256": "86993df6492c2142e3af30e5d38d3fc695307f65052f69a6a7cb246fb5fe4b8d",
+      "recipeSha256": "42e1b5275589e1f7585071650799205922f0c68f53b6fe7f30eadea31047037b"
+    }
+  }
+}

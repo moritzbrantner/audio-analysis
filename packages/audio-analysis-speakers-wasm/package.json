@@ -9,7 +9,10 @@
     "index.d.ts",
     "index.js",
     "pkg",
-    "README.md"
+    "README.md",
+    "resources.ts",
+    "community-profile.ts",
+    "community.ts"
   ],
   "main": "./index.js",
   "types": "./index.d.ts",
@@ -18,10 +21,19 @@
       "types": "./index.d.ts",
       "import": "./index.js",
       "default": "./index.js"
-    }
+    },
+    "./resources": "./resources.ts",
+    "./community": "./community.ts"
   },
   "scripts": {
     "build": "bash scripts/build-wasm.sh",
-    "test": "bash -lc 'bun test --parallel=\"${BUN_TEST_WORKERS:-${TEST_MAX_WORKERS:-2}}\" --max-concurrency=\"${BUN_TEST_MAX_CONCURRENCY:-${TEST_MAX_CONCURRENCY:-2}}\" tests'"
+    "test": "bun run typecheck:community && bash -lc 'bun test --parallel=\"${BUN_TEST_WORKERS:-${TEST_MAX_WORKERS:-2}}\" --max-concurrency=\"${BUN_TEST_MAX_CONCURRENCY:-${TEST_MAX_CONCURRENCY:-2}}\" tests'",
+    "typecheck:community": "tsc --noEmit -p tsconfig.community.json"
+  },
+  "devDependencies": {
+    "fflate": "0.8.3",
+    "npyjs": "1.2.0",
+    "onnxruntime-web": "1.30.0",
+    "typescript": "7.0.2"
   }
 }

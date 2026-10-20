@@ -15,10 +15,13 @@ pub mod trace;
 pub mod vbx;
 
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(feature = "pyannote-diarization")]
 use std::fs;
+#[cfg(feature = "pyannote-diarization")]
 use std::path::{Path, PathBuf};
 
 use audio_contracts::{DetectError, Result};
+#[cfg(feature = "pyannote-diarization")]
 use runtime_onnx::{
     f32_output_by_name_or_index, first_f32_output, single_f32_input, OnnxDimension, OnnxF32Tensor,
     OnnxIoInfo, OnnxRunner, OnnxSession, OnnxSessionMetadata, OnnxTensorElementType,
@@ -27,16 +30,25 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    AudioRuntime, SpeakerAudio, SpeakerDiarizationResponse, SpeakerEmbedding,
-    SpeakerEmbeddingModel, SpeakerEmbeddingModelFamily, SpeakerSegmentPrediction,
+    AudioRuntime, SpeakerDiarizationResponse, SpeakerEmbedding, SpeakerEmbeddingModel,
+    SpeakerEmbeddingModelFamily, SpeakerSegmentPrediction,
 };
 
+#[cfg(feature = "pyannote-diarization")]
+use crate::SpeakerAudio;
+
 const SAMPLE_RATE: u32 = 16_000;
+#[cfg(feature = "pyannote-diarization")]
 const DEFAULT_MANIFEST_FILE: &str = "pyannote_diarization_manifest.json";
+#[cfg(feature = "pyannote-diarization")]
 const DEFAULT_SEGMENTATION_MODEL_FILE: &str = "segmentation.onnx";
+#[cfg(feature = "pyannote-diarization")]
 const DEFAULT_EMBEDDING_MODEL_FILE: &str = "embedding.onnx";
+#[cfg(feature = "pyannote-diarization")]
 const DEFAULT_PLDA_TRANSFORM_FILE: &str = "plda_transform.json";
+#[cfg(feature = "pyannote-diarization")]
 const DEFAULT_PLDA_MODEL_FILE: &str = "plda_model.json";
+#[cfg(feature = "pyannote-diarization")]
 const DEFAULT_CLUSTERING_CONFIG_FILE: &str = "clustering.json";
 const DEFAULT_MODEL_ID: &str = "pyannote/speaker-diarization-community-1";
 const PINNED_SOURCE_REVISION: &str = "3533c8cf8e369892e6b79ff1bf80f7b0286a54ee";
@@ -53,6 +65,7 @@ const SEGMENTATION_FRAME_OFFSET_SECONDS: f64 = 0.030_968_75;
 const EMBEDDING_MIN_CLEAN_FRAMES: usize = 2;
 
 /// Native pyannote community diarizer configuration.
+#[cfg(feature = "pyannote-diarization")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PyannoteCommunityDiarizationConfig {
     pub bundle_path: PathBuf,
@@ -80,6 +93,7 @@ pub struct PyannoteCommunityDiarizationResult {
 /// Inspection verifies the provider-owned provenance, manifest, checksums,
 /// companion files, and ONNX tensor contracts without constructing an ONNX
 /// inference session or loading model weights.
+#[cfg(feature = "pyannote-diarization")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PyannoteCommunityDiarizationBundleReport {
@@ -94,6 +108,7 @@ pub struct PyannoteCommunityDiarizationBundleReport {
 }
 
 /// ONNX-backed pyannote community diarizer.
+#[cfg(feature = "pyannote-diarization")]
 #[derive(Debug)]
 pub struct PyannoteCommunityDiarizer {
     manifest: PyannoteDiarizationManifest,
@@ -104,6 +119,7 @@ pub struct PyannoteCommunityDiarizer {
     config: ResolvedPyannoteConfig,
 }
 
+#[cfg(feature = "pyannote-diarization")]
 #[derive(Debug, Clone)]
 struct ResolvedPyannoteConfig {
     bundle_path: PathBuf,
@@ -203,6 +219,7 @@ struct SegmentationBatch {
 #[derive(Debug, Clone)]
 struct SegmentationWindow {
     start_seconds: f64,
+    #[cfg(feature = "pyannote-diarization")]
     samples: Vec<f32>,
     scores: Vec<f32>,
 }
@@ -222,6 +239,7 @@ struct AssignedLocalSpeaker {
     speaker: usize,
 }
 
+#[cfg(feature = "pyannote-diarization")]
 impl PyannoteCommunityDiarizer {
     /// Builds a pyannote community diarizer from a local ONNX bundle.
     pub fn from_config(config: PyannoteCommunityDiarizationConfig) -> Result<Self> {
@@ -275,103 +293,19 @@ impl PyannoteCommunityDiarizer {
         let samples = audio.samples();
         let segmentations = self.run_segmentations(samples)?;
         let embeddings = self.run_embeddings(&segmentations)?;
-        let vbx = vbx::cluster(
-            &embeddings
-                .iter()
-                .map(|embedding| vbx::VbxEmbedding {
-                    chunk: embedding.chunk,
-                    local_speaker: embedding.local_speaker,
-                    clean_frames: embedding.clean_frames,
-                    values: &embedding.values,
-                })
-                .collect::<Vec<_>>(),
-            self.manifest.segmentation.frames,
-            self.config.min_speakers,
-            self.config.max_speakers,
-            &self.plda,
-            &self.clustering,
-        )?;
-        let posterior_iterations = vbx.posterior_iterations;
-        let training_embeddings = vbx.training_embeddings;
-        let automatic_speakers = vbx.automatic_speakers;
-        let retained_speakers = vbx.retained_speakers;
-        let assignments = vbx
-            .assignments
-            .into_iter()
-            .map(|assignment| AssignedLocalSpeaker {
-                chunk: assignment.chunk,
-                local_speaker: assignment.local_speaker,
-                speaker: assignment.speaker,
-            })
-            .collect::<Vec<_>>();
-        let segments = reconstruct_segments(&self.manifest, &segmentations, &assignments)?;
-        let speaker_count = segments
-            .iter()
-            .map(|segment| segment.speaker.clone())
-            .collect::<BTreeSet<_>>()
-            .len();
-        let speaker_embeddings = if self.config.return_speaker_embeddings {
-            Some(speaker_embedding_map(
-                &self.manifest,
-                &embeddings,
-                &assignments,
-            )?)
-        } else {
-            None
-        };
-        let diagnostics = vec![
-            "diarizationProvider=pyannote".to_string(),
-            "diarizationRuntime=onnx".to_string(),
-            "pyannoteOnnxGraphOptimization=default".to_string(),
-            format!("diarizationModel={}", self.manifest.model_id),
-            format!("pyannoteSourceRevision={}", self.manifest.source.revision),
-            format!("diarizationSpeakerCount={speaker_count}"),
-            format!(
-                "diarizationMinSpeakers={}",
-                format_optional_usize(self.config.min_speakers)
-            ),
-            format!(
-                "diarizationMaxSpeakers={}",
-                format_optional_usize(self.config.max_speakers)
-            ),
-            format!(
-                "pyannoteSegmentationWindows={}",
-                segmentations.windows.len()
-            ),
-            format!("pyannoteSegmentationFrames={}", segmentations.total_frames),
-            format!("pyannoteEmbeddingCount={}", embeddings.len()),
-            format!(
-                "pyannoteEmbeddingDimension={}",
-                self.manifest.embedding.dimension
-            ),
-            "pyannoteClustering=vbx".to_string(),
-            format!("pyannoteVbxFa={}", self.clustering.fa),
-            format!("pyannoteVbxFb={}", self.clustering.fb),
-            format!("pyannoteVbxPosteriorIterations={}", posterior_iterations),
-            format!("pyannoteVbxTrainingEmbeddings={training_embeddings}"),
-            format!("pyannoteVbxAutomaticSpeakers={automatic_speakers}"),
-            format!("pyannoteVbxRetainedSpeakers={retained_speakers}"),
-            format!(
-                "pyannoteArtifactSetSha256={}",
-                self.manifest.artifact_set_sha256
-            ),
-            "pyannotePldaTransform=applied".to_string(),
-            "pyannotePldaModel=applied".to_string(),
-            "pyannoteConstrainedAssignment=applied".to_string(),
-            "speakerEmbeddingProvider=pyannote-onnx".to_string(),
-        ];
-        Ok(PyannoteCommunityDiarizationResult {
-            response: SpeakerDiarizationResponse {
-                accepted: true,
-                operation: "audio.speakers.diarize".to_string(),
-                model_id: self.manifest.model_id.clone(),
-                runtime: AudioRuntime::Onnx,
-                segments,
-                speaker_embeddings,
-                diagnostics: diagnostics.clone(),
+        finish_diarization(
+            &CommunityProcessingContext {
+                manifest: &self.manifest,
+                plda: &self.plda,
+                clustering: &self.clustering,
+                min_speakers: self.config.min_speakers,
+                max_speakers: self.config.max_speakers,
+                return_speaker_embeddings: self.config.return_speaker_embeddings,
+                runtime: "onnx",
             },
-            diagnostics,
-        })
+            &segmentations,
+            &embeddings,
+        )
     }
 
     fn run_segmentations(&mut self, samples: &[f32]) -> Result<SegmentationBatch> {
@@ -428,25 +362,10 @@ impl PyannoteCommunityDiarizer {
     ) -> Result<Vec<LocalSpeakerEmbedding>> {
         let mut embeddings = Vec::new();
         for (chunk, window) in segmentations.windows.iter().enumerate() {
-            for local_speaker in 0..self.manifest.segmentation.local_speakers {
-                let full_mask = speaker_mask(&self.manifest, window, local_speaker);
-                let active_frames = full_mask
-                    .iter()
-                    .filter(|value| **value > ACTIVE_THRESHOLD)
-                    .count();
-                let clean_mask = clean_speaker_mask(&self.manifest, window, local_speaker);
-                let clean_frames = clean_mask
-                    .iter()
-                    .filter(|value| **value > ACTIVE_THRESHOLD)
-                    .count();
-                if active_frames == 0 {
-                    continue;
-                }
-                let mask = if clean_frames > EMBEDDING_MIN_CLEAN_FRAMES {
-                    clean_mask
-                } else {
-                    full_mask
-                };
+            for request in embedding_requests(&self.manifest, window) {
+                let local_speaker = request.local_speaker;
+                let clean_frames = request.clean_frames;
+                let mask = request.mask;
                 let waveform = single_f32_input(
                     self.manifest.embedding.waveform_input_name.clone(),
                     vec![1, 1, window.samples.len()],
@@ -482,6 +401,7 @@ impl PyannoteCommunityDiarizer {
     }
 }
 
+#[cfg(feature = "pyannote-diarization")]
 struct InspectedPyannoteCommunityBundle {
     resolved: ResolvedPyannoteConfig,
     manifest: PyannoteDiarizationManifest,
@@ -494,6 +414,7 @@ struct InspectedPyannoteCommunityBundle {
 /// The provider owns this contract: supported model and revision, required
 /// bundle files, provenance, checksums, and static ONNX tensor names/shapes.
 /// The function performs no network access and does not load ONNX weights.
+#[cfg(feature = "pyannote-diarization")]
 pub fn inspect_pyannote_community_diarization_bundle(
     config: PyannoteCommunityDiarizationConfig,
 ) -> Result<PyannoteCommunityDiarizationBundleReport> {
@@ -510,6 +431,7 @@ pub fn inspect_pyannote_community_diarization_bundle(
     })
 }
 
+#[cfg(feature = "pyannote-diarization")]
 fn inspect_bundle(
     config: PyannoteCommunityDiarizationConfig,
 ) -> Result<InspectedPyannoteCommunityBundle> {
@@ -541,6 +463,7 @@ fn inspect_bundle(
     })
 }
 
+#[cfg(feature = "pyannote-diarization")]
 fn required_bundle_paths(resolved: &ResolvedPyannoteConfig) -> Vec<PathBuf> {
     vec![
         resolved.manifest_path.clone(),
@@ -554,6 +477,7 @@ fn required_bundle_paths(resolved: &ResolvedPyannoteConfig) -> Vec<PathBuf> {
     ]
 }
 
+#[cfg(feature = "pyannote-diarization")]
 fn resolve_config(config: PyannoteCommunityDiarizationConfig) -> Result<ResolvedPyannoteConfig> {
     validate_speaker_bounds(config.min_speakers, config.max_speakers)?;
     let bundle_path = config.bundle_path;
@@ -614,6 +538,7 @@ fn resolve_config(config: PyannoteCommunityDiarizationConfig) -> Result<Resolved
     })
 }
 
+#[cfg(feature = "pyannote-diarization")]
 fn require_file(path: &Path, role: &str) -> Result<PathBuf> {
     if path.is_file() {
         Ok(path.to_path_buf())
@@ -624,6 +549,7 @@ fn require_file(path: &Path, role: &str) -> Result<PathBuf> {
     }
 }
 
+#[cfg(feature = "pyannote-diarization")]
 fn load_manifest(path: &Path) -> Result<PyannoteDiarizationManifest> {
     let text = fs::read_to_string(path).map_err(|error| {
         setup_error(format!(
@@ -682,6 +608,7 @@ fn validate_manifest(manifest: &PyannoteDiarizationManifest) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "pyannote-diarization")]
 fn validate_bundle_files(
     resolved: &ResolvedPyannoteConfig,
     manifest: &PyannoteDiarizationManifest,
@@ -747,10 +674,12 @@ fn validate_bundle_files(
     Ok(())
 }
 
+#[cfg(feature = "pyannote-diarization")]
 fn is_sha256(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+#[cfg(feature = "pyannote-diarization")]
 fn load_clustering(path: &Path) -> Result<vbx::VbxConfig> {
     serde_json::from_slice(
         &fs::read(path)
@@ -778,6 +707,7 @@ fn validate_clustering_matches_manifest(
     Ok(())
 }
 
+#[cfg(feature = "pyannote-diarization")]
 fn validate_segmentation_metadata(
     metadata: &OnnxSessionMetadata,
     manifest: &PyannoteDiarizationManifest,
@@ -804,6 +734,7 @@ fn validate_segmentation_metadata(
     )
 }
 
+#[cfg(feature = "pyannote-diarization")]
 fn validate_embedding_metadata(
     metadata: &OnnxSessionMetadata,
     manifest: &PyannoteDiarizationManifest,
@@ -829,6 +760,7 @@ fn validate_embedding_metadata(
     )
 }
 
+#[cfg(feature = "pyannote-diarization")]
 fn validate_onnx_io(
     values: &[OnnxIoInfo],
     expected_name: &str,
@@ -874,6 +806,7 @@ fn validate_onnx_io(
     Ok(())
 }
 
+#[cfg(any(test, feature = "pyannote-diarization"))]
 fn validate_speaker_bounds(min_speakers: Option<usize>, max_speakers: Option<usize>) -> Result<()> {
     if min_speakers == Some(0) {
         return Err(DetectError::InvalidArgument(
@@ -898,6 +831,7 @@ fn validate_speaker_bounds(min_speakers: Option<usize>, max_speakers: Option<usi
     Ok(())
 }
 
+#[cfg(feature = "pyannote-diarization")]
 fn seconds_to_samples(seconds: f64, sample_rate: u32) -> Result<usize> {
     if seconds <= 0.0 || !seconds.is_finite() {
         return Err(DetectError::InvalidArgument(
@@ -908,6 +842,7 @@ fn seconds_to_samples(seconds: f64, sample_rate: u32) -> Result<usize> {
     Ok((seconds * sample_rate as f64).round() as usize)
 }
 
+#[cfg(feature = "pyannote-diarization")]
 fn segmentation_scores(
     tensor: &OnnxF32Tensor,
     manifest: &PyannoteSegmentationManifest,
@@ -929,6 +864,7 @@ fn segmentation_scores(
     }
 }
 
+#[cfg(feature = "pyannote-diarization")]
 fn embedding_values(tensor: &OnnxF32Tensor, dimension: usize) -> Result<Vec<f32>> {
     match tensor.shape.as_slice() {
         [dim] if *dim == dimension => Ok(tensor.values.clone()),
@@ -1211,6 +1147,7 @@ fn setup_error(message: impl Into<String>) -> DetectError {
     DetectError::InvalidArgument(format!("setup_error: {}", message.into()))
 }
 
+#[cfg(feature = "pyannote-diarization")]
 fn map_onnx_session_error(error: runtime_onnx::OnnxRuntimeError) -> DetectError {
     match error {
         runtime_onnx::OnnxRuntimeError::InvalidArgument(_) => {
@@ -1223,6 +1160,7 @@ fn map_onnx_session_error(error: runtime_onnx::OnnxRuntimeError) -> DetectError 
     }
 }
 
+#[cfg(feature = "pyannote-diarization")]
 fn map_onnx_runtime_error(error: runtime_onnx::OnnxRuntimeError) -> DetectError {
     DetectError::InvalidArgument(format!("model_output_mismatch: {error}"))
 }
@@ -1381,6 +1319,7 @@ mod tests {
         let manifest = manifest();
         let window = SegmentationWindow {
             start_seconds: 0.0,
+            #[cfg(feature = "pyannote-diarization")]
             samples: vec![0.0; SAMPLE_RATE as usize],
             scores: vec![0.1, 0.9, 0.2, 0.8, 0.3, 0.7, 0.4, 0.6],
         };
@@ -1399,6 +1338,7 @@ mod tests {
             audio_duration_seconds: 1.0,
             windows: vec![SegmentationWindow {
                 start_seconds: 0.0,
+                #[cfg(feature = "pyannote-diarization")]
                 samples: vec![0.0; SAMPLE_RATE as usize],
                 scores: vec![0.9, 0.1, 0.8, 0.1, 0.1, 0.9, 0.1, 0.8],
             }],
@@ -1423,6 +1363,7 @@ mod tests {
         assert_eq!(segments[1].speaker, "SPEAKER_01");
     }
 
+    #[cfg(feature = "pyannote-diarization")]
     fn io(name: &str, dimensions: &[usize]) -> OnnxIoInfo {
         OnnxIoInfo {
             name: name.to_string(),
@@ -1435,6 +1376,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "pyannote-diarization")]
     #[test]
     fn segmentation_metadata_requires_three_dimensional_waveform() {
         let manifest = manifest();
@@ -1450,6 +1392,7 @@ mod tests {
         assert!(error.to_string().contains("shape"), "{error}");
     }
 
+    #[cfg(feature = "pyannote-diarization")]
     #[test]
     fn embedding_metadata_requires_waveform_mask_and_embedding_contract() {
         let manifest = manifest();
@@ -1466,5 +1409,355 @@ mod tests {
         let mut wrong_type = valid;
         wrong_type.outputs[0].element_type = Some(OnnxTensorElementType::I64);
         assert!(validate_embedding_metadata(&wrong_type, &manifest).is_err());
+    }
+}
+
+/// A model-backed local speaker's embedding input, using the native clean-mask policy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CommunityEmbeddingRequest {
+    pub local_speaker: usize,
+    pub clean_frames: usize,
+    pub mask: Vec<f32>,
+}
+
+fn approved_manifest() -> &'static PyannoteDiarizationManifest {
+    static MANIFEST: std::sync::OnceLock<PyannoteDiarizationManifest> = std::sync::OnceLock::new();
+    MANIFEST.get_or_init(|| {
+        serde_json::from_str(include_str!(
+            "pyannote/community-1/pyannote_diarization_manifest.json"
+        ))
+        .expect("checked-in approved community manifest must be valid")
+    })
+}
+
+/// Builds masks from one approved community-1 segmentation output (589 by 3).
+/// No local speaker is invented for inactive frames or malformed model outputs.
+pub fn community_embedding_requests(scores: &[f32]) -> Result<Vec<CommunityEmbeddingRequest>> {
+    validate_community_scores(scores)?;
+    Ok(embedding_requests(
+        approved_manifest(),
+        &SegmentationWindow {
+            start_seconds: 0.0,
+            #[cfg(feature = "pyannote-diarization")]
+            samples: Vec::new(),
+            scores: scores.to_vec(),
+        },
+    ))
+}
+
+fn validate_community_scores(scores: &[f32]) -> Result<()> {
+    let manifest = approved_manifest();
+    if scores.len() != manifest.segmentation.frames * manifest.segmentation.local_speakers
+        || scores
+            .iter()
+            .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+    {
+        return Err(DetectError::InvalidArgument(
+            "invalid community-1 segmentation scores".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn embedding_requests(
+    manifest: &PyannoteDiarizationManifest,
+    window: &SegmentationWindow,
+) -> Vec<CommunityEmbeddingRequest> {
+    let mut requests = Vec::new();
+    for local_speaker in 0..manifest.segmentation.local_speakers {
+        let full_mask = speaker_mask(manifest, window, local_speaker);
+        if !full_mask.iter().any(|value| *value > ACTIVE_THRESHOLD) {
+            continue;
+        }
+        let clean_mask = clean_speaker_mask(manifest, window, local_speaker);
+        let clean_frames = clean_mask
+            .iter()
+            .filter(|value| **value > ACTIVE_THRESHOLD)
+            .count();
+        let mask = if clean_frames > EMBEDDING_MIN_CLEAN_FRAMES {
+            clean_mask
+        } else {
+            full_mask
+        };
+        requests.push(CommunityEmbeddingRequest {
+            local_speaker,
+            clean_frames,
+            mask,
+        });
+    }
+    requests
+}
+
+struct CommunityProcessingContext<'a> {
+    manifest: &'a PyannoteDiarizationManifest,
+    plda: &'a plda::Plda,
+    clustering: &'a vbx::VbxConfig,
+    min_speakers: Option<usize>,
+    max_speakers: Option<usize>,
+    return_speaker_embeddings: bool,
+    runtime: &'a str,
+}
+
+fn finish_diarization(
+    context: &CommunityProcessingContext<'_>,
+    segmentations: &SegmentationBatch,
+    embeddings: &[LocalSpeakerEmbedding],
+) -> Result<PyannoteCommunityDiarizationResult> {
+    let vbx = vbx::cluster(
+        &embeddings
+            .iter()
+            .map(|embedding| vbx::VbxEmbedding {
+                chunk: embedding.chunk,
+                local_speaker: embedding.local_speaker,
+                clean_frames: embedding.clean_frames,
+                values: &embedding.values,
+            })
+            .collect::<Vec<_>>(),
+        context.manifest.segmentation.frames,
+        context.min_speakers,
+        context.max_speakers,
+        context.plda,
+        context.clustering,
+    )?;
+    let posterior_iterations = vbx.posterior_iterations;
+    let training_embeddings = vbx.training_embeddings;
+    let automatic_speakers = vbx.automatic_speakers;
+    let retained_speakers = vbx.retained_speakers;
+    let assignments = vbx
+        .assignments
+        .into_iter()
+        .map(|assignment| AssignedLocalSpeaker {
+            chunk: assignment.chunk,
+            local_speaker: assignment.local_speaker,
+            speaker: assignment.speaker,
+        })
+        .collect::<Vec<_>>();
+    let segments = reconstruct_segments(context.manifest, segmentations, &assignments)?;
+    let speaker_count = segments
+        .iter()
+        .map(|segment| segment.speaker.clone())
+        .collect::<BTreeSet<_>>()
+        .len();
+    let speaker_embeddings = if context.return_speaker_embeddings {
+        Some(speaker_embedding_map(
+            context.manifest,
+            embeddings,
+            &assignments,
+        )?)
+    } else {
+        None
+    };
+    let diagnostics = vec![
+        "diarizationProvider=pyannote".to_string(),
+        format!("diarizationRuntime={}", context.runtime),
+        "pyannoteOnnxGraphOptimization=default".to_string(),
+        format!("diarizationModel={}", context.manifest.model_id),
+        format!(
+            "pyannoteSourceRevision={}",
+            context.manifest.source.revision
+        ),
+        format!("diarizationSpeakerCount={speaker_count}"),
+        format!(
+            "diarizationMinSpeakers={}",
+            format_optional_usize(context.min_speakers)
+        ),
+        format!(
+            "diarizationMaxSpeakers={}",
+            format_optional_usize(context.max_speakers)
+        ),
+        format!(
+            "pyannoteSegmentationWindows={}",
+            segmentations.windows.len()
+        ),
+        format!("pyannoteSegmentationFrames={}", segmentations.total_frames),
+        format!("pyannoteEmbeddingCount={}", embeddings.len()),
+        format!(
+            "pyannoteEmbeddingDimension={}",
+            context.manifest.embedding.dimension
+        ),
+        "pyannoteClustering=vbx".to_string(),
+        format!("pyannoteVbxFa={}", context.clustering.fa),
+        format!("pyannoteVbxFb={}", context.clustering.fb),
+        format!("pyannoteVbxPosteriorIterations={}", posterior_iterations),
+        format!("pyannoteVbxTrainingEmbeddings={training_embeddings}"),
+        format!("pyannoteVbxAutomaticSpeakers={automatic_speakers}"),
+        format!("pyannoteVbxRetainedSpeakers={retained_speakers}"),
+        format!(
+            "pyannoteArtifactSetSha256={}",
+            context.manifest.artifact_set_sha256
+        ),
+        "pyannotePldaTransform=applied".to_string(),
+        "pyannotePldaModel=applied".to_string(),
+        "pyannoteConstrainedAssignment=applied".to_string(),
+        "speakerEmbeddingProvider=pyannote-onnx".to_string(),
+    ];
+    Ok(PyannoteCommunityDiarizationResult {
+        response: SpeakerDiarizationResponse {
+            accepted: true,
+            operation: "audio.speakers.diarize".to_string(),
+            model_id: context.manifest.model_id.clone(),
+            runtime: AudioRuntime::Onnx,
+            segments,
+            speaker_embeddings,
+            diagnostics: diagnostics.clone(),
+        },
+        diagnostics,
+    })
+}
+
+/// Portable community-1 postprocessor. Inference remains caller-owned; this owns
+/// the same masking, PLDA/VBx and turn reconstruction as the native provider.
+#[derive(Debug)]
+pub struct CommunityDiarizationProcessor {
+    plda: plda::Plda,
+    clustering: vbx::VbxConfig,
+    sample_count: usize,
+    expected_windows: usize,
+    windows: Vec<SegmentationWindow>,
+    requested_embeddings: BTreeMap<(usize, usize), usize>,
+    embeddings: BTreeMap<(usize, usize), LocalSpeakerEmbedding>,
+}
+
+impl CommunityDiarizationProcessor {
+    /// Accepts only the approved checkpoint's checksummed companion artifacts.
+    /// The browser limit is one hour of finite 16 kHz mono audio.
+    pub fn from_resources(
+        transform: &[u8],
+        model: &[u8],
+        clustering: &[u8],
+        sample_count: usize,
+    ) -> Result<Self> {
+        if sample_count == 0 || sample_count > 16_000 * 3600 {
+            return Err(DetectError::InvalidArgument(
+                "community browser input must contain at most one hour of 16 kHz mono audio".into(),
+            ));
+        }
+        let manifest = approved_manifest();
+        validate_manifest(manifest)?;
+        for (name, bytes) in [
+            ("plda_transform.json", transform),
+            ("plda_model.json", model),
+            ("clustering.json", clustering),
+        ] {
+            if bytes.len() > 1024 * 1024
+                || manifest.files.get(name) != Some(&format!("{:x}", Sha256::digest(bytes)))
+            {
+                return Err(setup_error(format!("checksum mismatch for `{name}`")));
+            }
+        }
+        let plda = plda::Plda::from_json(transform, model)?;
+        let clustering = serde_json::from_slice(clustering)
+            .map_err(|error| setup_error(format!("invalid clustering configuration: {error}")))?;
+        validate_clustering_matches_manifest(&clustering, &manifest.clustering)?;
+        let window_samples =
+            (manifest.segmentation.duration_seconds * f64::from(SAMPLE_RATE)) as usize;
+        let step_samples = (window_samples as f64 * manifest.segmentation.step_ratio) as usize;
+        let expected_windows = 1 + sample_count
+            .saturating_sub(window_samples)
+            .div_ceil(step_samples);
+        Ok(Self {
+            plda,
+            clustering,
+            sample_count,
+            expected_windows,
+            windows: Vec::new(),
+            requested_embeddings: BTreeMap::new(),
+            embeddings: BTreeMap::new(),
+        })
+    }
+
+    /// Appends the next 10-second, zero-padded segmentation output on the 1-second grid.
+    pub fn push_segmentation(
+        &mut self,
+        scores: Vec<f32>,
+    ) -> Result<Vec<CommunityEmbeddingRequest>> {
+        if self.windows.len() >= self.expected_windows {
+            return Err(DetectError::InvalidArgument(
+                "too many community segmentation windows".into(),
+            ));
+        }
+        let requests = community_embedding_requests(&scores)?;
+        let chunk = self.windows.len();
+        for request in &requests {
+            self.requested_embeddings
+                .insert((chunk, request.local_speaker), request.clean_frames);
+        }
+        self.windows.push(SegmentationWindow {
+            start_seconds: chunk as f64
+                * approved_manifest().segmentation.duration_seconds
+                * approved_manifest().segmentation.step_ratio,
+            #[cfg(feature = "pyannote-diarization")]
+            samples: Vec::new(),
+            scores,
+        });
+        Ok(requests)
+    }
+
+    /// Records an actual ONNX embedding for a previously requested local speaker.
+    pub fn push_embedding(
+        &mut self,
+        chunk: usize,
+        local_speaker: usize,
+        values: Vec<f32>,
+    ) -> Result<()> {
+        let key = (chunk, local_speaker);
+        let clean_frames = self
+            .requested_embeddings
+            .get(&key)
+            .copied()
+            .ok_or_else(|| {
+                DetectError::InvalidArgument(
+                    "embedding was not requested by model-backed segmentation".into(),
+                )
+            })?;
+        if self.embeddings.contains_key(&key)
+            || values.len() != approved_manifest().embedding.dimension
+            || values.iter().any(|value| !value.is_finite())
+        {
+            return Err(DetectError::InvalidArgument(
+                "duplicate or malformed community embedding".into(),
+            ));
+        }
+        self.embeddings.insert(
+            key,
+            LocalSpeakerEmbedding {
+                chunk,
+                local_speaker,
+                clean_frames,
+                values,
+            },
+        );
+        Ok(())
+    }
+
+    /// Consumes complete inference observations and emits anonymous source-timed turns.
+    pub fn finish(self) -> Result<PyannoteCommunityDiarizationResult> {
+        if self.windows.len() != self.expected_windows
+            || self.embeddings.len() != self.requested_embeddings.len()
+        {
+            return Err(DetectError::InvalidArgument(
+                "community inference is incomplete".into(),
+            ));
+        }
+        let batch = SegmentationBatch {
+            total_frames: self.windows.len() * approved_manifest().segmentation.frames,
+            audio_duration_seconds: self.sample_count as f64 / f64::from(SAMPLE_RATE),
+            windows: self.windows,
+        };
+        let embeddings = self.embeddings.into_values().collect::<Vec<_>>();
+        finish_diarization(
+            &CommunityProcessingContext {
+                manifest: approved_manifest(),
+                plda: &self.plda,
+                clustering: &self.clustering,
+                min_speakers: None,
+                max_speakers: None,
+                return_speaker_embeddings: false,
+                runtime: "onnxruntime-web",
+            },
+            &batch,
+            &embeddings,
+        )
     }
 }

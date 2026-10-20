@@ -16,3 +16,16 @@ not a claim of pyannote parity.
 bun run --cwd packages/audio-analysis-speakers-wasm build
 bun test packages/audio-analysis-speakers-wasm/tests/package.test.ts
 ```
+
+## Pyannote community-1
+
+Use `./resources` to load approved resources with a request-scoped Hugging Face token, and `./community` for actual CPU WASM community-1 diarization. Accept the upstream model conditions first. The existing root API remains a separate baseline capability. Community diarization never substitutes that baseline on failure. See [resource, privacy and real-browser evidence](../../docs/evidence/browser-community-diarization.md).
+
+```ts
+import { loadCommunityDiarizationResources } from "@moritzbrantner/audio-analysis-speakers-wasm/resources";
+import { diarizeCommunityAudioSamples } from "@moritzbrantner/audio-analysis-speakers-wasm/community";
+const bundle = await loadCommunityDiarizationResources({ token, signal });
+const result = await diarizeCommunityAudioSamples(samples16k, bundle, { signal });
+```
+
+Keep tokens out of persisted application state. Returned counts are tentative and labels anonymous. Resources remain in caller-owned memory; use `archiveCommunityDiarizationResources` only when explicitly provisioning a native cache.

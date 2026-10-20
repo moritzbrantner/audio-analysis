@@ -79,3 +79,8 @@ sha2 = "0.10.9"
 tempfile = "3.23.0"
 thiserror = "2.0.17"
 tokenizers = { version = "0.22.2", default-features = false, features = ["unstable_wasm"] }
+
+# Backport of huggingface/candle#4041; preserve 0.10 tensor/model APIs until a
+# compatible published Candle release includes ZIP 9 (Native WhisperX #366).
+[patch.crates-io]
+candle-core = { git = "https://github.com/moritzbrantner/candle", rev = "b57f9eb7ccc6bf5cebf0c3822ed69573b06877a9", version = "0.10.2" }

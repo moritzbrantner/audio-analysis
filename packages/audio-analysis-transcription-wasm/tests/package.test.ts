@@ -307,9 +307,13 @@ test("browser PCM resampler preserves continuity across decoded frame boundaries
   expect(first.length).toBe(160);
   expect(second.length).toBe(160);
   expect(first[0]).toBeCloseTo(0, 6);
-  expect(first[159]).toBeCloseTo((477 / 480 + 477 / 240) / 2, 5);
-  expect(second[0]).toBeCloseTo((480 / 480 + 480 / 240) / 2, 5);
-  expect(second[159]).toBeCloseTo((957 / 480 + 957 / 240) / 2, 5);
+  // A causal antialiasing filter delays the ramp; chunking must preserve its
+  // state and stereo downmix rather than reproduce unfiltered interpolation.
+  const whole = entry.createBrowserPcmResampler(48_000).push([
+    Float32Array.from({ length: 960 }, (_, index) => index / 480),
+    Float32Array.from({ length: 960 }, (_, index) => index / 240),
+  ]);
+  expect([...first, ...second]).toEqual([...whole]);
   expect(resampler.outputSampleRateHz).toBe(16_000);
 });
 
@@ -342,5 +346,8 @@ test("browser PCM resampler handles non-integer source ratios without resetting 
   const second = resampler.push([new Float32Array(441).fill(0.25)]);
 
   expect(first.length + second.length).toBe(320);
-  expect([...first, ...second].every((sample) => Math.abs(sample - 0.25) < 1e-6)).toBe(true);
+  const whole = entry.createBrowserPcmResampler(44_100).push([new Float32Array(882).fill(0.25)]);
+  expect([...first, ...second]).toEqual([...whole]);
+  // The existing FIR starts from silence; DC is preserved after its warmup.
+  expect(second.every((sample) => Math.abs(sample - 0.25) < 1e-6)).toBe(true);
 });

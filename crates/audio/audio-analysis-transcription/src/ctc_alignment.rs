@@ -118,13 +118,13 @@ pub(crate) fn align_with_observer(
     })
 }
 
-struct ResolvedAlignmentModel {
-    model_id: String,
-    bundle: PathBuf,
+pub(crate) struct ResolvedAlignmentModel {
+    pub model_id: String,
+    pub bundle: PathBuf,
     source: &'static str,
 }
 
-fn resolve_alignment_model(
+pub(crate) fn resolve_alignment_model(
     options: &AlignmentOptions,
     requested_model_id: &str,
 ) -> Result<ResolvedAlignmentModel> {

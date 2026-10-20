@@ -13,12 +13,12 @@ pub(crate) fn resolve_required_bundle_file(bundle: &Path, file: &str) -> Result<
     }
 
     let direct = bundle.join(file);
-    if direct.exists() {
+    if direct.is_file() {
         return Ok(direct);
     }
 
     let files_dir = bundle.join("files").join(file);
-    if files_dir.exists() {
+    if files_dir.is_file() {
         return Ok(files_dir);
     }
 
@@ -35,7 +35,7 @@ pub(crate) fn resolve_required_bundle_file(bundle: &Path, file: &str) -> Result<
             for model_file in loaded.manifest.files.values() {
                 if model_file.remote_path == file || model_file.local_path.ends_with(file) {
                     if let Some(path) = loaded.file_path(&model_file.remote_path) {
-                        if path.exists() {
+                        if path.is_file() {
                             return Ok(path);
                         }
                     }
@@ -45,7 +45,7 @@ pub(crate) fn resolve_required_bundle_file(bundle: &Path, file: &str) -> Result<
     }
 
     Err(setup_error(format!(
-        "required model bundle file `{file}` is missing in `{}`",
+        "required model bundle file `{file}` is missing or not a regular file in `{}`",
         bundle.display()
     )))
 }

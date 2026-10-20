@@ -2,6 +2,11 @@
 
 mod bounded_window;
 pub mod surface;
+mod resources;
+pub use resources::{
+    inspect_alignment_resources, inspect_candle_whisper_resources, CandleWhisperResourceInspection,
+    NativeModelResourceInspection, NativeResourceDevice,
+};
 
 #[cfg(feature = "alignment")]
 mod ctc_alignment;

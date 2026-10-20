@@ -89,6 +89,8 @@ pub struct PyannoteCommunityDiarizationBundleReport {
     pub source_revision: String,
     pub artifact_set_sha256: String,
     pub required_files: Vec<PathBuf>,
+    /// The same canonical descriptor attached to embeddings emitted by this bundle.
+    pub embedding_model: SpeakerEmbeddingModel,
 }
 
 /// ONNX-backed pyannote community diarizer.
@@ -496,7 +498,9 @@ pub fn inspect_pyannote_community_diarization_bundle(
     config: PyannoteCommunityDiarizationConfig,
 ) -> Result<PyannoteCommunityDiarizationBundleReport> {
     let inspected = inspect_bundle(config)?;
+    let embedding_model = speaker_embedding_model(&inspected.manifest);
     Ok(PyannoteCommunityDiarizationBundleReport {
+        embedding_model,
         bundle_path: inspected.resolved.bundle_path.clone(),
         manifest_path: inspected.resolved.manifest_path.clone(),
         model_id: inspected.manifest.model_id,
@@ -1141,17 +1145,21 @@ fn push_segment(
     Ok(())
 }
 
+fn speaker_embedding_model(manifest: &PyannoteDiarizationManifest) -> SpeakerEmbeddingModel {
+    SpeakerEmbeddingModel {
+        family: SpeakerEmbeddingModelFamily::Pyannote,
+        name: manifest.model_id.clone(),
+        version: "community-1".to_string(),
+        dimensions: manifest.embedding.dimension,
+    }
+}
+
 fn speaker_embedding_map(
     manifest: &PyannoteDiarizationManifest,
     embeddings: &[LocalSpeakerEmbedding],
     assignments: &[AssignedLocalSpeaker],
 ) -> Result<BTreeMap<String, SpeakerEmbedding>> {
-    let model = SpeakerEmbeddingModel {
-        family: SpeakerEmbeddingModelFamily::Pyannote,
-        name: manifest.model_id.clone(),
-        version: "community-1".to_string(),
-        dimensions: manifest.embedding.dimension,
-    };
+    let model = speaker_embedding_model(manifest);
     let mut grouped: BTreeMap<usize, Vec<&LocalSpeakerEmbedding>> = BTreeMap::new();
     for assignment in assignments {
         if let Some(embedding) = embeddings.iter().find(|item| {

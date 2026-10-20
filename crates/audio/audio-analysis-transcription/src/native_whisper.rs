@@ -77,9 +77,9 @@ struct WhisperRunSetup {
 }
 
 #[derive(Debug, Clone)]
-struct ResolvedWhisperModel {
-    model_id: String,
-    bundle: WhisperBundlePaths,
+pub(crate) struct ResolvedWhisperModel {
+    pub model_id: String,
+    pub bundle: WhisperBundlePaths,
     source: &'static str,
 }
 
@@ -791,11 +791,37 @@ fn resolve_whisper_model_with_observer(
     resolved_compute_type: CandleWhisperComputeType,
     observe: &mut dyn FnMut(WhisperModelResolutionEvent) -> Result<()>,
 ) -> Result<ResolvedWhisperModel> {
+    resolve_whisper_resources(
+        options,
+        requested_model_id,
+        resolved_compute_type,
+        ResourceInspection::ValidateQ8,
+        observe,
+    )
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum ResourceInspection {
+    FilesOnly,
+    ValidateQ8,
+}
+
+pub(crate) fn resolve_whisper_resources(
+    options: &CandleWhisperOptions,
+    requested_model_id: &str,
+    resolved_compute_type: CandleWhisperComputeType,
+    inspection: ResourceInspection,
+    observe: &mut dyn FnMut(WhisperModelResolutionEvent) -> Result<()>,
+) -> Result<ResolvedWhisperModel> {
     observe(WhisperModelResolutionEvent::ResolutionStart)?;
     let model_id = canonical_whisper_model_id(requested_model_id)?;
     if let Some(bundle) = &options.model_bundle {
         let bundle = if resolved_compute_type == CandleWhisperComputeType::Int8 {
-            resolve_q8_whisper_bundle_paths(bundle)?
+            let paths = resolve_q8_whisper_bundle_file_paths(bundle)?;
+            if matches!(inspection, ResourceInspection::ValidateQ8) {
+                validate_q8_whisper_bundle(&paths)?;
+            }
+            paths
         } else {
             resolve_whisper_bundle_paths(bundle)?
         };
@@ -1046,7 +1072,14 @@ pub(crate) fn resolve_whisper_bundle_paths(bundle: &Path) -> Result<WhisperBundl
     })
 }
 
+#[cfg(test)]
 fn resolve_q8_whisper_bundle_paths(bundle: &Path) -> Result<WhisperBundlePaths> {
+    let paths = resolve_q8_whisper_bundle_file_paths(bundle)?;
+    validate_q8_whisper_bundle(&paths)?;
+    Ok(paths)
+}
+
+fn resolve_q8_whisper_bundle_file_paths(bundle: &Path) -> Result<WhisperBundlePaths> {
     if !bundle.exists() {
         return Err(setup_error(format!(
             "required Candle Whisper Q8_0 model bundle `{}` is missing; required files: {}",
@@ -1083,7 +1116,6 @@ fn resolve_q8_whisper_bundle_paths(bundle: &Path) -> Result<WhisperBundlePaths> 
             "model.q8_0.gguf",
         )?),
     };
-    validate_q8_whisper_bundle(&paths)?;
     Ok(paths)
 }
 

@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 
 use audio_analysis_speakers::{
-    PyannoteCommunityDiarizationConfig, PyannoteCommunityDiarizer, SpeakerAudio,
-    SpeakerSegmentPrediction,
+    inspect_pyannote_community_diarization_bundle, PyannoteCommunityDiarizationConfig,
+    PyannoteCommunityDiarizer, SpeakerAudio, SpeakerSegmentPrediction,
 };
 
 const UPSTREAM_TURNS: &[(f64, f64, &str)] = &[
@@ -135,6 +135,8 @@ fn approved_bundle_matches_retained_upstream_two_speaker_evidence() {
         .expect("PYANNOTE_TWO_SPEAKER_WAV must name the retained fixture");
     let (samples, sample_rate) = read_mono_wav(&audio_path);
     let audio = SpeakerAudio::mono(&samples, sample_rate).expect("valid retained fixture");
+    let report = inspect_pyannote_community_diarization_bundle(config(bundle_path.clone()))
+        .expect("offline inspection of approved bundle");
     let mut diarizer = PyannoteCommunityDiarizer::from_config(config(bundle_path))
         .expect("approved bundle must pass offline and ONNX contract validation");
     let result = diarizer
@@ -166,6 +168,9 @@ fn approved_bundle_matches_retained_upstream_two_speaker_evidence() {
         .as_ref()
         .expect("requested speaker embeddings");
     assert_eq!(embeddings.len(), 2);
+    assert!(embeddings
+        .values()
+        .all(|embedding| embedding.model() == &report.embedding_model));
     assert!(result.diagnostics.iter().any(|item| {
         item == "pyannoteArtifactSetSha256=0a12189874dace9b590af9b09ef4637552006130716db57c35d72f984b36c577"
     }));

@@ -17,6 +17,15 @@ paths use FFmpeg-backed `audio-analysis-io` decode and then normalize/resample
 through the same native 16 kHz mono boundary. This opt-in media decode is not
 WhisperX parity and is not part of default tests.
 
+`inspect_candle_whisper_resources` and `inspect_alignment_resources` provide
+read-only resource preflight using the execution resolvers and device policy.
+They force cache-only resolution even if the supplied options allow downloads,
+require no audio input, and never open tensor data or construct model sessions.
+The typed reports include canonical local paths and resolved device/compute
+choices. Available files are not proof of valid weights or successful inference;
+normal execution still performs its full validation. Disabled alignment needs
+no resources; enabled providers report missing feature support explicitly.
+
 The compatibility whisper.cpp build, model store, and file adapter live behind
 the `native` feature. That adapter preserves the existing model/download
 behavior while returning the transcript document contract owned by

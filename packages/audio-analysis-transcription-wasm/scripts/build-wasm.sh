@@ -2,4 +2,4 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-wasm-pack build "$ROOT_DIR/crates/bindings/audio-analysis-transcription-wasm" --target web --out-dir "$ROOT_DIR/packages/audio-analysis-transcription-wasm/pkg"
+wasm-pack build "$ROOT_DIR/crates/bindings/audio-analysis-transcription-wasm" --target web --out-name audio_analysis_transcription_wasm --out-dir "$ROOT_DIR/packages/audio-analysis-transcription-wasm/pkg"

@@ -4,8 +4,9 @@ use media_core::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::ctc_alignment::{
-    backtrack_ctc, build_ctc_trellis, tokens_to_segment_words, CtcAlignedToken, CtcVocabulary,
+use crate::ctc::{
+    backtrack_ctc, build_ctc_trellis, normalize_text_to_aligned_chars, token_id,
+    tokens_to_segment_words, CtcAlignedToken, CtcVocabulary,
 };
 use crate::native_device::ResolvedNativeDevice;
 use crate::{
@@ -402,14 +403,6 @@ pub(crate) fn emit_wav2vec2_ctc_segments_with_load_observer(
         });
     }
     Ok(segments)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct TokenizedAlignmentChar {
-    char_index: usize,
-    character: String,
-    token_id: usize,
-    is_word_delimiter: bool,
 }
 
 pub(crate) fn resolve_wav2vec2_bundle_paths(bundle: &Path) -> Result<Wav2Vec2BundlePaths> {
@@ -816,63 +809,6 @@ pub(crate) fn normalized_text_to_token_ids(
         .collect())
 }
 
-fn normalize_text_to_aligned_chars(
-    text: &str,
-    vocab: &CtcVocabulary,
-) -> Result<Vec<TokenizedAlignmentChar>> {
-    let delimiter = token_id(&vocab.tokens, "|").map(|_| "|");
-    let uppercase_hits = vocab
-        .tokens
-        .iter()
-        .filter(|token| token.chars().any(|ch| ch.is_ascii_uppercase()))
-        .count();
-    let lowercase_hits = vocab
-        .tokens
-        .iter()
-        .filter(|token| token.chars().any(|ch| ch.is_ascii_lowercase()))
-        .count();
-    let use_uppercase = uppercase_hits >= lowercase_hits;
-    let mut chars = Vec::new();
-    for (char_index, character) in text.trim().chars().enumerate() {
-        if character.is_whitespace() {
-            if let Some(delimiter) = delimiter {
-                if let Some(id) = token_id(&vocab.tokens, delimiter) {
-                    chars.push(TokenizedAlignmentChar {
-                        char_index,
-                        character: " ".to_string(),
-                        token_id: id,
-                        is_word_delimiter: true,
-                    });
-                }
-            }
-            continue;
-        }
-        let lowered = character.to_lowercase().collect::<String>();
-        let token = if character.is_alphabetic() {
-            if use_uppercase {
-                character.to_uppercase().collect::<String>()
-            } else {
-                lowered.clone()
-            }
-        } else {
-            character.to_string()
-        };
-        let token_id = token_id(&vocab.tokens, &token).unwrap_or(usize::MAX);
-        chars.push(TokenizedAlignmentChar {
-            char_index,
-            character: lowered,
-            token_id,
-            is_word_delimiter: false,
-        });
-    }
-    if chars.is_empty() {
-        return Err(invalid_request(
-            "transcript text does not contain any wav2vec2 CTC tokens",
-        ));
-    }
-    Ok(chars)
-}
-
 fn tokens_to_segment_chars(
     segment_index: u64,
     tokens: &[CtcAlignedToken],
@@ -1128,10 +1064,6 @@ fn slice_segment_samples(
         mono.push(value);
     }
     Ok(mono)
-}
-
-fn token_id(tokens: &[String], token: &str) -> Option<usize> {
-    tokens.iter().position(|candidate| candidate == token)
 }
 
 #[cfg(test)]

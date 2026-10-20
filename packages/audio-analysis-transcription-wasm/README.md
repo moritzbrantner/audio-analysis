@@ -88,8 +88,8 @@ and UI permission/error handling.
 Media acquisition remains consumer-owned. `audio-analysis` owns the 16 kHz mono input contract,
 window/stride semantics, overlap stitching, model/runtime choice, backpressure limit, browser PCM
 adaptation, and normalized timed result. The WebGPU browser provider intentionally stops at
-transcription plus timed segments; alignment, diarization, and translation remain native/server
-capabilities rather than being approximated in this browser adapter.
+transcription plus timed segments. Forced alignment is available through the separate
+`./alignment` entry below; diarization and translation are separate provider capabilities.
 
 ```bash
 bun run --cwd packages/audio-analysis-transcription-wasm build
@@ -111,3 +111,32 @@ language metadata from its current provider.
 The browser entry remains the existing single-file JavaScript distribution
 surface consumed directly by static consumers. Its TypeScript declarations cover
 the new option and catalog; this change does not introduce a parallel runtime.
+
+
+## Browser forced alignment
+
+Bundle the typed `@moritzbrantner/audio-analysis-transcription-wasm/alignment` entry
+and serve the generated `pkg/` directory beside that bundle. Run the package build
+first; its WebAssembly module contains the same CTC trellis used by native alignment.
+
+```ts
+import { alignTranscriptAudioSamples } from
+  "@moritzbrantner/audio-analysis-transcription-wasm/alignment";
+
+const aligned = await alignTranscriptAudioSamples(samples16kMono, transcript, {
+  language: "en",
+});
+```
+
+The adapter runs pinned English or German wav2vec2 ONNX models with ONNX Runtime
+Web 1.30.0 on CPU WebAssembly, then aligns their log probabilities through Rust.
+`browserAlignmentCapabilities()` lists exact revisions and supported languages.
+English weights are approximately 361 MB and German weights 117 MB. Downloads use
+anonymous HTTPS requests and normal browser caching; callers should show progress.
+Input must be finite mono 16 kHz PCM, with transcript segments at most 30 seconds
+and inside the supplied audio. Unsupported languages and impossible alignments fail
+explicitly. Text and segment IDs are preserved; the returned copy contains model
+word timings and provenance. The source transcript and PCM remain unchanged.
+Cancellation is checked between stages; an already executing ONNX inference cannot
+be interrupted. Each adapter permits one active call and retains one language model;
+use `createBrowserAlignmentAdapter()` and `dispose()` to own that lifetime.

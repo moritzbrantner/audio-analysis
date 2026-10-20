@@ -17,6 +17,16 @@ pub fn run_operation(request: JsValue) -> Result<JsValue, JsValue> {
     serde_wasm_bindgen::to_value(&response).map_err(into_js_error)
 }
 
+/// Align a transcript segment against caller-provided CTC log probabilities.
+#[wasm_bindgen(js_name = alignCtcEmissions)]
+pub fn align_ctc_emissions(request: JsValue) -> Result<JsValue, JsValue> {
+    let request: audio_analysis_transcription::CtcEmissionAlignmentRequest =
+        serde_wasm_bindgen::from_value(request).map_err(into_js_error)?;
+    let words =
+        audio_analysis_transcription::align_ctc_emissions(request).map_err(into_js_error)?;
+    serde_wasm_bindgen::to_value(&words).map_err(into_js_error)
+}
+
 fn into_js_error(error: impl std::fmt::Display) -> JsValue {
     js_sys::Error::new(&error.to_string()).into()
 }

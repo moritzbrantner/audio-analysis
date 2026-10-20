@@ -315,6 +315,7 @@ export function createBrowserAlignmentAdapter(
             })),
             attributes: { ...segment.attributes, alignment: "ctc-forced-alignment" },
           });
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
         }
         return {
           ...source,

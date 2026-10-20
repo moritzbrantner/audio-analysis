@@ -1,5 +1,6 @@
 //! Typed PLDA transforms for pyannote community diarization.
 
+#[cfg(feature = "pyannote-diarization")]
 use std::{fs, path::Path};
 
 use audio_contracts::{DetectError, Result};
@@ -35,9 +36,20 @@ pub(super) struct Plda {
 }
 
 impl Plda {
+    #[cfg(feature = "pyannote-diarization")]
     pub(super) fn load(transform_path: &Path, model_path: &Path) -> Result<Self> {
-        let xvector: PldaTransform = read_json(transform_path, "PLDA transform")?;
-        let model: PldaModel = read_json(model_path, "PLDA model")?;
+        let transform = fs::read(transform_path)
+            .map_err(|error| setup_error(format!("failed to read PLDA transform: {error}")))?;
+        let model = fs::read(model_path)
+            .map_err(|error| setup_error(format!("failed to read PLDA model: {error}")))?;
+        Self::from_json(&transform, &model)
+    }
+
+    pub(super) fn from_json(transform: &[u8], model: &[u8]) -> Result<Self> {
+        let xvector: PldaTransform = serde_json::from_slice(transform)
+            .map_err(|error| setup_error(format!("invalid PLDA transform: {error}")))?;
+        let model: PldaModel = serde_json::from_slice(model)
+            .map_err(|error| setup_error(format!("invalid PLDA model: {error}")))?;
         validate_transform(&xvector)?;
         validate_model(&model)?;
         if xvector.output_dimension != model.dimension {
@@ -121,13 +133,6 @@ impl Plda {
         }
         Ok(projected)
     }
-}
-
-fn read_json<T: for<'de> Deserialize<'de>>(path: &Path, role: &str) -> Result<T> {
-    let bytes =
-        fs::read(path).map_err(|error| setup_error(format!("failed to read {role}: {error}")))?;
-    serde_json::from_slice(&bytes)
-        .map_err(|error| setup_error(format!("failed to parse {role}: {error}")))
 }
 
 fn validate_transform(value: &PldaTransform) -> Result<()> {

@@ -1,0 +1,83 @@
+{
+  "artifactSetSha256": "0a12189874dace9b590af9b09ef4637552006130716db57c35d72f984b36c577",
+  "clustering": {
+    "constrainedAssignment": true,
+    "fa": 0.07,
+    "fb": 0.8,
+    "kind": "vbx",
+    "maxIters": 20,
+    "minActiveRatio": 0.2,
+    "threshold": 0.6
+  },
+  "conversion": {
+    "command": "python scripts/convert_pyannote_community.py --source-dir <standard-hugging-face-cache-snapshot> --two-speaker-fixture <local-two-speaker-wav>",
+    "inputHashes": {
+      "README.md": "2db91f9265bd81f1653ff088b5bff22bf6aebebea03328513af65501643f8a31",
+      "config.yaml": "5ce2bfa9a938dc132cec1172592d65173cbb8f444ea1e4133f10f9391de155be",
+      "embedding/README.md": "fa9e5105ae95edb231d841476cdb91eef4be0621c372ed4f7d3421294b5f8ad7",
+      "embedding/pytorch_model.bin": "6f10ff60898a1d185fa22e1d11e0bfa8a92efec811f11bca48cb8cafebefd929",
+      "plda/README.md": "e1316dbbeb3261431478d48ceebbd4bba395c3587e7b80c254dbab00f1209d0a",
+      "plda/plda.npz": "9b77bcd840692710dd3496f62ecfeed8d8e5f002fd991b785079b244eab7d255",
+      "plda/xvec_transform.npz": "325f1ce8e48f7e55e9c8aa47e05d2766b7c48c4b25b8de8dd751e7a4cc5fbe8f",
+      "segmentation/pytorch_model.bin": "7ad24338d844fb95985486eb1a464e32d229f6d7a03c9abe60f978bacf3f816e"
+    },
+    "onnxOpset": 17,
+    "packages": {
+      "numpy": "2.4.6",
+      "onnx": "1.22.0",
+      "onnxruntime": "1.27.0",
+      "pyannote.audio": "4.0.4",
+      "torch": "2.8.0",
+      "torchaudio": "2.8.0"
+    },
+    "python": "3.11.15"
+  },
+  "embedding": {
+    "dimension": 256,
+    "maskFrames": 589,
+    "maskInputName": "masks",
+    "outputName": "embeddings",
+    "waveformInputName": "waveform"
+  },
+  "endToEndComparison": {
+    "assignedSpeakers": 2,
+    "embeddingsFinite": true,
+    "fixtureSha256": "d57df4e868dbaccaffb45a2569a6fa8f619847b9e1ae2ea66c465dba4252afbb",
+    "requestedSpeakers": 2,
+    "turnCount": 20
+  },
+  "files": {
+    "LICENSE.md": "a4f9ca9a094f311ad6ce9c021f164aa5d150fb5517df1fb9d31288f0a4e4a4c0",
+    "MODEL_PROVENANCE.md": "bb89c24e8b95b0bb5cca36428aa588662f80b18894bf47eb2b61932dfbe80d13",
+    "clustering.json": "ed79fc68111e9ac92b306d2064461425c175359592f8447a0ec3f21ec265f073",
+    "embedding.onnx": "ea25e8c1c6d08c79e4b812dd00f7044969115f475b5cb94d9601f670ef1d1c47",
+    "plda_model.json": "0c58a94bdbc1dfbb1d1d067deefcc8f7fd288b3d0bc098670e230323075c5530",
+    "plda_transform.json": "154c5ba3e1bcafa8fa9b42dbfa0a82e49e141dd89a41cb54ea8e2b43d2ccf46c",
+    "segmentation.onnx": "cbfb788c5156fc802ecf2a9772c0dd88e3dadc4ca8645f11b565870749a5259b"
+  },
+  "kind": "pyannote-diarization",
+  "labelFormat": "SPEAKER_{:02}",
+  "modelId": "pyannote/speaker-diarization-community-1",
+  "numericalComparison": {
+    "embeddingMaxAbsoluteDifference": 1.862645149230957e-06,
+    "fixtureSeed": 218,
+    "segmentationMaxAbsoluteDifference": 0.0,
+    "tolerance": 0.0001
+  },
+  "sampleRate": 16000,
+  "schemaVersion": 1,
+  "segmentation": {
+    "durationSeconds": 10.0,
+    "frames": 589,
+    "inputName": "waveform",
+    "localSpeakers": 3,
+    "outputName": "segmentations",
+    "powerset": true,
+    "stepRatio": 0.1
+  },
+  "source": {
+    "license": "CC-BY-4.0",
+    "modelId": "pyannote/speaker-diarization-community-1",
+    "revision": "3533c8cf8e369892e6b79ff1bf80f7b0286a54ee"
+  }
+}

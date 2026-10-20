@@ -30,7 +30,8 @@ audio-contracts.workspace = true
 [features]
 default = []
 onnx = ["dep:runtime-onnx", "runtime-onnx/onnxruntime"]
-pyannote-diarization = ["onnx", "dep:ndarray", "dep:sha2"]
+pyannote-core = ["dep:ndarray", "dep:sha2"]
+pyannote-diarization = ["onnx", "pyannote-core"]
 model-bundles = ["dep:model-runtime"]
 external-tests = ["onnx", "model-bundles"]
 

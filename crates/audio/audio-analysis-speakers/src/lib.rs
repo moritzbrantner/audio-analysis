@@ -6,7 +6,7 @@ pub use library_transfer::{
     SpeakerLibraryImportSummary,
 };
 
-#[cfg(feature = "pyannote-diarization")]
+#[cfg(feature = "pyannote-core")]
 pub mod pyannote;
 pub mod surface;
 use std::collections::BTreeMap;

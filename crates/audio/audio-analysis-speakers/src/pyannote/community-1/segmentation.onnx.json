@@ -1,0 +1,250 @@
+{
+  "targetSha256": "cbfb788c5156fc802ecf2a9772c0dd88e3dadc4ca8645f11b565870749a5259b",
+  "parts": [
+    {
+      "targetStart": 32707,
+      "targetEnd": 32711,
+      "donor": "segmentation-community-1.onnx",
+      "start": 20527,
+      "end": 20531
+    },
+    {
+      "targetStart": 32750,
+      "targetEnd": 32754,
+      "donor": "segmentation-community-1.onnx",
+      "start": 20564,
+      "end": 20568
+    },
+    {
+      "targetStart": 32809,
+      "targetEnd": 32969,
+      "donor": "segmentation-community-1.onnx",
+      "start": 20617,
+      "end": 20777
+    },
+    {
+      "targetStart": 33025,
+      "targetEnd": 33185,
+      "donor": "segmentation-community-1.onnx",
+      "start": 20827,
+      "end": 20987
+    },
+    {
+      "targetStart": 33238,
+      "targetEnd": 33738,
+      "donor": "segmentation-community-1.onnx",
+      "start": 21034,
+      "end": 21534
+    },
+    {
+      "targetStart": 33788,
+      "targetEnd": 34288,
+      "donor": "segmentation-community-1.onnx",
+      "start": 21578,
+      "end": 22078
+    },
+    {
+      "targetStart": 34335,
+      "targetEnd": 130335,
+      "donor": "segmentation-community-1.onnx",
+      "start": 22119,
+      "end": 118119
+    },
+    {
+      "targetStart": 130374,
+      "targetEnd": 130614,
+      "donor": "segmentation-community-1.onnx",
+      "start": 118152,
+      "end": 118392
+    },
+    {
+      "targetStart": 130661,
+      "targetEnd": 202661,
+      "donor": "segmentation-community-1.onnx",
+      "start": 118433,
+      "end": 190433
+    },
+    {
+      "targetStart": 202700,
+      "targetEnd": 202940,
+      "donor": "segmentation-community-1.onnx",
+      "start": 190466,
+      "end": 190706
+    },
+    {
+      "targetStart": 202981,
+      "targetEnd": 203301,
+      "donor": "segmentation-community-1.onnx",
+      "start": 190741,
+      "end": 191061
+    },
+    {
+      "targetStart": 203340,
+      "targetEnd": 203660,
+      "donor": "segmentation-community-1.onnx",
+      "start": 191094,
+      "end": 191414
+    },
+    {
+      "targetStart": 203701,
+      "targetEnd": 203941,
+      "donor": "segmentation-community-1.onnx",
+      "start": 191449,
+      "end": 191689
+    },
+    {
+      "targetStart": 203980,
+      "targetEnd": 204220,
+      "donor": "segmentation-community-1.onnx",
+      "start": 191722,
+      "end": 191962
+    },
+    {
+      "targetStart": 204261,
+      "targetEnd": 204501,
+      "donor": "segmentation-community-1.onnx",
+      "start": 191997,
+      "end": 192237
+    },
+    {
+      "targetStart": 204540,
+      "targetEnd": 204780,
+      "donor": "segmentation-community-1.onnx",
+      "start": 192270,
+      "end": 192510
+    },
+    {
+      "targetStart": 204812,
+      "targetEnd": 205324,
+      "donor": "segmentation-community-1.onnx",
+      "start": 192536,
+      "end": 193048
+    },
+    {
+      "targetStart": 205356,
+      "targetEnd": 205868,
+      "donor": "segmentation-community-1.onnx",
+      "start": 193074,
+      "end": 193586
+    },
+    {
+      "targetStart": 205899,
+      "targetEnd": 205927,
+      "donor": "segmentation-community-1.onnx",
+      "start": 193611,
+      "end": 193639
+    },
+    {
+      "targetStart": 205954,
+      "targetEnd": 206454,
+      "donor": "segmentation-community-1.onnx",
+      "start": 193666,
+      "end": 194166
+    },
+    {
+      "targetStart": 206483,
+      "targetEnd": 214675,
+      "donor": "segmentation-community-1.onnx",
+      "start": 194195,
+      "end": 202387
+    },
+    {
+      "targetStart": 214708,
+      "targetEnd": 460468,
+      "donor": "segmentation-community-1.onnx",
+      "start": 202420,
+      "end": 448180
+    },
+    {
+      "targetStart": 460502,
+      "targetEnd": 984790,
+      "donor": "segmentation-community-1.onnx",
+      "start": 448214,
+      "end": 972502
+    },
+    {
+      "targetStart": 984819,
+      "targetEnd": 993011,
+      "donor": "segmentation-community-1.onnx",
+      "start": 972531,
+      "end": 980723
+    },
+    {
+      "targetStart": 993045,
+      "targetEnd": 2041621,
+      "donor": "segmentation-community-1.onnx",
+      "start": 980757,
+      "end": 2029333
+    },
+    {
+      "targetStart": 2041655,
+      "targetEnd": 2565943,
+      "donor": "segmentation-community-1.onnx",
+      "start": 2029367,
+      "end": 2553655
+    },
+    {
+      "targetStart": 2565972,
+      "targetEnd": 2574164,
+      "donor": "segmentation-community-1.onnx",
+      "start": 2553684,
+      "end": 2561876
+    },
+    {
+      "targetStart": 2574198,
+      "targetEnd": 3622774,
+      "donor": "segmentation-community-1.onnx",
+      "start": 2561910,
+      "end": 3610486
+    },
+    {
+      "targetStart": 3622808,
+      "targetEnd": 4147096,
+      "donor": "segmentation-community-1.onnx",
+      "start": 3610520,
+      "end": 4134808
+    },
+    {
+      "targetStart": 4147125,
+      "targetEnd": 4155317,
+      "donor": "segmentation-community-1.onnx",
+      "start": 4134837,
+      "end": 4143029
+    },
+    {
+      "targetStart": 4155351,
+      "targetEnd": 5203927,
+      "donor": "segmentation-community-1.onnx",
+      "start": 4143063,
+      "end": 5191639
+    },
+    {
+      "targetStart": 5203961,
+      "targetEnd": 5728249,
+      "donor": "segmentation-community-1.onnx",
+      "start": 5191673,
+      "end": 5715961
+    },
+    {
+      "targetStart": 5728283,
+      "targetEnd": 5859355,
+      "donor": "segmentation-community-1.onnx",
+      "start": 5715995,
+      "end": 5847067
+    },
+    {
+      "targetStart": 5859389,
+      "targetEnd": 5924925,
+      "donor": "segmentation-community-1.onnx",
+      "start": 5847101,
+      "end": 5912637
+    },
+    {
+      "targetStart": 5924956,
+      "targetEnd": 5928540,
+      "donor": "segmentation-community-1.onnx",
+      "start": 5912668,
+      "end": 5916252
+    }
+  ]
+}

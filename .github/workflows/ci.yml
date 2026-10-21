@@ -12,7 +12,32 @@ env:
   CODING_TOOLING_REV: c9e071995abf65d2326930efb05e47e585af0efd
 
 jobs:
+  docs-scope:
+    runs-on: ubuntu-latest
+    outputs:
+      docs-only: ${{ steps.classify.outputs.docs-only }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+      - id: classify
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          echo "docs-only=false" >> "$GITHUB_OUTPUT"
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then exit 0; fi
+          mapfile -d '' changed < <(git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA")
+          if (( ${#changed[@]} == 0 )); then exit 0; fi
+          for file in "${changed[@]}"; do
+            if [[ "$file" != *.md ]]; then exit 0; fi
+          done
+          echo "docs-only=true" >> "$GITHUB_OUTPUT"
+
   verification:
+    needs: docs-scope
+    if: needs.docs-scope.outputs.docs-only != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -78,20 +103,23 @@ jobs:
         run: bash scripts/source-deps deactivate
 
   structural-validation:
+    needs: docs-scope
+    if: needs.docs-scope.outputs.docs-only != 'true'
     uses: ./.github/workflows/structural-ci.yml
 
   runtime-validation:
-    if: github.event_name == 'pull_request'
+    needs: docs-scope
+    if: github.event_name == 'pull_request' && needs.docs-scope.outputs.docs-only != 'true'
     uses: ./.github/workflows/runtime-evidence.yml
 
   merge-ready:
     name: ${{ github.event_name == 'pull_request' && 'merge-ready' || 'validation-summary' }}
     if: ${{ always() }}
-    needs: [verification, structural-validation, runtime-validation]
+    needs: [docs-scope, verification, structural-validation, runtime-validation]
     runs-on: ubuntu-latest
     steps:
       - uses: moritzbrantner/reusable-workflows/.github/actions/merge-ready@b0f25f241d76af2584dfc9e375084ff5c5cb97da
         with:
           needs: ${{ toJSON(needs) }}
-          required: '["verification", "structural-validation", "runtime-validation"]'
-          allow-skipped: ${{ github.event_name == 'pull_request' && '[]' || '["runtime-validation"]' }}
+          required: '["docs-scope", "verification", "structural-validation", "runtime-validation"]'
+          allow-skipped: ${{ needs.docs-scope.outputs.docs-only == 'true' && '["verification", "structural-validation", "runtime-validation"]' || github.event_name == 'pull_request' && '[]' || '["runtime-validation"]' }}

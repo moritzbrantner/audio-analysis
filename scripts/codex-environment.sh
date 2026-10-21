@@ -97,8 +97,8 @@ if [[ -n "$bun_version" ]]; then
   fi
   observed_bun="$(bun --version)"
   if [[ "$observed_bun" != "$bun_version" ]]; then
-    printf 'Bun preflight mismatch: expected %s, got %s\n' "$bun_version" "$observed_bun" >&2
-    exit 1
+    # Bun tracks latest (owner decision 2026-10-21); packageManager is informational.
+    printf 'Bun differs from packageManager (declared %s, observed %s); continuing\n' "$bun_version" "$observed_bun" >&2
   fi
 fi
 

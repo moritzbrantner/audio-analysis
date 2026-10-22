@@ -33,7 +33,7 @@ jobs:
       - name: Set up reference Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: 3.12.13
+          python-version: 3.15.1
       - name: Install FFmpeg runtime
         run: |
           sudo apt-get update

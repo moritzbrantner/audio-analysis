@@ -1,4 +1,12 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>moritzbrantner/coding-agent-conventions"]
+  "extends": ["github>moritzbrantner/coding-agent-conventions"],
+  "packageRules": [
+    {
+      "description": "Candle stays on the 0.10 ZIP 9 backport (docs/evidence/candle-zip9-backport.md) until a published release depends on ZIP 9; 0.11.0 still uses ZIP 8.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["candle-core", "candle-nn", "candle-transformers"],
+      "allowedVersions": "<0.11"
+    }
+  ]
 }

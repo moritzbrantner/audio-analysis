@@ -641,18 +641,15 @@ fn validate_bundle_files(
         }
         let bytes = fs::read(path)
             .map_err(|error| setup_error(format!("failed to read `{name}`: {error}")))?;
-        let actual = format!("{:x}", Sha256::digest(bytes));
+        let actual = hex::encode(Sha256::digest(bytes));
         if actual != *expected {
             return Err(setup_error(format!("checksum mismatch for `{name}`")));
         }
     }
-    let digest = format!(
-        "{:x}",
-        Sha256::digest(
-            serde_json::to_vec(&manifest.files)
-                .map_err(|error| setup_error(format!("failed to hash manifest files: {error}")))?
-        )
-    );
+    let digest = hex::encode(Sha256::digest(
+        serde_json::to_vec(&manifest.files)
+            .map_err(|error| setup_error(format!("failed to hash manifest files: {error}")))?,
+    ));
     if digest != manifest.artifact_set_sha256 {
         return Err(setup_error(
             "artifactSetSha256 does not match the checksummed artifact set",
@@ -1641,7 +1638,7 @@ impl CommunityDiarizationProcessor {
             ("clustering.json", clustering),
         ] {
             if bytes.len() > 1024 * 1024
-                || manifest.files.get(name) != Some(&format!("{:x}", Sha256::digest(bytes)))
+                || manifest.files.get(name) != Some(&hex::encode(Sha256::digest(bytes)))
             {
                 return Err(setup_error(format!("checksum mismatch for `{name}`")));
             }

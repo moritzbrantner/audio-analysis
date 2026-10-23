@@ -68,6 +68,7 @@ candle-transformers = "0.10.2"
 clap = { version = "4.5.51", features = ["derive"] }
 criterion = "0.8.0"
 flate2 = "1.1.9"
+hex = "0.4.3"
 hound = "3.5.1"
 ndarray = "0.17.2"
 proptest = "1.6.0"

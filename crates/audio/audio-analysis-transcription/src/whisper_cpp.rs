@@ -402,7 +402,7 @@ impl ModelStore {
         }
         file.flush()?;
 
-        let checksum = format!("{:x}", hasher.finalize());
+        let checksum = hex::encode(hasher.finalize());
         if checksum != model.checksum_sha256() {
             let _ = fs::remove_file(&temp_path);
             return Err(WhisperCppError::InvalidChecksum { model });

@@ -23,6 +23,7 @@ model-runtime = { workspace = true, optional = true }
 runtime-onnx = { workspace = true, optional = true }
 ndarray = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
+hex = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 audio-contracts.workspace = true
@@ -30,7 +31,7 @@ audio-contracts.workspace = true
 [features]
 default = []
 onnx = ["dep:runtime-onnx", "runtime-onnx/onnxruntime"]
-pyannote-core = ["dep:ndarray", "dep:sha2"]
+pyannote-core = ["dep:ndarray", "dep:sha2", "dep:hex"]
 pyannote-diarization = ["onnx", "pyannote-core"]
 model-bundles = ["dep:model-runtime"]
 external-tests = ["onnx", "model-bundles"]

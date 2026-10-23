@@ -1036,7 +1036,7 @@ fn validate_pyannote_vad_checksums(
                 path.display()
             ))
         })?;
-        let actual = format!("{:x}", Sha256::digest(bytes));
+        let actual = hex::encode(Sha256::digest(bytes));
         if !actual.eq_ignore_ascii_case(expected) {
             return Err(DetectError::InvalidArgument(format!(
                 "pyannote VAD checksum mismatch for `{file}`"

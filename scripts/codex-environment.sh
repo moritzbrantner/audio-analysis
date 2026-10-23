@@ -53,10 +53,6 @@ PY
 )"
 
 if [[ -n "$rust_toolchain" ]]; then
-  if ! [[ "$rust_toolchain" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    printf 'Rust toolchain must use an exact version, got %s\n' "$rust_toolchain" >&2
-    exit 2
-  fi
   if ! command -v rustup >/dev/null 2>&1; then
     printf '%s\n' 'rustup is required before repository setup; provision it through the trusted agent/base environment rather than an unpinned installer.' >&2
     exit 2
@@ -87,18 +83,9 @@ if path.is_file():
 PY
 )"
 if [[ -n "$bun_version" ]]; then
-  if ! [[ "$bun_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
-    printf 'Bun packageManager must use an exact version, got %s\n' "$bun_version" >&2
-    exit 2
-  fi
   if ! command -v bun >/dev/null 2>&1; then
-    printf '%s\n' 'bun is required before repository setup; provision the exact packageManager version through the trusted agent/base environment.' >&2
+    printf '%s\n' 'bun is required before repository setup; install the latest stable Bun through the trusted agent/base environment.' >&2
     exit 2
-  fi
-  observed_bun="$(bun --version)"
-  if [[ "$observed_bun" != "$bun_version" ]]; then
-    # Bun tracks latest (owner decision 2026-10-21); packageManager is informational.
-    printf 'Bun differs from packageManager (declared %s, observed %s); continuing\n' "$bun_version" "$observed_bun" >&2
   fi
 fi
 
@@ -114,10 +101,3 @@ for command in "${environment_commands[@]}"; do
   (cd "$root" && bash -lc "$command")
 done
 
-if [[ -n "$rust_toolchain" ]]; then
-  observed_rust="$(cd "$root" && rustc --version | awk '{print $2}')"
-  if [[ "$observed_rust" != "$rust_toolchain" ]]; then
-    printf 'Rust preflight mismatch: expected %s, got %s\n' "$rust_toolchain" "$observed_rust" >&2
-    exit 1
-  fi
-fi

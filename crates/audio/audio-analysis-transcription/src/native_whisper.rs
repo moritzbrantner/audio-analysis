@@ -4040,7 +4040,7 @@ mod tests {
         );
         let assert_sha256 = |path: &Path, expected: &str| {
             let bytes = std::fs::read(path).expect("pinned parity resource");
-            let actual = format!("{:x}", Sha256::digest(bytes));
+            let actual = hex::encode(Sha256::digest(bytes));
             assert_eq!(
                 actual,
                 expected,
@@ -4061,7 +4061,7 @@ mod tests {
         let whisperx_oracle_bytes =
             std::fs::read(whisperx_oracle_path).expect("retained WhisperX 3.8.6 oracle");
         assert_eq!(
-            format!("{:x}", Sha256::digest(&whisperx_oracle_bytes)),
+            hex::encode(Sha256::digest(&whisperx_oracle_bytes)),
             "1b38bea5200eea4c037eea0420ff71c73283c238f9820c978a60ca0c7612e095",
             "retained WhisperX 3.8.6 oracle changed"
         );
@@ -4178,7 +4178,7 @@ mod tests {
         let mel_oracle_bytes =
             std::fs::read(mel_oracle_path).expect("retained Transformers mel oracle");
         assert_eq!(
-            format!("{:x}", Sha256::digest(&mel_oracle_bytes)),
+            hex::encode(Sha256::digest(&mel_oracle_bytes)),
             "2e5702b857570249e43ab92804c28cabf8194f8f03c1fd48f97c3bfd9c091fbf",
             "retained Transformers mel oracle changed"
         );
@@ -4249,7 +4249,7 @@ mod tests {
         let logits_oracle_bytes =
             std::fs::read(logits_oracle_path).expect("retained Transformers logits oracle");
         assert_eq!(
-            format!("{:x}", Sha256::digest(&logits_oracle_bytes)),
+            hex::encode(Sha256::digest(&logits_oracle_bytes)),
             "751015116dcded3c45314938e471679439abd6ddc08ee5509bc16a66cd540412",
             "retained Transformers filtered-logits oracle changed"
         );
@@ -4338,7 +4338,7 @@ mod tests {
             );
         let assert_sha256 = |path: &Path, expected: &str| {
             let bytes = std::fs::read(path).expect("pinned long-window parity resource");
-            let actual = format!("{:x}", Sha256::digest(bytes));
+            let actual = hex::encode(Sha256::digest(bytes));
             assert_eq!(
                 actual,
                 expected,

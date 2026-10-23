@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  CODING_TOOLING_REV: c9e071995abf65d2326930efb05e47e585af0efd
+  CODING_TOOLING_REV: 2ceb2b57c946fd042fdf098c05427519c146a62f
 
 jobs:
   docs-scope:

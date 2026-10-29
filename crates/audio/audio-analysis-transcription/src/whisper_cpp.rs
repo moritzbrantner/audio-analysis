@@ -71,6 +71,10 @@ pub enum WhisperCppModel {
     LargeV3Turbo,
 }
 
+/// Hugging Face `ggerganov/whisper.cpp` commit that model downloads, checksums
+/// and sizes are pinned to.
+pub const WHISPER_CPP_MODELS_REVISION: &str = "5359861c739e955e79d9a303bcbc70fb988958b1";
+
 impl WhisperCppModel {
     /// Constant for all.
     pub const ALL: [Self; 12] = [
@@ -111,31 +115,49 @@ impl WhisperCppModel {
         format!("ggml-{}.bin", self.id())
     }
 
-    /// Returns download URL.
+    /// Returns the download URL, pinned to [`WHISPER_CPP_MODELS_REVISION`].
     pub fn download_url(self) -> String {
         format!(
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{}",
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/{WHISPER_CPP_MODELS_REVISION}/{}",
             self.file_name()
         )
     }
 
-    /// Returns checksum sha256.
+    /// Returns the SHA-256 of the model file (its Git LFS object id) at
+    /// [`WHISPER_CPP_MODELS_REVISION`].
     pub fn checksum_sha256(self) -> &'static str {
         match self {
-            Self::TinyEn => "0d686a2a6a22b02da2ef3101d4c86e68461363a623c58f27f81b1b2d36b42317",
-            Self::Tiny => "518970a29bedb265f23ac48d486ddbc63bedffd90967b10140ae5ac61243acf3",
+            Self::TinyEn => "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
+            Self::Tiny => "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
             Self::BaseEn => "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
-            Self::Base => "2f62d18b50c3f3feafbf990eec23a93d319660b1efbdd3fff55e52b7cde2e374",
-            Self::SmallEn => "0d57184d34ae7d736e5bb2db5bf83debe730bd53dcefa235a0979b9dcfd33fb3",
-            Self::Small => "edd29d67e70b000132af65205b99bb774b77abc13d10103e14f80ce2242913e1",
-            Self::MediumEn => "a163589aa264d5188df3b05ed4eac56bfd97e26910f207809d869f7e99886fd2",
-            Self::Medium => "d3d5696e6a3e0ca2aa08eb31cad208ffa1e87b3cc341f59e628fbdcf8122de9b",
-            Self::LargeV1 => "cbcb187d1e1abe979d33636cdc63381de20738eeda0885c39440b086e184248a",
-            Self::LargeV2 => "c6d6d3dcebc5e0074175386e17eba305fc5cc7d3d5dff3ecfd11e8f2bd4222d7",
-            Self::LargeV3 => "766d11cebbdf5a67c179c5774e2642b609e35e1a30240e7b559d5647c655b0a4",
+            Self::Base => "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+            Self::SmallEn => "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
+            Self::Small => "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+            Self::MediumEn => "cc37e93478338ec7700281a7ac30a10128929eb8f427dda2e865faa8f6da4356",
+            Self::Medium => "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
+            Self::LargeV1 => "7d99f41a10525d0206bddadd86760181fa920438b6b33237e3118ff6c83bb53d",
+            Self::LargeV2 => "9a423fe4d40c82774b6af34115b8b935f34152246eb19e80e376071d3f999487",
+            Self::LargeV3 => "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2",
             Self::LargeV3Turbo => {
-                "5a4b65b05933d70ce9d5aa6265eb128fa5eba38f6fee40836fdedc4d2fde42ad"
+                "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"
             }
+        }
+    }
+
+    /// Returns the model file size in bytes at [`WHISPER_CPP_MODELS_REVISION`].
+    pub fn size_bytes(self) -> u64 {
+        match self {
+            Self::TinyEn => 77_704_715,
+            Self::Tiny => 77_691_713,
+            Self::BaseEn => 147_964_211,
+            Self::Base => 147_951_465,
+            Self::SmallEn => 487_614_201,
+            Self::Small => 487_601_967,
+            Self::MediumEn => 1_533_774_781,
+            Self::Medium => 1_533_763_059,
+            Self::LargeV1 | Self::LargeV2 => 3_094_623_691,
+            Self::LargeV3 => 3_095_033_483,
+            Self::LargeV3Turbo => 1_624_555_275,
         }
     }
 
@@ -373,9 +395,7 @@ impl ModelStore {
         let response = ureq::get(&model.download_url())
             .call()
             .map_err(|error| WhisperCppError::Http(error.to_string()))?;
-        let total_bytes = response
-            .header("Content-Length")
-            .and_then(|value| value.parse::<u64>().ok());
+        let total_bytes = Some(model.size_bytes());
         let mut reader = response.into_reader();
         let mut file = BufWriter::new(File::create(&temp_path)?);
         let mut hasher = Sha256::new();
@@ -403,7 +423,7 @@ impl ModelStore {
         file.flush()?;
 
         let checksum = hex::encode(hasher.finalize());
-        if checksum != model.checksum_sha256() {
+        if downloaded != model.size_bytes() || checksum != model.checksum_sha256() {
             let _ = fs::remove_file(&temp_path);
             return Err(WhisperCppError::InvalidChecksum { model });
         }
@@ -855,8 +875,48 @@ mod tests {
         assert_eq!(WhisperCppModel::BaseEn.file_name(), "ggml-base.en.bin");
         assert_eq!(
             WhisperCppModel::LargeV3Turbo.download_url(),
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo.bin"
         );
+    }
+
+    /// Git LFS pointers captured from the pinned Hugging Face revision. The model
+    /// table must match them exactly, so editing either side alone fails here.
+    const LFS_POINTERS: &str = include_str!("../tests/fixtures/whisper-cpp-lfs-pointers.txt");
+
+    #[test]
+    fn model_table_matches_pinned_lfs_pointers() {
+        let mut revision = None;
+        let mut pointers = Vec::new();
+        let mut file = None;
+        let mut oid = None;
+        for line in LFS_POINTERS.lines() {
+            if let Some(value) = line.strip_prefix("revision ") {
+                revision = Some(value);
+            } else if let Some(value) = line.strip_prefix("file ") {
+                file = Some(value.to_owned());
+            } else if let Some(value) = line.strip_prefix("oid sha256:") {
+                oid = Some(value);
+            } else if let Some(value) = line.strip_prefix("size ") {
+                pointers.push((
+                    file.take().expect("pointer file"),
+                    oid.take().expect("pointer oid"),
+                    value.parse::<u64>().expect("pointer size"),
+                ));
+            }
+        }
+
+        assert_eq!(revision, Some(WHISPER_CPP_MODELS_REVISION));
+        let table: Vec<_> = WhisperCppModel::ALL
+            .into_iter()
+            .map(|model| {
+                (
+                    model.file_name(),
+                    model.checksum_sha256(),
+                    model.size_bytes(),
+                )
+            })
+            .collect();
+        assert_eq!(table, pointers);
     }
 
     #[test]

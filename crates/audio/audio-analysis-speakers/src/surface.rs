@@ -7,12 +7,12 @@ use runtime_core::{
 };
 
 use crate::{
-    assign_speakers_to_transcript_with_policy, diarize_speakers, DiarizedSpeaker, EnergyVadConfig,
+    assign_speakers_to_transcript_with_policy, diarize_speakers, DiarizedSpeaker,
     EnergyVoiceActivityDetector, SpeakerAudio, SpeakerDiarizationRequest,
     SpeakerDiarizationResponse, SpeakerDiarizer, SpeakerEmbedding, SpeakerEmbeddingExtractor,
-    SpeakerId, SpeakerIdentificationOptions, SpeakerLabel, SpeakerLibrary, SpeakerSegmentPrediction,
-    SpeakerTranscriptAssignmentPolicy, SpectralSpeakerEmbedder, TranscriptionContract,
-    VoiceActivityDetector, WindowedSpeakerDiarizer,
+    SpeakerId, SpeakerIdentificationOptions, SpeakerLabel, SpeakerLibrary,
+    SpeakerSegmentPrediction, SpeakerTranscriptAssignmentPolicy, SpectralSpeakerEmbedder,
+    TranscriptionContract, VadOptions, VoiceActivityDetector, WindowedSpeakerDiarizer,
 };
 
 const MAX_SAMPLES: usize = 192_000;
@@ -256,7 +256,9 @@ fn identify_value(input: serde_json::Value) -> Result<serde_json::Value, String>
     let result = library
         .identify(&query_embedding, &SpeakerIdentificationOptions::default())
         .map_err(|error| error.to_string())?;
-    let library_json = library.to_json_string().map_err(|error| error.to_string())?;
+    let library_json = library
+        .to_json_string()
+        .map_err(|error| error.to_string())?;
     let library_snapshot: serde_json::Value =
         serde_json::from_str(&library_json).map_err(|error| error.to_string())?;
     Ok(serde_json::json!({
@@ -324,11 +326,11 @@ fn vad_value(input: serde_json::Value) -> Result<serde_json::Value, String> {
     let channels = channels(&input)?;
     let audio = SpeakerAudio::interleaved(&samples, sample_rate, channels)
         .map_err(|error| error.to_string())?;
-    let config = vad_config_from_input(&input, sample_rate)?;
-    let mut vad = EnergyVoiceActivityDetector::new(config).map_err(|error| error.to_string())?;
-    let spans = vad
-        .detect_speech(&audio)
-        .map_err(|error| error.to_string())?;
+    let options = vad_config_from_input(&input, sample_rate)?;
+    let spans = EnergyVoiceActivityDetector
+        .detect_speech(&audio, &options)
+        .map_err(|error| error.to_string())?
+        .segments;
     let speech_seconds = spans
         .iter()
         .map(|span| span.duration_seconds())
@@ -371,10 +373,11 @@ fn diarize_value(input: serde_json::Value) -> Result<serde_json::Value, String> 
     let channels = channels(&input)?;
     let audio = SpeakerAudio::interleaved(&samples, sample_rate, channels)
         .map_err(|error| error.to_string())?;
-    let vad = EnergyVoiceActivityDetector::new(vad_config_from_input(&input, sample_rate)?)
-        .map_err(|error| error.to_string())?;
+    let vad_options = vad_config_from_input(&input, sample_rate)?;
     let embedder = speaker_embedder(&input)?;
-    let mut diarizer = WindowedSpeakerDiarizer::new(embedder, vad);
+    let mut diarizer = WindowedSpeakerDiarizer::new(embedder, EnergyVoiceActivityDetector)
+        .vad_options(vad_options)
+        .map_err(|error| error.to_string())?;
     if let Some(threshold) = finite_f32(&input, "clusterThreshold")? {
         diarizer = diarizer
             .cluster_threshold(threshold)
@@ -433,26 +436,27 @@ fn speaker_embedder(input: &serde_json::Value) -> Result<SpectralSpeakerEmbedder
 fn vad_config_from_input(
     input: &serde_json::Value,
     sample_rate: u32,
-) -> Result<EnergyVadConfig, String> {
+) -> Result<VadOptions, String> {
+    let defaults = VadOptions::unpadded();
     let frame_size = positive_usize(
         input,
         "frameSize",
-        ((sample_rate as f64) * EnergyVadConfig::default().frame_seconds).round() as usize,
+        ((sample_rate as f64) * defaults.frame_seconds).round() as usize,
     )?;
     let hop_size = positive_usize(
         input,
         "hopSize",
-        ((sample_rate as f64) * EnergyVadConfig::default().hop_seconds).round() as usize,
+        ((sample_rate as f64) * defaults.hop_seconds).round() as usize,
     )?;
-    let config = EnergyVadConfig {
-        rms_threshold: finite_f32(input, "threshold")?
-            .unwrap_or(EnergyVadConfig::default().rms_threshold),
+    let config = VadOptions {
+        rms_threshold: finite_f32(input, "threshold")?.unwrap_or(defaults.rms_threshold),
         frame_seconds: frame_size as f64 / sample_rate as f64,
         hop_seconds: hop_size as f64 / sample_rate as f64,
         min_speech_seconds: finite_f64(input, "minSpeechSeconds")?
-            .unwrap_or(EnergyVadConfig::default().min_speech_seconds),
+            .unwrap_or(defaults.min_speech_seconds),
         merge_gap_seconds: finite_f64(input, "minSilenceSeconds")?
-            .unwrap_or(EnergyVadConfig::default().merge_gap_seconds),
+            .unwrap_or(defaults.merge_gap_seconds),
+        ..defaults
     };
     config.validate().map_err(|error| error.to_string())?;
     Ok(config)

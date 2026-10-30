@@ -9,11 +9,15 @@ pub use library_transfer::{
 #[cfg(feature = "pyannote-core")]
 pub mod pyannote;
 pub mod surface;
+mod vad;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+pub use vad::{
+    EnergyVoiceActivityDetector, SpeechSpan, VadOptions, VadResponse, VoiceActivityDetector,
+};
 
-use audio_analysis_core::{interleaved_to_mono, rms, zero_pad_to, ChannelMix, FrameSpec};
+use audio_analysis_core::{interleaved_to_mono, ChannelMix};
 pub use audio_analysis_recognition::AudioRuntime;
 use audio_analysis_recognition::{
     AudioEmbeddingExtractor, AudioRuntimeSelection, FallbackPolicy, SpectralAudioEmbedder,
@@ -1630,175 +1634,6 @@ impl OnnxSpeakerEmbedder {
     }
 }
 
-/// Trait for voice activity detector implementations.
-pub trait VoiceActivityDetector {
-    /// Detects speech spans.
-    fn detect_speech(&mut self, audio: &SpeakerAudio<'_>) -> Result<Vec<SpeechSpan>>;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-/// Speech activity span.
-pub struct SpeechSpan {
-    /// Start in seconds.
-    pub start_seconds: f64,
-    /// End in seconds.
-    pub end_seconds: f64,
-    /// Speech confidence or energy score.
-    pub score: f32,
-}
-
-impl SpeechSpan {
-    /// Creates a new value.
-    pub fn new(start_seconds: f64, end_seconds: f64, score: f32) -> Result<Self> {
-        let span = Self {
-            start_seconds,
-            end_seconds,
-            score,
-        };
-        span.validate()?;
-        Ok(span)
-    }
-
-    /// Returns duration in seconds.
-    pub fn duration_seconds(&self) -> f64 {
-        self.end_seconds - self.start_seconds
-    }
-
-    fn validate(&self) -> Result<()> {
-        if !self.start_seconds.is_finite()
-            || !self.end_seconds.is_finite()
-            || !self.score.is_finite()
-        {
-            return Err(DetectError::InvalidArgument(
-                "speech span values must be finite".to_string(),
-            ));
-        }
-        if self.start_seconds < 0.0 || self.end_seconds <= self.start_seconds {
-            return Err(DetectError::InvalidArgument(
-                "speech span must have non-negative start and positive duration".to_string(),
-            ));
-        }
-        if self.score < 0.0 {
-            return Err(DetectError::InvalidArgument(
-                "speech span score must be non-negative".to_string(),
-            ));
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-/// Energy/RMS VAD configuration.
-pub struct EnergyVadConfig {
-    /// RMS threshold above which a frame is speech.
-    pub rms_threshold: f32,
-    /// Frame duration in seconds.
-    pub frame_seconds: f64,
-    /// Hop duration in seconds.
-    pub hop_seconds: f64,
-    /// Minimum accepted speech span duration.
-    pub min_speech_seconds: f64,
-    /// Merge speech spans separated by less than this gap.
-    pub merge_gap_seconds: f64,
-}
-
-impl EnergyVadConfig {
-    /// Validates this value.
-    pub fn validate(&self) -> Result<()> {
-        if !self.rms_threshold.is_finite() || self.rms_threshold < 0.0 {
-            return Err(DetectError::InvalidArgument(
-                "VAD RMS threshold must be finite and non-negative".to_string(),
-            ));
-        }
-        if !self.frame_seconds.is_finite() || self.frame_seconds <= 0.0 {
-            return Err(DetectError::InvalidArgument(
-                "VAD frame duration must be finite and positive".to_string(),
-            ));
-        }
-        if !self.hop_seconds.is_finite() || self.hop_seconds <= 0.0 {
-            return Err(DetectError::InvalidArgument(
-                "VAD hop duration must be finite and positive".to_string(),
-            ));
-        }
-        if !self.min_speech_seconds.is_finite() || self.min_speech_seconds < 0.0 {
-            return Err(DetectError::InvalidArgument(
-                "VAD minimum speech duration must be finite and non-negative".to_string(),
-            ));
-        }
-        if !self.merge_gap_seconds.is_finite() || self.merge_gap_seconds < 0.0 {
-            return Err(DetectError::InvalidArgument(
-                "VAD merge gap must be finite and non-negative".to_string(),
-            ));
-        }
-        Ok(())
-    }
-}
-
-impl Default for EnergyVadConfig {
-    fn default() -> Self {
-        Self {
-            rms_threshold: 0.01,
-            frame_seconds: 0.03,
-            hop_seconds: 0.01,
-            min_speech_seconds: 0.08,
-            merge_gap_seconds: 0.05,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-/// Simple energy/RMS voice activity detector.
-pub struct EnergyVoiceActivityDetector {
-    /// The config value.
-    pub config: EnergyVadConfig,
-}
-
-impl EnergyVoiceActivityDetector {
-    /// Creates a new value.
-    pub fn new(config: EnergyVadConfig) -> Result<Self> {
-        config.validate()?;
-        Ok(Self { config })
-    }
-}
-
-impl Default for EnergyVoiceActivityDetector {
-    fn default() -> Self {
-        Self::new(EnergyVadConfig::default()).expect("valid default VAD config")
-    }
-}
-
-impl VoiceActivityDetector for EnergyVoiceActivityDetector {
-    fn detect_speech(&mut self, audio: &SpeakerAudio<'_>) -> Result<Vec<SpeechSpan>> {
-        self.config.validate()?;
-        let samples = audio.to_mono()?;
-        let frame_size = seconds_to_samples(self.config.frame_seconds, audio.sample_rate())?;
-        let hop_size = seconds_to_samples(self.config.hop_seconds, audio.sample_rate())?;
-        let frame_spec = FrameSpec::new(frame_size, hop_size)?;
-        let mut active = Vec::new();
-        let frames: Vec<(usize, Vec<f32>)> = if samples.len() < frame_size {
-            vec![(0, zero_pad_to(samples.clone(), frame_size))]
-        } else {
-            frame_spec
-                .frames(&samples)
-                .map(|(start, frame)| (start, frame.to_vec()))
-                .collect()
-        };
-        for (start, frame) in frames {
-            let score = rms(&frame);
-            if score >= self.config.rms_threshold {
-                let start_seconds = start as f64 / audio.sample_rate() as f64;
-                let end_seconds =
-                    ((start + frame_size).min(samples.len())) as f64 / audio.sample_rate() as f64;
-                active.push(SpeechSpan::new(start_seconds, end_seconds, score)?);
-            }
-        }
-        Ok(filter_short_spans(
-            merge_spans(active, self.config.merge_gap_seconds)?,
-            self.config.min_speech_seconds,
-        ))
-    }
-}
-
 /// Trait for speaker diarization implementations.
 pub trait SpeakerDiarizer {
     /// Diarizes speaker activity.
@@ -1841,6 +1676,8 @@ pub struct WindowedSpeakerDiarizer<E, V> {
     pub extractor: E,
     /// Voice activity detector.
     pub vad: V,
+    /// Options passed to the voice activity detector.
+    pub vad_options: VadOptions,
     /// Optional enrolled speaker library.
     pub library: Option<SpeakerLibrary>,
     /// Identification options for mapping clusters to known speakers.
@@ -1860,12 +1697,20 @@ impl<E, V> WindowedSpeakerDiarizer<E, V> {
         Self {
             extractor,
             vad,
+            vad_options: VadOptions::unpadded(),
             library: None,
             identification_options: SpeakerIdentificationOptions::default(),
             cluster_threshold: 0.72,
             min_speakers: None,
             max_speakers: None,
         }
+    }
+
+    /// Returns this value with voice activity detection options.
+    pub fn vad_options(mut self, vad_options: VadOptions) -> Result<Self> {
+        vad_options.validate()?;
+        self.vad_options = vad_options;
+        Ok(self)
     }
 
     /// Returns this value with a speaker library.
@@ -1905,7 +1750,7 @@ where
     V: VoiceActivityDetector,
 {
     fn diarize(&mut self, audio: &SpeakerAudio<'_>) -> Result<DiarizationResult> {
-        let spans = self.vad.detect_speech(audio)?;
+        let spans = self.vad.detect_speech(audio, &self.vad_options)?.segments;
         let mono = audio.to_mono()?;
         let mut windows = Vec::new();
 
@@ -2852,46 +2697,6 @@ fn normalize_values(values: &mut [f32]) -> Result<()> {
     Ok(())
 }
 
-fn seconds_to_samples(seconds: f64, sample_rate: u32) -> Result<usize> {
-    if !seconds.is_finite() || seconds <= 0.0 {
-        return Err(DetectError::InvalidArgument(
-            "duration must be finite and positive".to_string(),
-        ));
-    }
-    Ok(((seconds * sample_rate as f64).round() as usize).max(1))
-}
-
-fn merge_spans(spans: Vec<SpeechSpan>, merge_gap_seconds: f64) -> Result<Vec<SpeechSpan>> {
-    let mut merged: Vec<SpeechSpan> = Vec::new();
-    for span in spans {
-        if let Some(last) = merged.last_mut() {
-            if span.start_seconds - last.end_seconds <= merge_gap_seconds {
-                let total_duration = last.duration_seconds() + span.duration_seconds();
-                let score = if total_duration <= f64::EPSILON {
-                    last.score.max(span.score) as f64
-                } else {
-                    ((last.score as f64 * last.duration_seconds())
-                        + (span.score as f64 * span.duration_seconds()))
-                        / total_duration
-                } as f32;
-                last.end_seconds = span.end_seconds;
-                last.score = score;
-                last.validate()?;
-                continue;
-            }
-        }
-        merged.push(span);
-    }
-    Ok(merged)
-}
-
-fn filter_short_spans(spans: Vec<SpeechSpan>, min_speech_seconds: f64) -> Vec<SpeechSpan> {
-    spans
-        .into_iter()
-        .filter(|span| span.duration_seconds() >= min_speech_seconds)
-        .collect()
-}
-
 /// Handles speaker diarization from imported segments or one-speaker fallback.
 pub fn diarize_speakers(request: SpeakerDiarizationRequest) -> Result<SpeakerDiarizationResponse> {
     let model_id = request
@@ -2950,10 +2755,9 @@ pub fn diarize_speaker_audio_baseline(
 ) -> Result<SpeakerDiarizationResponse> {
     let audio = SpeakerAudio::mono(samples, sample_rate)?;
     let embedder = SpectralSpeakerEmbedder::default();
-    let vad_config = EnergyVadConfig::default();
-    let vad = EnergyVoiceActivityDetector::new(vad_config)?;
-    let merge_gap_seconds = vad_config.merge_gap_seconds as f32;
-    let mut diarizer = WindowedSpeakerDiarizer::new(embedder, vad).cluster_threshold(0.95)?;
+    let mut diarizer = WindowedSpeakerDiarizer::new(embedder, EnergyVoiceActivityDetector)
+        .cluster_threshold(0.95)?;
+    let merge_gap_seconds = diarizer.vad_options.merge_gap_seconds as f32;
     let result = diarizer.diarize(&audio)?;
     let segments = stable_speaker_predictions(result.segments, merge_gap_seconds)?;
     Ok(SpeakerDiarizationResponse {
@@ -3778,8 +3582,19 @@ mod tests {
     }
 
     impl VoiceActivityDetector for FixedVad {
-        fn detect_speech(&mut self, _audio: &SpeakerAudio<'_>) -> Result<Vec<SpeechSpan>> {
-            Ok(self.spans.clone())
+        fn provider_id(&self) -> &str {
+            "fixed"
+        }
+
+        fn detect_speech(
+            &mut self,
+            _audio: &SpeakerAudio<'_>,
+            _options: &VadOptions,
+        ) -> Result<VadResponse> {
+            Ok(VadResponse {
+                segments: self.spans.clone(),
+                diagnostics: Vec::new(),
+            })
         }
     }
 
@@ -4659,61 +4474,6 @@ mod tests {
     }
 
     #[test]
-    fn energy_vad_detects_and_merges_speech_spans() {
-        let sample_rate = 1_000;
-        let mut samples = vec![0.0; 100];
-        samples.extend(vec![0.2; 120]);
-        samples.extend(vec![0.0; 20]);
-        samples.extend(vec![0.2; 120]);
-        samples.extend(vec![0.0; 100]);
-        let audio = SpeakerAudio::mono(&samples, sample_rate).unwrap();
-        let mut vad = EnergyVoiceActivityDetector::new(EnergyVadConfig {
-            rms_threshold: 0.05,
-            frame_seconds: 0.04,
-            hop_seconds: 0.02,
-            min_speech_seconds: 0.05,
-            merge_gap_seconds: 0.05,
-        })
-        .unwrap();
-
-        let spans = vad.detect_speech(&audio).unwrap();
-
-        assert_eq!(spans.len(), 1);
-        assert!(spans[0].duration_seconds() >= 0.25);
-    }
-
-    #[test]
-    fn energy_vad_rejects_invalid_config_and_filters_short_or_quiet_audio() {
-        assert!(EnergyVoiceActivityDetector::new(EnergyVadConfig {
-            rms_threshold: -1.0,
-            ..EnergyVadConfig::default()
-        })
-        .is_err());
-        assert!(EnergyVoiceActivityDetector::new(EnergyVadConfig {
-            frame_seconds: 0.0,
-            ..EnergyVadConfig::default()
-        })
-        .is_err());
-
-        let quiet = [0.0_f32; 200];
-        let audio = SpeakerAudio::mono(&quiet, 1_000).unwrap();
-        let mut vad = EnergyVoiceActivityDetector::default();
-        assert!(vad.detect_speech(&audio).unwrap().is_empty());
-
-        let short = [0.2_f32; 20];
-        let audio = SpeakerAudio::mono(&short, 1_000).unwrap();
-        let mut vad = EnergyVoiceActivityDetector::new(EnergyVadConfig {
-            rms_threshold: 0.05,
-            frame_seconds: 0.01,
-            hop_seconds: 0.01,
-            min_speech_seconds: 0.05,
-            merge_gap_seconds: 0.0,
-        })
-        .unwrap();
-        assert!(vad.detect_speech(&audio).unwrap().is_empty());
-    }
-
-    #[test]
     fn diarizer_returns_unknown_segments_for_unenrolled_clusters() {
         let sample_rate = 8_000;
         let samples = sine(220.0, sample_rate, 0.25);
@@ -4721,15 +4481,16 @@ mod tests {
         let embedder =
             SpectralSpeakerEmbedder::new(SpectralEmbeddingConfig::new(512, 256, 8).unwrap())
                 .unwrap();
-        let vad = EnergyVoiceActivityDetector::new(EnergyVadConfig {
-            rms_threshold: 0.01,
-            frame_seconds: 0.05,
-            hop_seconds: 0.05,
-            min_speech_seconds: 0.05,
-            merge_gap_seconds: 0.02,
-        })
-        .unwrap();
-        let mut diarizer = WindowedSpeakerDiarizer::new(embedder, vad);
+        let mut diarizer = WindowedSpeakerDiarizer::new(embedder, EnergyVoiceActivityDetector)
+            .vad_options(VadOptions {
+                rms_threshold: 0.01,
+                frame_seconds: 0.05,
+                hop_seconds: 0.05,
+                min_speech_seconds: 0.05,
+                merge_gap_seconds: 0.02,
+                ..VadOptions::unpadded()
+            })
+            .unwrap();
 
         let result = diarizer.diarize(&audio).unwrap();
 

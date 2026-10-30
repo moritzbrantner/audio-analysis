@@ -23,7 +23,7 @@ use serde::Deserialize;
 #[cfg(feature = "pyannote-vad")]
 use sha2::{Digest, Sha256};
 
-use crate::{SpeechActivitySegment, TranscriptionVadProvider, VadRequest, VadResponse};
+use crate::{SpeakerAudio, SpeechSpan, VadOptions, VadResponse, VoiceActivityDetector};
 
 const SILERO_SAMPLE_RATE: u32 = 16_000;
 const SILERO_WINDOW_SAMPLES: usize = 512;
@@ -195,21 +195,26 @@ impl PyannoteVadTranscriptionProvider {
 }
 
 #[cfg(any(feature = "pyannote-vad", test))]
-impl TranscriptionVadProvider for PyannoteVadTranscriptionProvider {
+impl VoiceActivityDetector for PyannoteVadTranscriptionProvider {
     fn provider_id(&self) -> &str {
         "pyannote-vad"
     }
 
-    fn detect_speech(&mut self, request: VadRequest) -> Result<VadResponse> {
-        if request.audio.sample_rate != PYANNOTE_SAMPLE_RATE || request.audio.channels != 1 {
+    fn detect_speech(
+        &mut self,
+        audio: &SpeakerAudio<'_>,
+        _options: &VadOptions,
+    ) -> Result<VadResponse> {
+        if audio.sample_rate() != PYANNOTE_SAMPLE_RATE || audio.channels() != 1 {
             return Err(DetectError::InvalidArgument(format!(
                 "pyannote VAD requires 16000 Hz mono audio, got sample_rate={} channels={}",
-                request.audio.sample_rate, request.audio.channels
+                audio.sample_rate(),
+                audio.channels()
             )));
         }
         let batch = self
             .runner
-            .speech_frames(&request.audio.samples, request.audio.sample_rate)?;
+            .speech_frames(audio.samples(), audio.sample_rate())?;
         let raw_segments =
             pyannote_frames_to_segments(&batch.frames, self.onset, self.offset, self.chunk_size)?;
         let segments = merge_whisperx_vad_chunks(raw_segments, self.chunk_size)?;
@@ -226,27 +231,35 @@ impl TranscriptionVadProvider for PyannoteVadTranscriptionProvider {
     }
 }
 
-impl TranscriptionVadProvider for SileroVadTranscriptionProvider {
+impl VoiceActivityDetector for SileroVadTranscriptionProvider {
     fn provider_id(&self) -> &str {
         "silero-vad"
     }
 
-    fn detect_speech(&mut self, request: VadRequest) -> Result<VadResponse> {
-        if request.audio.sample_rate != SILERO_SAMPLE_RATE || request.audio.channels != 1 {
+    fn detect_speech(
+        &mut self,
+        audio: &SpeakerAudio<'_>,
+        options: &VadOptions,
+    ) -> Result<VadResponse> {
+        if audio.sample_rate() != SILERO_SAMPLE_RATE || audio.channels() != 1 {
             return Err(DetectError::InvalidArgument(format!(
                 "silero VAD requires 16000 Hz mono audio, got sample_rate={} channels={}",
-                request.audio.sample_rate, request.audio.channels
+                audio.sample_rate(),
+                audio.channels()
             )));
         }
         let probabilities = self
             .runner
-            .speech_probabilities(&request.audio.samples, request.audio.sample_rate)?;
+            .speech_probabilities(audio.samples(), audio.sample_rate())?;
         let raw_segments = self
             .detector
-            .detect_from_probabilities(&probabilities, request.audio.samples.len())?;
+            .detect_from_probabilities(&probabilities, audio.samples().len())?;
         let segments = merge_whisperx_vad_chunks(
             raw_segments,
-            request.options.max_chunk_seconds.max(f64::EPSILON),
+            options
+                .max_chunk_seconds
+                .unwrap_or(f64::INFINITY)
+                .max(f64::EPSILON),
         )?;
         let mut diagnostics = vec![
             format!("sileroVadProbabilityWindows={}", probabilities.len()),
@@ -274,7 +287,7 @@ impl SileroTimestampDetector {
         &self,
         probabilities: &[f32],
         audio_len_samples: usize,
-    ) -> Result<Vec<SpeechActivitySegment>> {
+    ) -> Result<Vec<SpeechSpan>> {
         if probabilities
             .iter()
             .any(|probability| !probability.is_finite())
@@ -403,7 +416,7 @@ impl SileroTimestampDetector {
             .filter(|speech| speech.end > speech.start)
             .map(|speech| {
                 let score = max_probability_for_span(probabilities, speech.start, speech.end);
-                SpeechActivitySegment::new(
+                SpeechSpan::new(
                     speech.start as f64 / SILERO_SAMPLE_RATE as f64,
                     speech.end as f64 / SILERO_SAMPLE_RATE as f64,
                     score,
@@ -463,9 +476,9 @@ fn max_probability_for_span(probabilities: &[f32], start: usize, end: usize) -> 
 }
 
 pub fn merge_whisperx_vad_chunks(
-    segments: Vec<SpeechActivitySegment>,
+    segments: Vec<SpeechSpan>,
     chunk_size: f64,
-) -> Result<Vec<SpeechActivitySegment>> {
+) -> Result<Vec<SpeechSpan>> {
     let Some(first) = segments.first() else {
         return Ok(Vec::new());
     };
@@ -476,9 +489,7 @@ pub fn merge_whisperx_vad_chunks(
 
     for segment in segments {
         if segment.end_seconds - curr_start > chunk_size && curr_end - curr_start > 0.0 {
-            merged.push(SpeechActivitySegment::new(
-                curr_start, curr_end, curr_score,
-            )?);
+            merged.push(SpeechSpan::new(curr_start, curr_end, curr_score)?);
             curr_start = segment.start_seconds;
             curr_score = segment.score;
         } else {
@@ -487,9 +498,7 @@ pub fn merge_whisperx_vad_chunks(
         curr_end = segment.end_seconds;
     }
 
-    merged.push(SpeechActivitySegment::new(
-        curr_start, curr_end, curr_score,
-    )?);
+    merged.push(SpeechSpan::new(curr_start, curr_end, curr_score)?);
     Ok(merged)
 }
 
@@ -499,7 +508,7 @@ fn pyannote_frames_to_segments(
     onset: f32,
     offset: f32,
     max_duration: f64,
-) -> Result<Vec<SpeechActivitySegment>> {
+) -> Result<Vec<SpeechSpan>> {
     if frames.iter().any(|frame| {
         !frame.start_seconds.is_finite()
             || !frame.end_seconds.is_finite()
@@ -575,7 +584,7 @@ fn pyannote_frames_to_segments(
 
 #[cfg(any(feature = "pyannote-vad", test))]
 fn push_pyannote_segment(
-    segments: &mut Vec<SpeechActivitySegment>,
+    segments: &mut Vec<SpeechSpan>,
     start: f64,
     end: f64,
     frames: &[PyannoteVadFrame],
@@ -584,7 +593,7 @@ fn push_pyannote_segment(
         return Ok(());
     }
     let score = frames.iter().map(|frame| frame.score).fold(0.0, f32::max);
-    segments.push(SpeechActivitySegment::new(start, end, score)?);
+    segments.push(SpeechSpan::new(start, end, score)?);
     Ok(())
 }
 
@@ -1398,7 +1407,22 @@ fn pyannote_onnx_invalid(error: runtime_onnx::OnnxRuntimeError) -> DetectError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{LoadedAudio, VadOptions};
+    use crate::LoadedAudio;
+
+    struct VadRequest {
+        audio: LoadedAudio,
+        options: VadOptions,
+    }
+
+    trait DetectRequest {
+        fn detect_request(&mut self, request: VadRequest) -> Result<VadResponse>;
+    }
+
+    impl<T: VoiceActivityDetector> DetectRequest for T {
+        fn detect_request(&mut self, request: VadRequest) -> Result<VadResponse> {
+            self.detect_speech(&request.audio.speaker_audio()?, &request.options)
+        }
+    }
 
     #[derive(Debug)]
     struct MockSileroRunner {
@@ -1492,9 +1516,9 @@ mod tests {
     fn merge_whisperx_vad_chunks_matches_expected_boundaries() {
         let merged = merge_whisperx_vad_chunks(
             vec![
-                SpeechActivitySegment::new(0.0, 4.0, 0.5).unwrap(),
-                SpeechActivitySegment::new(4.2, 8.0, 0.6).unwrap(),
-                SpeechActivitySegment::new(8.2, 11.0, 0.7).unwrap(),
+                SpeechSpan::new(0.0, 4.0, 0.5).unwrap(),
+                SpeechSpan::new(4.2, 8.0, 0.6).unwrap(),
+                SpeechSpan::new(8.2, 11.0, 0.7).unwrap(),
             ],
             7.0,
         )
@@ -1518,9 +1542,9 @@ mod tests {
     #[test]
     fn merge_whisperx_vad_chunks_ignores_silero_onset_and_offset() {
         let segments = vec![
-            SpeechActivitySegment::new(0.0, 4.0, 0.5).unwrap(),
-            SpeechActivitySegment::new(4.2, 8.0, 0.6).unwrap(),
-            SpeechActivitySegment::new(8.2, 11.0, 0.7).unwrap(),
+            SpeechSpan::new(0.0, 4.0, 0.5).unwrap(),
+            SpeechSpan::new(4.2, 8.0, 0.6).unwrap(),
+            SpeechSpan::new(8.2, 11.0, 0.7).unwrap(),
         ];
 
         let default = merge_with_whisperx_silero_args(segments.clone(), 7.0, 0.5, Some(0.363))
@@ -1535,8 +1559,8 @@ mod tests {
     fn merge_whisperx_vad_chunks_starts_new_chunk_only_after_progress() {
         let merged = merge_whisperx_vad_chunks(
             vec![
-                SpeechActivitySegment::new(0.0, 10.0, 0.5).unwrap(),
-                SpeechActivitySegment::new(10.0, 11.0, 0.6).unwrap(),
+                SpeechSpan::new(0.0, 10.0, 0.5).unwrap(),
+                SpeechSpan::new(10.0, 11.0, 0.6).unwrap(),
             ],
             5.0,
         )
@@ -1562,7 +1586,7 @@ mod tests {
             }),
             vec!["sileroVadThreshold=0.5".to_string()],
         );
-        let response = provider.detect_speech(vad_request(1.0)).expect("detect");
+        let response = provider.detect_request(vad_request(1.0)).expect("detect");
 
         assert_eq!(provider.provider_id(), "silero-vad");
         assert_eq!(response.segments.len(), 1);
@@ -1594,8 +1618,8 @@ mod tests {
             }),
             Vec::new(),
         );
-        let first = provider.detect_speech(vad_request(1.0)).expect("first");
-        let second = provider.detect_speech(vad_request(1.0)).expect("second");
+        let first = provider.detect_request(vad_request(1.0)).expect("first");
+        let second = provider.detect_request(vad_request(1.0)).expect("second");
 
         assert_eq!(first.segments, second.segments);
     }
@@ -1612,13 +1636,13 @@ mod tests {
             }),
             Vec::new(),
         );
-        let error = provider.detect_speech(request).expect_err("should reject");
+        let error = provider.detect_request(request).expect_err("should reject");
 
         assert!(error.to_string().contains("16000 Hz mono audio"));
 
         let mut request = vad_request(1.0);
         request.audio.channels = 2;
-        let error = provider.detect_speech(request).expect_err("should reject");
+        let error = provider.detect_request(request).expect_err("should reject");
 
         assert!(error.to_string().contains("channels=2"));
     }
@@ -1641,7 +1665,7 @@ mod tests {
             }),
             vec!["pyannoteVadModel=/models/pyannote_vad.onnx".to_string()],
         );
-        let response = provider.detect_speech(vad_request(1.0)).expect("detect");
+        let response = provider.detect_request(vad_request(1.0)).expect("detect");
 
         assert_eq!(provider.provider_id(), "pyannote-vad");
         assert_eq!(response.segments.len(), 1);
@@ -1685,7 +1709,7 @@ mod tests {
             }),
             Vec::new(),
         );
-        let response = provider.detect_speech(vad_request(12.0)).expect("detect");
+        let response = provider.detect_request(vad_request(12.0)).expect("detect");
 
         assert_eq!(response.segments.len(), 2);
         assert_eq!(response.segments[0].start_seconds, 0.0);
@@ -1773,7 +1797,7 @@ mod tests {
         eprintln!("loaded pyannote VAD provider");
 
         let response = provider
-            .detect_speech(VadRequest {
+            .detect_request(VadRequest {
                 audio: LoadedAudio {
                     samples,
                     sample_rate: spec.sample_rate,
@@ -1801,7 +1825,7 @@ mod tests {
             Vec::new(),
         );
         let error = provider
-            .detect_speech(vad_request(1.0))
+            .detect_request(vad_request(1.0))
             .expect_err("non-finite pyannote frame should fail");
 
         assert!(error
@@ -1823,7 +1847,7 @@ mod tests {
             }),
             Vec::new(),
         );
-        let error = provider.detect_speech(request).expect_err("should reject");
+        let error = provider.detect_request(request).expect_err("should reject");
 
         assert!(error.to_string().contains("16000 Hz mono audio"));
         assert!(error.to_string().contains("channels=2"));
@@ -2040,7 +2064,7 @@ mod tests {
         for sample in &mut request.audio.samples[8_000..24_000] {
             *sample = 0.2;
         }
-        let response = provider.detect_speech(request).expect("detect");
+        let response = provider.detect_request(request).expect("detect");
 
         assert!(!response.segments.is_empty());
     }
@@ -2065,8 +2089,7 @@ mod tests {
                 source: Some("mock.wav".to_string()),
             },
             options: VadOptions {
-                enabled: true,
-                max_chunk_seconds: 30.0,
+                max_chunk_seconds: Some(30.0),
                 ..VadOptions::default()
             },
         }
@@ -2117,11 +2140,11 @@ mod tests {
     }
 
     fn merge_with_whisperx_silero_args(
-        segments: Vec<SpeechActivitySegment>,
+        segments: Vec<SpeechSpan>,
         chunk_size: f64,
         _onset: f32,
         _offset: Option<f32>,
-    ) -> Result<Vec<SpeechActivitySegment>> {
+    ) -> Result<Vec<SpeechSpan>> {
         merge_whisperx_vad_chunks(segments, chunk_size)
     }
 }

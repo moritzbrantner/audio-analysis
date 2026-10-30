@@ -257,8 +257,9 @@ const CANDLE_WHISPER_ACTIVE_ROW_TENSOR_BATCH_EXECUTION: &str =
 #[cfg(feature = "audio-io")]
 pub use audio_analysis_io::{AudioIoError, SelectedMediaSource};
 pub use audio_analysis_speakers::{
-    AudioRuntime, SpeakerDiarizationOptions, SpeakerDiarizationResponse, SpeakerSegmentPrediction,
-    SpeakerTranscriptAssignmentPolicy,
+    AudioRuntime, EnergyVoiceActivityDetector, SpeakerAudio, SpeakerDiarizationOptions,
+    SpeakerDiarizationResponse, SpeakerSegmentPrediction, SpeakerTranscriptAssignmentPolicy,
+    SpeechSpan, VadOptions, VadResponse, VoiceActivityDetector,
 };
 #[cfg(feature = "candle")]
 pub use native_whisper_quantized::{
@@ -283,7 +284,7 @@ pub struct TranscriptionPipelineRequest {
     pub source: TranscriptionSource,
     pub provider: TranscriptionProviderSelection,
     #[serde(default)]
-    pub vad: VadOptions,
+    pub vad: TranscriptionVadOptions,
     #[serde(default)]
     pub alignment: AlignmentOptions,
     #[serde(default)]
@@ -1144,65 +1145,28 @@ impl AlignmentInterpolationMethod {
 }
 
 /// VAD options used before ASR chunking.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct VadOptions {
+pub struct TranscriptionVadOptions {
+    /// Run VAD; when disabled the full source is one ASR chunk.
     #[serde(default = "default_vad_enabled")]
     pub enabled: bool,
-    #[serde(default = "default_vad_threshold")]
-    pub rms_threshold: f32,
-    #[serde(default = "default_vad_frame_seconds")]
-    pub frame_seconds: f64,
-    #[serde(default = "default_vad_hop_seconds")]
-    pub hop_seconds: f64,
-    #[serde(default = "default_vad_min_speech_seconds")]
-    pub min_speech_seconds: f64,
-    #[serde(default = "default_vad_padding_seconds")]
-    pub padding_seconds: f64,
-    #[serde(default = "default_vad_merge_gap_seconds")]
-    pub merge_gap_seconds: f64,
-    #[serde(default = "default_vad_max_chunk_seconds")]
-    pub max_chunk_seconds: f64,
+    /// Detection options passed to the voice activity detector.
+    #[serde(flatten)]
+    pub detection: VadOptions,
 }
 
-impl Default for VadOptions {
+impl Default for TranscriptionVadOptions {
     fn default() -> Self {
         Self {
-            enabled: true,
-            rms_threshold: default_vad_threshold(),
-            frame_seconds: default_vad_frame_seconds(),
-            hop_seconds: default_vad_hop_seconds(),
-            min_speech_seconds: default_vad_min_speech_seconds(),
-            padding_seconds: default_vad_padding_seconds(),
-            merge_gap_seconds: default_vad_merge_gap_seconds(),
-            max_chunk_seconds: default_vad_max_chunk_seconds(),
+            enabled: default_vad_enabled(),
+            detection: VadOptions::default(),
         }
     }
 }
 
 fn default_vad_enabled() -> bool {
     true
-}
-fn default_vad_threshold() -> f32 {
-    0.01
-}
-fn default_vad_frame_seconds() -> f64 {
-    0.03
-}
-fn default_vad_hop_seconds() -> f64 {
-    0.01
-}
-fn default_vad_min_speech_seconds() -> f64 {
-    0.08
-}
-fn default_vad_padding_seconds() -> f64 {
-    0.02
-}
-fn default_vad_merge_gap_seconds() -> f64 {
-    0.05
-}
-fn default_vad_max_chunk_seconds() -> f64 {
-    30.0
 }
 
 /// Forced-alignment options.
@@ -1311,7 +1275,7 @@ pub struct TranscriptionPipelineResponse {
     pub provider: String,
     pub model_id: String,
     pub transcript: TranscriptionContract,
-    pub vad_segments: Vec<SpeechActivitySegment>,
+    pub vad_segments: Vec<SpeechSpan>,
     pub alignment: Option<AlignmentSummary>,
     pub diarization: Option<SpeakerDiarizationResponse>,
     pub artifacts: Vec<TranscriptionArtifact>,
@@ -1364,6 +1328,11 @@ impl LoadedAudio {
         }
         self.samples.len() as f64 / self.channels as f64 / self.sample_rate as f64
     }
+
+    /// Borrows these samples as validated audio for voice activity detection.
+    pub fn speaker_audio(&self) -> Result<SpeakerAudio<'_>> {
+        SpeakerAudio::interleaved(&self.samples, self.sample_rate, self.channels)
+    }
 }
 
 /// Error returned by selected-media transcription entrypoints.
@@ -1403,50 +1372,12 @@ impl From<audio_analysis_io::AudioIoError> for SelectedMediaTranscriptionError {
     }
 }
 
-/// A speech activity span used for ASR chunking.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SpeechActivitySegment {
-    pub start_seconds: f64,
-    pub end_seconds: f64,
-    pub score: f32,
-}
-
-impl SpeechActivitySegment {
-    pub fn new(start_seconds: f64, end_seconds: f64, score: f32) -> Result<Self> {
-        let segment = Self {
-            start_seconds,
-            end_seconds,
-            score,
-        };
-        segment.validate()?;
-        Ok(segment)
-    }
-
-    pub fn validate(&self) -> Result<()> {
-        if !self.start_seconds.is_finite()
-            || !self.end_seconds.is_finite()
-            || !self.score.is_finite()
-        {
-            return Err(invalid_request(
-                "speech activity segment values must be finite",
-            ));
-        }
-        if self.start_seconds < 0.0 || self.end_seconds <= self.start_seconds {
-            return Err(invalid_request(
-                "speech activity segment must have non-negative start and positive duration",
-            ));
-        }
-        Ok(())
-    }
-}
-
 /// ASR provider request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AsrRequest {
     pub audio: LoadedAudio,
-    pub chunks: Vec<SpeechActivitySegment>,
+    pub chunks: Vec<SpeechSpan>,
     #[serde(default)]
     pub task: TranscriptionTask,
     pub language: Option<String>,
@@ -1523,23 +1454,6 @@ pub struct AlignmentSummary {
     pub word_count: usize,
 }
 
-/// VAD request.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct VadRequest {
-    pub audio: LoadedAudio,
-    pub options: VadOptions,
-}
-
-/// VAD response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct VadResponse {
-    pub segments: Vec<SpeechActivitySegment>,
-    #[serde(default)]
-    pub diagnostics: Vec<String>,
-}
-
 /// Trait for audio transcription providers.
 pub trait AudioTranscriptionProvider {
     fn provider_id(&self) -> &str;
@@ -1566,12 +1480,6 @@ pub trait ForcedAlignmentProvider {
     ) -> Result<AlignmentResponse> {
         self.align(request)
     }
-}
-
-/// Trait for transcription VAD providers.
-pub trait TranscriptionVadProvider {
-    fn provider_id(&self) -> &str;
-    fn detect_speech(&mut self, request: VadRequest) -> Result<VadResponse>;
 }
 
 /// Trait for transcript diarization and speaker assignment providers.
@@ -1644,8 +1552,7 @@ impl TranscriptDiarizationProvider for NativeSpeakerDiarizationProvider {
         let speaker_audio =
             audio_analysis_speakers::SpeakerAudio::mono(&audio.samples, audio.sample_rate)?;
         let embedder = audio_analysis_speakers::SpectralSpeakerEmbedder::default();
-        let vad_config = audio_analysis_speakers::EnergyVadConfig::default();
-        let vad = audio_analysis_speakers::EnergyVoiceActivityDetector::new(vad_config)?;
+        let vad = EnergyVoiceActivityDetector;
         let mut diarizer = audio_analysis_speakers::WindowedSpeakerDiarizer::new(embedder, vad)
             .cluster_threshold(0.95)?
             .speaker_bounds(options.min_speakers, options.max_speakers)?;
@@ -1726,7 +1633,7 @@ fn diarize_with_onnx_speaker_embeddings(
     let embedder = audio_analysis_speakers::OnnxSpeakerEmbedder::from_config(config)?;
     let spans = speech_spans_from_transcript(transcript, audio.duration_seconds())?;
     let result = if spans.is_empty() {
-        let vad = audio_analysis_speakers::EnergyVoiceActivityDetector::default();
+        let vad = EnergyVoiceActivityDetector;
         let mut diarizer = audio_analysis_speakers::WindowedSpeakerDiarizer::new(embedder, vad)
             .cluster_threshold(0.95)?
             .speaker_bounds(options.min_speakers, options.max_speakers)?;
@@ -1747,24 +1654,6 @@ fn diarize_with_onnx_speaker_embeddings(
         speaker_embeddings: None,
         diagnostics: Vec::new(),
     })
-}
-
-/// Default pure-Rust energy VAD provider.
-#[derive(Debug, Clone, Default)]
-pub struct EnergyVadTranscriptionProvider;
-
-impl TranscriptionVadProvider for EnergyVadTranscriptionProvider {
-    fn provider_id(&self) -> &str {
-        "energy-vad"
-    }
-
-    fn detect_speech(&mut self, request: VadRequest) -> Result<VadResponse> {
-        let segments = energy_vad_segments(&request.audio, &request.options)?;
-        Ok(VadResponse {
-            segments,
-            diagnostics: vec!["deterministic energy VAD completed".to_string()],
-        })
-    }
 }
 
 /// Feature-gated Candle Whisper provider.
@@ -2461,7 +2350,7 @@ impl WhisperXCommandTranscriber {
 pub struct NativeTranscriptionRunnerOptions {
     pub provider: TranscriptionProviderSelection,
     #[serde(default)]
-    pub vad: VadOptions,
+    pub vad: TranscriptionVadOptions,
     #[serde(default)]
     pub alignment: AlignmentOptions,
     #[serde(default)]
@@ -2473,7 +2362,7 @@ impl NativeTranscriptionRunnerOptions {
     pub fn from_request(request: &TranscriptionPipelineRequest) -> Self {
         Self {
             provider: request.provider.clone(),
-            vad: request.vad.clone(),
+            vad: request.vad,
             alignment: request.alignment.clone(),
             diarization: request.diarization.clone(),
         }
@@ -2484,7 +2373,7 @@ impl Default for NativeTranscriptionRunnerOptions {
     fn default() -> Self {
         Self {
             provider: TranscriptionProviderSelection::CandleWhisper(CandleWhisperOptions::default()),
-            vad: VadOptions::default(),
+            vad: TranscriptionVadOptions::default(),
             alignment: AlignmentOptions::default(),
             diarization: DiarizationOptions::default(),
         }
@@ -2500,7 +2389,7 @@ impl Default for NativeTranscriptionRunnerOptions {
 pub struct NativeTranscriptionRunner {
     options: NativeTranscriptionRunnerOptions,
     mode: NativeTranscriptionRunnerMode,
-    vad_provider: Box<dyn TranscriptionVadProvider>,
+    vad_provider: Box<dyn VoiceActivityDetector>,
     asr_provider: Box<dyn AudioTranscriptionProvider>,
     alignment_provider: Option<Box<dyn ForcedAlignmentProvider>>,
     diarization_provider: Option<Box<dyn TranscriptDiarizationProvider>>,
@@ -2565,7 +2454,7 @@ impl NativeTranscriptionRunner {
         Ok(Self {
             options,
             mode: NativeTranscriptionRunnerMode::DefaultStack,
-            vad_provider: Box::new(EnergyVadTranscriptionProvider),
+            vad_provider: Box::new(EnergyVoiceActivityDetector),
             asr_provider,
             alignment_provider,
             diarization_provider,
@@ -2583,7 +2472,7 @@ impl NativeTranscriptionRunner {
     /// than introducing a separate test-only abstraction.
     pub fn from_providers(
         options: NativeTranscriptionRunnerOptions,
-        vad_provider: Box<dyn TranscriptionVadProvider>,
+        vad_provider: Box<dyn VoiceActivityDetector>,
         asr_provider: Box<dyn AudioTranscriptionProvider>,
         alignment_provider: Option<Box<dyn ForcedAlignmentProvider>>,
         diarization_provider: Option<Box<dyn TranscriptDiarizationProvider>>,
@@ -2686,7 +2575,7 @@ impl NativeTranscriptionRunner {
 
 fn run_native_transcription_pipeline(
     request: TranscriptionPipelineRequest,
-    vad: &mut dyn TranscriptionVadProvider,
+    vad: &mut dyn VoiceActivityDetector,
     asr: &mut dyn AudioTranscriptionProvider,
     diarization_provider: Option<&mut dyn TranscriptDiarizationProvider>,
 ) -> Result<TranscriptionPipelineResponse> {
@@ -2714,7 +2603,7 @@ pub fn transcribe(request: TranscriptionPipelineRequest) -> Result<Transcription
             provider.transcribe_pipeline(request)
         }
         TranscriptionProviderSelection::CandleWhisper(options) => {
-            let mut vad = EnergyVadTranscriptionProvider;
+            let mut vad = EnergyVoiceActivityDetector;
             let mut asr = CandleWhisperTranscriber::new(options.clone());
             #[cfg(feature = "diarization")]
             {
@@ -2731,7 +2620,7 @@ pub fn transcribe(request: TranscriptionPipelineRequest) -> Result<Transcription
             }
         }
         TranscriptionProviderSelection::WhisperCpp(options) => {
-            let mut vad = EnergyVadTranscriptionProvider;
+            let mut vad = EnergyVoiceActivityDetector;
             let mut asr = WhisperCppTranscriber {
                 options: options.clone(),
             };
@@ -2772,7 +2661,7 @@ pub fn transcribe_selected_media(
 pub fn run_transcription_pipeline_from_selected_media_with_observer(
     request: TranscriptionPipelineRequest,
     audio_stream_index: Option<usize>,
-    vad_provider: &mut dyn TranscriptionVadProvider,
+    vad_provider: &mut dyn VoiceActivityDetector,
     asr_provider: &mut dyn AudioTranscriptionProvider,
     alignment_provider: Option<&mut dyn ForcedAlignmentProvider>,
     diarization_provider: Option<&mut dyn TranscriptDiarizationProvider>,
@@ -2821,7 +2710,7 @@ fn predecode_selected_media_request(
 /// Runs the provider-agnostic native transcription pipeline.
 pub fn run_transcription_pipeline(
     request: TranscriptionPipelineRequest,
-    vad_provider: &mut dyn TranscriptionVadProvider,
+    vad_provider: &mut dyn VoiceActivityDetector,
     asr_provider: &mut dyn AudioTranscriptionProvider,
     alignment_provider: Option<&mut dyn ForcedAlignmentProvider>,
     diarization_provider: Option<&mut dyn TranscriptDiarizationProvider>,
@@ -2840,7 +2729,7 @@ pub fn run_transcription_pipeline(
 /// Runs the provider-agnostic native transcription pipeline and emits phase events.
 pub fn run_transcription_pipeline_with_observer(
     request: TranscriptionPipelineRequest,
-    vad_provider: &mut dyn TranscriptionVadProvider,
+    vad_provider: &mut dyn VoiceActivityDetector,
     asr_provider: &mut dyn AudioTranscriptionProvider,
     alignment_provider: Option<&mut dyn ForcedAlignmentProvider>,
     diarization_provider: Option<&mut dyn TranscriptDiarizationProvider>,
@@ -2866,18 +2755,22 @@ pub fn run_transcription_pipeline_with_observer(
         provider: vad_provider.provider_id().to_string(),
     });
     ensure_pipeline_active(observer)?;
+    let full_source_seconds = audio.duration_seconds().max(1.0 / audio.sample_rate as f64);
     let vad_response = if request.vad.enabled {
-        vad_provider.detect_speech(VadRequest {
-            audio: audio.clone(),
-            options: request.vad.clone(),
-        })?
+        let mut response =
+            vad_provider.detect_speech(&audio.speaker_audio()?, &request.vad.detection)?;
+        if response.segments.is_empty() {
+            response
+                .segments
+                .push(SpeechSpan::new(0.0, full_source_seconds, 0.0)?);
+            response
+                .diagnostics
+                .push("VAD found no speech; using full source as one ASR chunk".to_string());
+        }
+        response
     } else {
         VadResponse {
-            segments: vec![SpeechActivitySegment::new(
-                0.0,
-                audio.duration_seconds().max(1.0 / audio.sample_rate as f64),
-                1.0,
-            )?],
+            segments: vec![SpeechSpan::new(0.0, full_source_seconds, 1.0)?],
             diagnostics: vec!["VAD disabled; using full source as one ASR chunk".to_string()],
         }
     };
@@ -3587,7 +3480,7 @@ fn validate_diarization_options(options: &DiarizationOptions) -> Result<()> {
 fn speech_spans_from_transcript(
     transcript: &TranscriptionContract,
     audio_duration_seconds: f64,
-) -> Result<Vec<audio_analysis_speakers::SpeechSpan>> {
+) -> Result<Vec<SpeechSpan>> {
     const AUDIO_DURATION_EPSILON: f64 = 1e-6;
 
     let has_timed_words = transcript.segments.iter().any(|segment| {
@@ -3635,10 +3528,7 @@ fn speech_spans_from_transcript(
         }
     }
 
-    merge_transcript_speech_spans(
-        spans,
-        audio_analysis_speakers::EnergyVadConfig::default().merge_gap_seconds,
-    )
+    merge_transcript_speech_spans(spans, VadOptions::default().merge_gap_seconds)
 }
 
 #[cfg(feature = "diarization")]
@@ -3647,7 +3537,7 @@ fn transcript_timing_span(
     end_seconds: f64,
     audio_duration_seconds: f64,
     audio_duration_epsilon: f64,
-) -> Result<audio_analysis_speakers::SpeechSpan> {
+) -> Result<SpeechSpan> {
     if !start_seconds.is_finite() || !end_seconds.is_finite() || !audio_duration_seconds.is_finite()
     {
         return Err(invalid_request(
@@ -3672,16 +3562,16 @@ fn transcript_timing_span(
     } else {
         end_seconds
     };
-    audio_analysis_speakers::SpeechSpan::new(start_seconds, end_seconds, 1.0)
+    SpeechSpan::new(start_seconds, end_seconds, 1.0)
 }
 
 #[cfg(feature = "diarization")]
 fn merge_transcript_speech_spans(
-    mut spans: Vec<audio_analysis_speakers::SpeechSpan>,
+    mut spans: Vec<SpeechSpan>,
     merge_gap_seconds: f64,
-) -> Result<Vec<audio_analysis_speakers::SpeechSpan>> {
+) -> Result<Vec<SpeechSpan>> {
     spans.sort_by(|left, right| left.start_seconds.total_cmp(&right.start_seconds));
-    let mut merged: Vec<audio_analysis_speakers::SpeechSpan> = Vec::new();
+    let mut merged: Vec<SpeechSpan> = Vec::new();
     for span in spans {
         if let Some(last) = merged.last_mut() {
             if span.start_seconds - last.end_seconds <= merge_gap_seconds {
@@ -3706,16 +3596,24 @@ fn merge_transcript_speech_spans(
 #[cfg(feature = "diarization")]
 #[derive(Debug, Clone)]
 struct TranscriptSpeechSpanVad {
-    spans: Vec<audio_analysis_speakers::SpeechSpan>,
+    spans: Vec<SpeechSpan>,
 }
 
 #[cfg(feature = "diarization")]
-impl audio_analysis_speakers::VoiceActivityDetector for TranscriptSpeechSpanVad {
+impl VoiceActivityDetector for TranscriptSpeechSpanVad {
+    fn provider_id(&self) -> &str {
+        "transcript-speech-spans"
+    }
+
     fn detect_speech(
         &mut self,
-        _audio: &audio_analysis_speakers::SpeakerAudio<'_>,
-    ) -> Result<Vec<audio_analysis_speakers::SpeechSpan>> {
-        Ok(self.spans.clone())
+        _audio: &SpeakerAudio<'_>,
+        _options: &VadOptions,
+    ) -> Result<VadResponse> {
+        Ok(VadResponse {
+            segments: self.spans.clone(),
+            diagnostics: Vec::new(),
+        })
     }
 }
 
@@ -3748,10 +3646,7 @@ fn stable_speaker_predictions_from_diarization(
             score: Some(segment.score),
         })?);
     }
-    merge_speaker_predictions(
-        predictions,
-        audio_analysis_speakers::EnergyVadConfig::default().merge_gap_seconds as f32,
-    )
+    merge_speaker_predictions(predictions, VadOptions::default().merge_gap_seconds as f32)
 }
 
 #[cfg(feature = "diarization")]
@@ -3976,137 +3871,9 @@ pub(crate) fn resample_linear(samples: &[f32], from_rate: u32, to_rate: u32) -> 
         .collect()
 }
 
-fn energy_vad_segments(
-    audio: &LoadedAudio,
-    options: &VadOptions,
-) -> Result<Vec<SpeechActivitySegment>> {
-    validate_vad_options(options)?;
-    let frame_size = seconds_to_samples(options.frame_seconds, audio.sample_rate)?;
-    let hop_size = seconds_to_samples(options.hop_seconds, audio.sample_rate)?;
-    let mut active = Vec::new();
-    let mut start = 0;
-    while start < audio.samples.len() {
-        let end = (start + frame_size).min(audio.samples.len());
-        let score = rms(&audio.samples[start..end]);
-        if score >= options.rms_threshold {
-            active.push(SpeechActivitySegment::new(
-                start as f64 / audio.sample_rate as f64,
-                end as f64 / audio.sample_rate as f64,
-                score,
-            )?);
-        }
-        if start + hop_size >= audio.samples.len() {
-            break;
-        }
-        start += hop_size;
-    }
-    let duration = audio.duration_seconds();
-    let mut merged = merge_speech_segments(active, options.merge_gap_seconds)?;
-    for segment in &mut merged {
-        segment.start_seconds = (segment.start_seconds - options.padding_seconds).max(0.0);
-        segment.end_seconds = (segment.end_seconds + options.padding_seconds).min(duration);
-    }
-    merged = merge_speech_segments(merged, options.merge_gap_seconds)?;
-    let filtered = merged
-        .into_iter()
-        .filter(|segment| segment.end_seconds - segment.start_seconds >= options.min_speech_seconds)
-        .flat_map(|segment| split_max_chunk(segment, options.max_chunk_seconds))
-        .collect::<Vec<_>>();
-    if filtered.is_empty() {
-        return Ok(vec![SpeechActivitySegment::new(
-            0.0,
-            duration.max(1.0 / audio.sample_rate as f64),
-            0.0,
-        )?]);
-    }
-    Ok(filtered)
-}
-
-fn validate_vad_options(options: &VadOptions) -> Result<()> {
-    if !options.rms_threshold.is_finite() || options.rms_threshold < 0.0 {
-        return Err(invalid_request(
-            "VAD RMS threshold must be finite and non-negative",
-        ));
-    }
-    for (name, value, positive) in [
-        ("frameSeconds", options.frame_seconds, true),
-        ("hopSeconds", options.hop_seconds, true),
-        ("minSpeechSeconds", options.min_speech_seconds, false),
-        ("paddingSeconds", options.padding_seconds, false),
-        ("mergeGapSeconds", options.merge_gap_seconds, false),
-        ("maxChunkSeconds", options.max_chunk_seconds, true),
-    ] {
-        if !value.is_finite() || (positive && value <= 0.0) || (!positive && value < 0.0) {
-            return Err(invalid_request(format!(
-                "VAD option `{name}` has an invalid value"
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn seconds_to_samples(seconds: f64, sample_rate: u32) -> Result<usize> {
-    if !seconds.is_finite() || seconds <= 0.0 || sample_rate == 0 {
-        return Err(invalid_request("invalid sample duration"));
-    }
-    Ok((seconds * sample_rate as f64).round().max(1.0) as usize)
-}
-
-fn rms(samples: &[f32]) -> f32 {
-    if samples.is_empty() {
-        return 0.0;
-    }
-    (samples.iter().map(|sample| sample * sample).sum::<f32>() / samples.len() as f32).sqrt()
-}
-
-fn merge_speech_segments(
-    mut segments: Vec<SpeechActivitySegment>,
-    merge_gap_seconds: f64,
-) -> Result<Vec<SpeechActivitySegment>> {
-    segments.sort_by(|left, right| left.start_seconds.total_cmp(&right.start_seconds));
-    let mut merged: Vec<SpeechActivitySegment> = Vec::new();
-    for segment in segments {
-        if let Some(last) = merged.last_mut() {
-            if segment.start_seconds - last.end_seconds <= merge_gap_seconds {
-                last.end_seconds = last.end_seconds.max(segment.end_seconds);
-                last.score = last.score.max(segment.score);
-                continue;
-            }
-        }
-        merged.push(segment);
-    }
-    for segment in &merged {
-        segment.validate()?;
-    }
-    Ok(merged)
-}
-
-fn split_max_chunk(
-    segment: SpeechActivitySegment,
-    max_chunk_seconds: f64,
-) -> Vec<SpeechActivitySegment> {
-    if segment.end_seconds - segment.start_seconds <= max_chunk_seconds {
-        return vec![segment];
-    }
-    let mut chunks = Vec::new();
-    let mut start = segment.start_seconds;
-    while start < segment.end_seconds {
-        let end = (start + max_chunk_seconds).min(segment.end_seconds);
-        if end > start {
-            chunks.push(SpeechActivitySegment {
-                start_seconds: start,
-                end_seconds: end,
-                score: segment.score,
-            });
-        }
-        start = end;
-    }
-    chunks
-}
-
 fn offset_chunk_local_segments(
     transcript: &mut TranscriptionContract,
-    chunks: &[SpeechActivitySegment],
+    chunks: &[SpeechSpan],
 ) -> Result<()> {
     if chunks.is_empty() || transcript.segments.len() != chunks.len() {
         return Ok(());
@@ -4521,7 +4288,7 @@ fn whisperx_json_bytes(
         .map(|_| (None, stdout.to_vec()))
 }
 
-fn whisperx_stdout_vad_segments(stdout: &[u8]) -> Vec<SpeechActivitySegment> {
+fn whisperx_stdout_vad_segments(stdout: &[u8]) -> Vec<SpeechSpan> {
     let stdout = String::from_utf8_lossy(stdout);
     stdout
         .lines()
@@ -4532,7 +4299,7 @@ fn whisperx_stdout_vad_segments(stdout: &[u8]) -> Vec<SpeechActivitySegment> {
             let (start_seconds, end_seconds) = range.split_once("-->")?;
             let start_seconds = start_seconds.trim().parse::<f64>().ok()?;
             let end_seconds = end_seconds.trim().parse::<f64>().ok()?;
-            SpeechActivitySegment::new(start_seconds, end_seconds, 1.0).ok()
+            SpeechSpan::new(start_seconds, end_seconds, 1.0).ok()
         })
         .collect()
 }
@@ -4721,15 +4488,19 @@ mod tests {
 
     #[derive(Clone)]
     struct FixedVadProvider {
-        segments: Vec<SpeechActivitySegment>,
+        segments: Vec<SpeechSpan>,
     }
 
-    impl TranscriptionVadProvider for FixedVadProvider {
+    impl VoiceActivityDetector for FixedVadProvider {
         fn provider_id(&self) -> &str {
             "fixed-vad"
         }
 
-        fn detect_speech(&mut self, _request: VadRequest) -> Result<VadResponse> {
+        fn detect_speech(
+            &mut self,
+            _audio: &SpeakerAudio<'_>,
+            _options: &VadOptions,
+        ) -> Result<VadResponse> {
             Ok(VadResponse {
                 segments: self.segments.clone(),
                 diagnostics: vec!["fixed VAD completed".to_string()],
@@ -4952,9 +4723,12 @@ mod tests {
                 source: Some("synthetic".to_string()),
             },
             provider: TranscriptionProviderSelection::CandleWhisper(CandleWhisperOptions::default()),
-            vad: VadOptions {
-                min_speech_seconds: 0.01,
-                ..VadOptions::default()
+            vad: TranscriptionVadOptions {
+                detection: VadOptions {
+                    min_speech_seconds: 0.01,
+                    ..VadOptions::default()
+                },
+                ..TranscriptionVadOptions::default()
             },
             alignment: AlignmentOptions::default(),
             diarization: DiarizationOptions::default(),
@@ -4967,7 +4741,7 @@ mod tests {
         let mut request = sample_request();
         request.alignment.enabled = true;
         let mut vad = FixedVadProvider {
-            segments: vec![SpeechActivitySegment::new(0.0, 1.0, 1.0).unwrap()],
+            segments: vec![SpeechSpan::new(0.0, 1.0, 1.0).unwrap()],
         };
         let mut asr = MockAsrProvider;
         let mut aligner = MockAlignmentProvider;
@@ -4986,11 +4760,11 @@ mod tests {
         assert!(error.to_string().contains("cancelled"));
     }
 
-    fn batch_test_chunks() -> Vec<SpeechActivitySegment> {
+    fn batch_test_chunks() -> Vec<SpeechSpan> {
         vec![
-            SpeechActivitySegment::new(0.0, 0.20, 1.0).unwrap(),
-            SpeechActivitySegment::new(0.20, 0.40, 1.0).unwrap(),
-            SpeechActivitySegment::new(0.40, 0.60, 1.0).unwrap(),
+            SpeechSpan::new(0.0, 0.20, 1.0).unwrap(),
+            SpeechSpan::new(0.20, 0.40, 1.0).unwrap(),
+            SpeechSpan::new(0.40, 0.60, 1.0).unwrap(),
         ]
     }
 
@@ -5033,9 +4807,9 @@ mod tests {
     #[test]
     fn pipeline_observer_receives_model_load_and_reuse_events() {
         let mut request = sample_request();
-        request.vad = VadOptions {
+        request.vad = TranscriptionVadOptions {
             enabled: false,
-            ..VadOptions::default()
+            ..TranscriptionVadOptions::default()
         };
         request.alignment = AlignmentOptions {
             enabled: true,
@@ -5043,7 +4817,7 @@ mod tests {
             ..AlignmentOptions::default()
         };
         let mut vad = FixedVadProvider {
-            segments: vec![SpeechActivitySegment::new(0.0, 0.5, 1.0).unwrap()],
+            segments: vec![SpeechSpan::new(0.0, 0.5, 1.0).unwrap()],
         };
         let mut asr = ObservingAsrProvider;
         let mut aligner = ObservingAlignmentProvider;
@@ -5245,7 +5019,7 @@ mod tests {
                 channels: 1,
                 source: Some("decode-smoke".to_string()),
             },
-            chunks: vec![SpeechActivitySegment::new(0.0, 1.0, 1.0).unwrap()],
+            chunks: vec![SpeechSpan::new(0.0, 1.0, 1.0).unwrap()],
             task: TranscriptionTask::Transcribe,
             language: Some("en".to_string()),
             model_id: "openai/whisper-tiny.en".to_string(),
@@ -5315,7 +5089,7 @@ mod tests {
         let response = provider
             .transcribe(AsrRequest {
                 audio,
-                chunks: vec![SpeechActivitySegment::new(0.0, duration, 1.0).unwrap()],
+                chunks: vec![SpeechSpan::new(0.0, duration, 1.0).unwrap()],
                 task: TranscriptionTask::Transcribe,
                 language: Some("en".to_string()),
                 model_id: "openai/whisper-tiny.en".to_string(),
@@ -5351,7 +5125,7 @@ mod tests {
                 channels: 1,
                 source: Some("controlled-observer".to_string()),
             },
-            chunks: vec![SpeechActivitySegment::new(0.0, 0.001, 1.0).unwrap()],
+            chunks: vec![SpeechSpan::new(0.0, 0.001, 1.0).unwrap()],
             task: TranscriptionTask::Transcribe,
             language: Some("en".to_string()),
             model_id: "openai/whisper-tiny.en".to_string(),
@@ -6636,7 +6410,7 @@ mod tests {
         let mut transcript =
             transcription_from_segments(None, Some("en".to_string()), vec![segment])
                 .map_err(|error| DetectError::InvalidArgument(error.to_string()))?;
-        let chunks = vec![SpeechActivitySegment::new(5.0, 6.0, 0.8)?];
+        let chunks = vec![SpeechSpan::new(5.0, 6.0, 0.8)?];
 
         offset_chunk_local_segments(&mut transcript, &chunks)?;
 
@@ -6657,7 +6431,7 @@ mod tests {
         let mut transcript =
             transcription_from_segments(None, Some("en".to_string()), vec![segment])
                 .map_err(|error| DetectError::InvalidArgument(error.to_string()))?;
-        let chunks = vec![SpeechActivitySegment::new(5.0, 6.0, 0.8)?];
+        let chunks = vec![SpeechSpan::new(5.0, 6.0, 0.8)?];
 
         offset_chunk_local_segments(&mut transcript, &chunks)?;
 
@@ -6741,7 +6515,7 @@ mod tests {
                 channels: 1,
                 source: None,
             },
-            chunks: vec![SpeechActivitySegment::new(0.0, 0.001, 0.0).unwrap()],
+            chunks: vec![SpeechSpan::new(0.0, 0.001, 0.0).unwrap()],
             task: TranscriptionTask::Transcribe,
             language: None,
             model_id: "openai/whisper-large-v3".to_string(),
@@ -6765,7 +6539,7 @@ mod tests {
                 channels: 1,
                 source: None,
             },
-            chunks: vec![SpeechActivitySegment::new(0.0, 0.001, 0.0).unwrap()],
+            chunks: vec![SpeechSpan::new(0.0, 0.001, 0.0).unwrap()],
             task: TranscriptionTask::Transcribe,
             language: None,
             model_id: "openai/whisper-large-v3".to_string(),
@@ -6785,7 +6559,7 @@ mod tests {
                 channels: 1,
                 source: None,
             },
-            chunks: vec![SpeechActivitySegment::new(0.0, 0.001, 0.0).unwrap()],
+            chunks: vec![SpeechSpan::new(0.0, 0.001, 0.0).unwrap()],
             task: TranscriptionTask::Transcribe,
             language: None,
             model_id: "openai/whisper-large-v3".to_string(),
@@ -6805,7 +6579,7 @@ mod tests {
                 channels: 1,
                 source: None,
             },
-            chunks: vec![SpeechActivitySegment::new(0.0, 0.001, 0.0).unwrap()],
+            chunks: vec![SpeechSpan::new(0.0, 0.001, 0.0).unwrap()],
             task: TranscriptionTask::Transcribe,
             language: None,
             model_id: "openai/whisper-large-v3".to_string(),
@@ -7027,7 +6801,7 @@ mod tests {
                 None => TranscriptionSource::Path { path: path.clone() },
             };
             request.vad.enabled = false;
-            let mut vad = EnergyVadTranscriptionProvider;
+            let mut vad = EnergyVoiceActivityDetector;
             let mut asr = FrequencyAsr;
             let mut observer = RecordingObserver::default();
             run_transcription_pipeline_with_observer(
@@ -7078,7 +6852,7 @@ mod tests {
         write_two_audio_stream_test_media(&path).unwrap();
         let mut request = sample_request();
         request.source = TranscriptionSource::Path { path };
-        let mut vad = EnergyVadTranscriptionProvider;
+        let mut vad = EnergyVoiceActivityDetector;
         let mut asr = PanickingAsr;
         let mut observer = RecordingObserver::default();
 
@@ -7130,12 +6904,9 @@ mod tests {
     fn vad_splits_deterministic_synthetic_speech() {
         let request = sample_request();
         let audio = LoadedAudio::mono_16khz_from_source(&request.source).unwrap();
-        let mut vad = EnergyVadTranscriptionProvider;
+        let mut vad = EnergyVoiceActivityDetector;
         let response = vad
-            .detect_speech(VadRequest {
-                audio,
-                options: request.vad,
-            })
+            .detect_speech(&audio.speaker_audio().unwrap(), &request.vad.detection)
             .unwrap();
         assert_eq!(response.segments.len(), 1);
         assert!(response.segments[0].start_seconds < 0.07);
@@ -7221,7 +6992,7 @@ mod tests {
         };
         request.alignment.enabled = true;
         let mut vad = FixedVadProvider {
-            segments: vec![SpeechActivitySegment::new(0.0, 2.0, 1.0).unwrap()],
+            segments: vec![SpeechSpan::new(0.0, 2.0, 1.0).unwrap()],
         };
         let result = run_transcription_pipeline(
             request,
@@ -7273,7 +7044,7 @@ mod tests {
         let mut request = sample_request();
         request.alignment.enabled = true;
         request.diarization.enabled = true;
-        let mut vad = EnergyVadTranscriptionProvider;
+        let mut vad = EnergyVoiceActivityDetector;
         let mut asr = MockAsrProvider;
         let mut aligner = MockAlignmentProvider;
         let mut diarizer = MockDiarizationProvider;
@@ -7311,7 +7082,7 @@ mod tests {
                 ..SpeakerDiarizationOptions::default()
             },
         };
-        let mut vad = EnergyVadTranscriptionProvider;
+        let mut vad = EnergyVoiceActivityDetector;
         let mut asr = MockAsrProvider;
         let mut diarizer = MockDiarizationProvider;
 
@@ -7358,7 +7129,7 @@ mod tests {
             },
             ..DiarizationOptions::default()
         };
-        let mut vad = EnergyVadTranscriptionProvider;
+        let mut vad = EnergyVoiceActivityDetector;
         let mut asr = MockAsrProvider;
         let mut diarizer = MockOnnxDiarizationProvider;
 
@@ -7407,7 +7178,7 @@ mod tests {
             },
             ..DiarizationOptions::default()
         };
-        let mut vad = EnergyVadTranscriptionProvider;
+        let mut vad = EnergyVoiceActivityDetector;
         let mut asr = MockAsrProvider;
         let mut diarizer = NativeSpeakerDiarizationProvider;
 
@@ -7509,7 +7280,7 @@ mod tests {
                 source: Some(audio_path.to_string_lossy().into_owned()),
             },
             provider: TranscriptionProviderSelection::CandleWhisper(CandleWhisperOptions::default()),
-            vad: VadOptions::default(),
+            vad: TranscriptionVadOptions::default(),
             alignment: AlignmentOptions::default(),
             diarization: DiarizationOptions {
                 enabled: true,
@@ -7533,11 +7304,11 @@ mod tests {
 
         let segments = if second_end > second_start {
             vec![
-                SpeechActivitySegment::new(0.0, first_end, 1.0)?,
-                SpeechActivitySegment::new(second_start, second_end, 1.0)?,
+                SpeechSpan::new(0.0, first_end, 1.0)?,
+                SpeechSpan::new(second_start, second_end, 1.0)?,
             ]
         } else {
-            vec![SpeechActivitySegment::new(0.0, first_end, 1.0)?]
+            vec![SpeechSpan::new(0.0, first_end, 1.0)?]
         };
         let mut vad = FixedVadProvider { segments };
         let mut asr = MockAsrProvider;
@@ -7632,7 +7403,7 @@ mod tests {
                 ..SpeakerDiarizationOptions::default()
             },
         };
-        let mut vad = EnergyVadTranscriptionProvider;
+        let mut vad = EnergyVoiceActivityDetector;
         let mut asr = MockAsrProvider;
         let mut diarizer = PanickingDiarizationProvider { called: false };
 
@@ -7650,7 +7421,7 @@ mod tests {
     fn native_diarization_without_feature_still_reports_no_provider() {
         let mut request = sample_request();
         request.diarization.enabled = true;
-        let mut vad = EnergyVadTranscriptionProvider;
+        let mut vad = EnergyVoiceActivityDetector;
         let mut asr = MockAsrProvider;
 
         let error = run_transcription_pipeline(request, &mut vad, &mut asr, None, None)
@@ -7833,7 +7604,7 @@ mod tests {
             model_bundle: Some(temp.path().to_path_buf()),
             ..AlignmentOptions::default()
         };
-        let mut vad = EnergyVadTranscriptionProvider;
+        let mut vad = EnergyVoiceActivityDetector;
         let mut asr = MockAsrProvider;
 
         let response = run_native_transcription_pipeline(request, &mut vad, &mut asr, None)?;
@@ -7868,7 +7639,7 @@ mod tests {
     #[test]
     fn native_pipeline_leaves_alignment_absent_when_disabled() {
         let request = sample_request();
-        let mut vad = EnergyVadTranscriptionProvider;
+        let mut vad = EnergyVoiceActivityDetector;
         let mut asr = MockAsrProvider;
 
         let response =
@@ -7892,7 +7663,7 @@ mod tests {
             task: TranscriptionTask::Translate,
             ..CandleWhisperOptions::default()
         });
-        let mut vad = EnergyVadTranscriptionProvider;
+        let mut vad = EnergyVoiceActivityDetector;
         let mut asr = MockAsrProvider;
 
         let response =
@@ -7922,7 +7693,7 @@ mod tests {
             ..CandleWhisperOptions::default()
         });
         request.alignment.enabled = true;
-        let mut vad = EnergyVadTranscriptionProvider;
+        let mut vad = EnergyVoiceActivityDetector;
         let mut asr = MockAsrProvider;
 
         let error = run_native_transcription_pipeline(request, &mut vad, &mut asr, None)
@@ -7941,7 +7712,7 @@ mod tests {
             ..CandleWhisperOptions::default()
         });
         request.diarization.enabled = true;
-        let mut vad = EnergyVadTranscriptionProvider;
+        let mut vad = EnergyVoiceActivityDetector;
         let mut asr = MockAsrProvider;
         let mut diarizer = MockDiarizationProvider;
 
@@ -7972,7 +7743,7 @@ mod tests {
             ..AlignmentOptions::default()
         };
         request.diarization.enabled = true;
-        let mut vad = EnergyVadTranscriptionProvider;
+        let mut vad = EnergyVoiceActivityDetector;
         let mut asr = MockAsrProvider;
         let mut diarizer = AlignmentAwareDiarizationProvider {
             saw_aligned_words: false,
@@ -7999,7 +7770,7 @@ mod tests {
     fn native_pipeline_alignment_without_feature_reports_alignment_unsupported_runtime() {
         let mut request = sample_request();
         request.alignment.enabled = true;
-        let mut vad = EnergyVadTranscriptionProvider;
+        let mut vad = EnergyVoiceActivityDetector;
         let mut asr = MockAsrProvider;
 
         let error = run_native_transcription_pipeline(request, &mut vad, &mut asr, None)
@@ -8024,7 +7795,7 @@ mod tests {
             model_bundle: Some(temp.path().to_path_buf()),
             ..AlignmentOptions::default()
         };
-        let mut vad = EnergyVadTranscriptionProvider;
+        let mut vad = EnergyVoiceActivityDetector;
         let mut asr = MockAsrProvider;
 
         let response = run_native_transcription_pipeline(request, &mut vad, &mut asr, None)?;
@@ -8055,7 +7826,7 @@ mod tests {
                 command: PathBuf::from("definitely-missing-whisperx-command"),
                 ..WhisperXCommandOptions::default()
             }),
-            vad: VadOptions::default(),
+            vad: TranscriptionVadOptions::default(),
             alignment: AlignmentOptions::default(),
             diarization: DiarizationOptions::default(),
             output: TranscriptionOutputOptions::default(),
@@ -8095,7 +7866,7 @@ mod tests {
                         channels: 1,
                         source: None,
                     },
-                    chunks: vec![SpeechActivitySegment::new(0.0, 0.001, 1.0).unwrap()],
+                    chunks: vec![SpeechSpan::new(0.0, 0.001, 1.0).unwrap()],
                     task: TranscriptionTask::Transcribe,
                     language: Some("en".to_string()),
                     model_id: "tiny.en".to_string(),
@@ -8126,7 +7897,7 @@ mod tests {
                 hf_token_env: Some("VIDEO_ANALYSIS_TEST_MISSING_HF_TOKEN".to_string()),
                 ..WhisperXCommandOptions::default()
             }),
-            vad: VadOptions::default(),
+            vad: TranscriptionVadOptions::default(),
             alignment: AlignmentOptions::default(),
             diarization: DiarizationOptions::default(),
             output: TranscriptionOutputOptions::default(),
@@ -8167,7 +7938,7 @@ mod tests {
                 output_dir: Some(output_dir),
                 ..WhisperXCommandOptions::default()
             }),
-            vad: VadOptions::default(),
+            vad: TranscriptionVadOptions::default(),
             alignment: AlignmentOptions::default(),
             diarization: DiarizationOptions::default(),
             output: TranscriptionOutputOptions::default(),
@@ -8291,7 +8062,7 @@ mod tests {
                 timeout_seconds: Some(1),
                 ..WhisperXCommandOptions::default()
             }),
-            vad: VadOptions::default(),
+            vad: TranscriptionVadOptions::default(),
             alignment: AlignmentOptions::default(),
             diarization: DiarizationOptions::default(),
             output: TranscriptionOutputOptions::default(),
@@ -8332,7 +8103,7 @@ mod tests {
                     model_cache_only: true,
                     ..CandleWhisperOptions::default()
                 }),
-                vad: VadOptions::default(),
+                vad: TranscriptionVadOptions::default(),
                 alignment: AlignmentOptions {
                     enabled: false,
                     ..AlignmentOptions::default()
@@ -8381,7 +8152,7 @@ mod tests {
                     model_bundle: Some(bundle),
                     ..CandleWhisperOptions::default()
                 }),
-                vad: VadOptions::default(),
+                vad: TranscriptionVadOptions::default(),
                 alignment: AlignmentOptions::default(),
                 diarization: DiarizationOptions::default(),
                 output: TranscriptionOutputOptions::default(),
@@ -8448,7 +8219,7 @@ mod tests {
                     model_bundle: Some(bundle),
                     ..CandleWhisperOptions::default()
                 }),
-                vad: VadOptions::default(),
+                vad: TranscriptionVadOptions::default(),
                 alignment: AlignmentOptions {
                     enabled: false,
                     ..AlignmentOptions::default()

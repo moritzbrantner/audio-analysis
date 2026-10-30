@@ -1,10 +1,9 @@
 use audio_analysis_recognition::SpectralEmbeddingConfig;
 use audio_analysis_speakers::{
-    DiarizedSpeaker, EnergyVadConfig, EnergyVoiceActivityDetector, SpeakerAudio, SpeakerDiarizer,
-    SpeakerEmbedding, SpeakerEmbeddingExtractor, SpeakerEmbeddingModel,
-    SpeakerEmbeddingModelFamily, SpeakerId, SpeakerIdentificationOptions, SpeakerLabel,
-    SpeakerLibrary, SpectralSpeakerEmbedder, SpeechSpan, VoiceActivityDetector,
-    WindowedSpeakerDiarizer,
+    DiarizedSpeaker, EnergyVoiceActivityDetector, SpeakerAudio, SpeakerDiarizer, SpeakerEmbedding,
+    SpeakerEmbeddingExtractor, SpeakerEmbeddingModel, SpeakerEmbeddingModelFamily, SpeakerId,
+    SpeakerIdentificationOptions, SpeakerLabel, SpeakerLibrary, SpectralSpeakerEmbedder,
+    SpeechSpan, VadOptions, VadResponse, VoiceActivityDetector, WindowedSpeakerDiarizer,
 };
 use audio_contracts::Result;
 
@@ -49,8 +48,19 @@ struct FixedVad {
 }
 
 impl VoiceActivityDetector for FixedVad {
-    fn detect_speech(&mut self, _audio: &SpeakerAudio<'_>) -> Result<Vec<SpeechSpan>> {
-        Ok(self.spans.clone())
+    fn provider_id(&self) -> &str {
+        "fixed"
+    }
+
+    fn detect_speech(
+        &mut self,
+        _audio: &SpeakerAudio<'_>,
+        _options: &VadOptions,
+    ) -> Result<VadResponse> {
+        Ok(VadResponse {
+            segments: self.spans.clone(),
+            diagnostics: Vec::new(),
+        })
     }
 }
 
@@ -101,19 +111,27 @@ fn public_vad_finds_speech_and_rejects_quiet_audio() {
     samples.extend(vec![0.25; 200]);
     samples.extend(vec![0.0; 100]);
     let audio = SpeakerAudio::mono(&samples, 1_000).unwrap();
-    let mut vad = EnergyVoiceActivityDetector::new(EnergyVadConfig {
+    let options = VadOptions {
         rms_threshold: 0.05,
         frame_seconds: 0.04,
         hop_seconds: 0.02,
         min_speech_seconds: 0.05,
         merge_gap_seconds: 0.02,
-    })
-    .unwrap();
-    assert_eq!(vad.detect_speech(&audio).unwrap().len(), 1);
+        ..VadOptions::unpadded()
+    };
+    let mut vad = EnergyVoiceActivityDetector;
+    assert_eq!(
+        vad.detect_speech(&audio, &options).unwrap().segments.len(),
+        1
+    );
 
     let quiet = vec![0.0_f32; 400];
     let quiet = SpeakerAudio::mono(&quiet, 1_000).unwrap();
-    assert!(vad.detect_speech(&quiet).unwrap().is_empty());
+    assert!(vad
+        .detect_speech(&quiet, &options)
+        .unwrap()
+        .segments
+        .is_empty());
 }
 
 #[test]

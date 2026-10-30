@@ -215,9 +215,8 @@ impl VoiceActivityDetector for PyannoteVadTranscriptionProvider {
         let batch = self
             .runner
             .speech_frames(audio.samples(), audio.sample_rate())?;
-        let raw_segments =
+        let segments =
             pyannote_frames_to_segments(&batch.frames, self.onset, self.offset, self.chunk_size)?;
-        let segments = merge_whisperx_vad_chunks(raw_segments, self.chunk_size)?;
         let mut diagnostics = vec![
             format!("pyannoteVadWindows={}", batch.windows),
             format!("pyannoteVadFrames={}", batch.frames.len()),
@@ -239,7 +238,7 @@ impl VoiceActivityDetector for SileroVadTranscriptionProvider {
     fn detect_speech(
         &mut self,
         audio: &SpeakerAudio<'_>,
-        options: &VadOptions,
+        _options: &VadOptions,
     ) -> Result<VadResponse> {
         if audio.sample_rate() != SILERO_SAMPLE_RATE || audio.channels() != 1 {
             return Err(DetectError::InvalidArgument(format!(
@@ -251,16 +250,9 @@ impl VoiceActivityDetector for SileroVadTranscriptionProvider {
         let probabilities = self
             .runner
             .speech_probabilities(audio.samples(), audio.sample_rate())?;
-        let raw_segments = self
+        let segments = self
             .detector
             .detect_from_probabilities(&probabilities, audio.samples().len())?;
-        let segments = merge_whisperx_vad_chunks(
-            raw_segments,
-            options
-                .max_chunk_seconds
-                .unwrap_or(f64::INFINITY)
-                .max(f64::EPSILON),
-        )?;
         let mut diagnostics = vec![
             format!("sileroVadProbabilityWindows={}", probabilities.len()),
             "native Silero VAD completed".to_string(),
@@ -473,33 +465,6 @@ fn max_probability_for_span(probabilities: &[f32], start: usize, end: usize) -> 
             (window_end > start && window_start < end).then_some(*probability)
         })
         .fold(0.0, f32::max)
-}
-
-pub fn merge_whisperx_vad_chunks(
-    segments: Vec<SpeechSpan>,
-    chunk_size: f64,
-) -> Result<Vec<SpeechSpan>> {
-    let Some(first) = segments.first() else {
-        return Ok(Vec::new());
-    };
-    let mut merged = Vec::new();
-    let mut curr_start = first.start_seconds;
-    let mut curr_end = 0.0;
-    let mut curr_score = first.score;
-
-    for segment in segments {
-        if segment.end_seconds - curr_start > chunk_size && curr_end - curr_start > 0.0 {
-            merged.push(SpeechSpan::new(curr_start, curr_end, curr_score)?);
-            curr_start = segment.start_seconds;
-            curr_score = segment.score;
-        } else {
-            curr_score = curr_score.max(segment.score);
-        }
-        curr_end = segment.end_seconds;
-    }
-
-    merged.push(SpeechSpan::new(curr_start, curr_end, curr_score)?);
-    Ok(merged)
 }
 
 #[cfg(any(feature = "pyannote-vad", test))]
@@ -1407,7 +1372,7 @@ fn pyannote_onnx_invalid(error: runtime_onnx::OnnxRuntimeError) -> DetectError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::LoadedAudio;
+    use crate::{merge_whisperx_vad_chunks, LoadedAudio};
 
     struct VadRequest {
         audio: LoadedAudio,
@@ -1691,7 +1656,7 @@ mod tests {
     }
 
     #[test]
-    fn pyannote_provider_applies_chunk_size_to_merged_speech() {
+    fn pyannote_provider_returns_speech_unmerged() {
         let mut provider = PyannoteVadTranscriptionProvider::new_for_runner(
             0.5,
             0.3,
@@ -1711,11 +1676,13 @@ mod tests {
         );
         let response = provider.detect_request(vad_request(12.0)).expect("detect");
 
-        assert_eq!(response.segments.len(), 2);
-        assert_eq!(response.segments[0].start_seconds, 0.0);
-        assert_eq!(response.segments[0].end_seconds, 3.0);
-        assert_eq!(response.segments[1].start_seconds, 3.2);
-        assert_eq!(response.segments[1].end_seconds, 8.0);
+        // Merging up to the chunk size is the pipeline's job.
+        let spans = response
+            .segments
+            .iter()
+            .map(|span| (span.start_seconds, span.end_seconds))
+            .collect::<Vec<_>>();
+        assert_eq!(spans, vec![(0.0, 3.0), (3.2, 6.0), (6.2, 8.0)]);
     }
 
     #[test]

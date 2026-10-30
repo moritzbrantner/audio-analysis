@@ -720,4 +720,3 @@ pub(crate) fn validate_candle_setup(
         Ok(())
     }
 }
-

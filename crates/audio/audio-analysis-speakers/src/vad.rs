@@ -111,7 +111,8 @@ pub struct VadOptions {
     /// Merge speech spans separated by no more than this gap.
     #[serde(default = "default_merge_gap_seconds")]
     pub merge_gap_seconds: f64,
-    /// Split spans longer than this; `None` keeps spans whole.
+    /// ASR chunk size: split spans longer than this; `None` keeps spans whole.
+    /// The transcription pipeline also merges adjacent spans up to this size.
     #[serde(default = "default_max_chunk_seconds")]
     pub max_chunk_seconds: Option<f64>,
 }

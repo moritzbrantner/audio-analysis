@@ -438,6 +438,11 @@ pub fn run_transcription_pipeline_with_observer(
     let vad_response = if request.vad.enabled {
         let mut response =
             vad_provider.detect_speech(&audio.speaker_audio()?, &request.vad.detection)?;
+        response.segments = asr_chunks_from_speech(
+            response.segments,
+            full_source_seconds,
+            request.vad.detection.max_chunk_seconds,
+        )?;
         if response.segments.is_empty() {
             response
                 .segments
@@ -588,6 +593,57 @@ pub fn run_transcription_pipeline_with_observer(
     })
 }
 
+/// Turns detector speech spans into ASR chunks: clamps them to the audio and,
+/// with a chunk size, merges adjacent spans up to it (WhisperX `merge_chunks`).
+pub(crate) fn asr_chunks_from_speech(
+    mut spans: Vec<SpeechSpan>,
+    duration_seconds: f64,
+    chunk_seconds: Option<f64>,
+) -> Result<Vec<SpeechSpan>> {
+    spans.sort_by(|left, right| left.start_seconds.total_cmp(&right.start_seconds));
+    let clamped = spans
+        .into_iter()
+        .filter_map(|mut span| {
+            span.start_seconds = span.start_seconds.max(0.0);
+            span.end_seconds = span.end_seconds.min(duration_seconds);
+            (span.end_seconds > span.start_seconds).then_some(span)
+        })
+        .collect();
+    match chunk_seconds {
+        Some(chunk_seconds) => merge_whisperx_vad_chunks(clamped, chunk_seconds),
+        None => Ok(clamped),
+    }
+}
+
+/// WhisperX `merge_chunks`: greedily joins consecutive speech spans while the
+/// joined span stays within `chunk_size` seconds. A single longer span is kept.
+pub fn merge_whisperx_vad_chunks(
+    segments: Vec<SpeechSpan>,
+    chunk_size: f64,
+) -> Result<Vec<SpeechSpan>> {
+    let Some(first) = segments.first() else {
+        return Ok(Vec::new());
+    };
+    let mut merged = Vec::new();
+    let mut curr_start = first.start_seconds;
+    let mut curr_end = 0.0;
+    let mut curr_score = first.score;
+
+    for segment in segments {
+        if segment.end_seconds - curr_start > chunk_size && curr_end - curr_start > 0.0 {
+            merged.push(SpeechSpan::new(curr_start, curr_end, curr_score)?);
+            curr_start = segment.start_seconds;
+            curr_score = segment.score;
+        } else {
+            curr_score = curr_score.max(segment.score);
+        }
+        curr_end = segment.end_seconds;
+    }
+
+    merged.push(SpeechSpan::new(curr_start, curr_end, curr_score)?);
+    Ok(merged)
+}
+
 pub(crate) fn ensure_pipeline_active(observer: &dyn TranscriptionPipelineObserver) -> Result<()> {
     if observer.cancellation_requested() {
         return Err(media_core::DetectError::InvalidArgument(
@@ -605,14 +661,18 @@ pub(crate) fn provider_language(provider: &TranscriptionProviderSelection) -> Op
     }
 }
 
-pub(crate) fn validate_batch_options_for_provider(provider: &TranscriptionProviderSelection) -> Result<()> {
+pub(crate) fn validate_batch_options_for_provider(
+    provider: &TranscriptionProviderSelection,
+) -> Result<()> {
     if let TranscriptionProviderSelection::CandleWhisper(options) = provider {
         validate_candle_batch_options(options)?;
     }
     Ok(())
 }
 
-pub(crate) fn validate_task_options_for_request(request: &TranscriptionPipelineRequest) -> Result<()> {
+pub(crate) fn validate_task_options_for_request(
+    request: &TranscriptionPipelineRequest,
+) -> Result<()> {
     let task = request.provider.task();
     if task == TranscriptionTask::Translate && request.alignment.enabled {
         return Err(invalid_request(
@@ -630,4 +690,3 @@ pub(crate) fn validate_task_options_for_request(request: &TranscriptionPipelineR
     }
     Ok(())
 }
-

@@ -389,10 +389,61 @@ fn batch_test_chunks() -> Vec<SpeechSpan> {
 }
 
 fn batch_test_request(options: CandleWhisperOptions) -> TranscriptionPipelineRequest {
-    TranscriptionPipelineRequest {
+    // A 0.2 s chunk size keeps the three 0.2 s test chunks apart.
+    let mut request = TranscriptionPipelineRequest {
         provider: TranscriptionProviderSelection::CandleWhisper(options),
         ..sample_request()
-    }
+    };
+    request.vad.detection.max_chunk_seconds = Some(0.2);
+    request
+}
+
+#[test]
+fn pipeline_merges_vad_speech_up_to_chunk_size_like_whisperx() {
+    let mut vad = FixedVadProvider {
+        segments: vec![
+            SpeechSpan::new(0.0, 0.1, 0.5).unwrap(),
+            SpeechSpan::new(0.15, 0.3, 0.9).unwrap(),
+            SpeechSpan::new(0.35, 0.5, 0.7).unwrap(),
+            SpeechSpan::new(0.55, 0.9, 0.6).unwrap(),
+        ],
+    };
+    let mut request = sample_request();
+    request.vad.detection.max_chunk_seconds = Some(0.5);
+    let response =
+        run_transcription_pipeline(request, &mut vad, &mut MockAsrProvider, None, None).unwrap();
+
+    assert!(response
+        .diagnostics
+        .iter()
+        .any(|item| item == "chunkCount=2"));
+    let starts = response
+        .transcript
+        .segments
+        .iter()
+        .map(|segment| segment.start_seconds().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(starts, vec![0.0, 0.55]);
+}
+
+#[test]
+fn asr_chunks_are_clamped_to_the_audio_duration() {
+    let chunks = asr_chunks_from_speech(
+        vec![
+            SpeechSpan::new(0.0, 1.0, 1.0).unwrap(),
+            SpeechSpan::new(9.0, 10.02, 1.0).unwrap(),
+            SpeechSpan::new(10.05, 10.2, 1.0).unwrap(),
+        ],
+        10.0,
+        None,
+    )
+    .unwrap();
+
+    let spans = chunks
+        .iter()
+        .map(|span| (span.start_seconds, span.end_seconds))
+        .collect::<Vec<_>>();
+    assert_eq!(spans, vec![(0.0, 1.0), (9.0, 10.0)]);
 }
 
 #[test]
@@ -613,9 +664,7 @@ fn previous_text_conditioning_rejects_independent_active_row_batches() {
 #[test]
 fn real_tiny_whisper_bundle_runs_greedy_sampling_and_beam_paths_when_requested() {
     if std::env::var("RUN_CANDLE_WHISPER_DECODE_TESTS").as_deref() != Ok("1") {
-        eprintln!(
-            "skipping native Whisper decode smoke; set RUN_CANDLE_WHISPER_DECODE_TESTS=1"
-        );
+        eprintln!("skipping native Whisper decode smoke; set RUN_CANDLE_WHISPER_DECODE_TESTS=1");
         return;
     }
     let bundle = std::env::var_os("CANDLE_WHISPER_TINY_BUNDLE")
@@ -1557,8 +1606,7 @@ fn speech_spans_from_transcript_prefers_aligned_words(
 #[cfg(feature = "diarization")]
 fn speech_spans_from_transcript_falls_back_to_segments(
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let first =
-        TranscriptSegmentContract::new(0, "hello").with_time_range(Some(0.2), Some(0.5))?;
+    let first = TranscriptSegmentContract::new(0, "hello").with_time_range(Some(0.2), Some(0.5))?;
     let second =
         TranscriptSegmentContract::new(1, "world").with_time_range(Some(1.0), Some(1.4))?;
     let transcript =
@@ -1990,8 +2038,7 @@ fn segment_without_words_uses_policy_fallback(
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
     let segment =
         TranscriptSegmentContract::new(0, "hello").with_time_range(Some(0.5), Some(0.8))?;
-    let mut transcript =
-        transcription_from_segments(None, Some("en".to_string()), vec![segment])?;
+    let mut transcript = transcription_from_segments(None, Some("en".to_string()), vec![segment])?;
     let diarization = diarization_response_for_tests(vec![
         SpeakerSegmentPrediction {
             speaker: "speaker_0".to_string(),
@@ -2024,12 +2071,10 @@ fn offset_chunk_local_segments_skips_global_timing() -> Result<()> {
     segment
         .attributes
         .insert("timing".to_string(), "global".to_string());
-    segment.push_word(
-        TranscriptWordContract::new("hello").with_time_range(Some(10.0), Some(10.5))?,
-    )?;
-    let mut transcript =
-        transcription_from_segments(None, Some("en".to_string()), vec![segment])
-            .map_err(|error| DetectError::InvalidArgument(error.to_string()))?;
+    segment
+        .push_word(TranscriptWordContract::new("hello").with_time_range(Some(10.0), Some(10.5))?)?;
+    let mut transcript = transcription_from_segments(None, Some("en".to_string()), vec![segment])
+        .map_err(|error| DetectError::InvalidArgument(error.to_string()))?;
     let chunks = vec![SpeechSpan::new(5.0, 6.0, 0.8)?];
 
     offset_chunk_local_segments(&mut transcript, &chunks)?;
@@ -2048,9 +2093,8 @@ fn offset_chunk_local_segments_skips_global_timing() -> Result<()> {
 fn offset_chunk_local_segments_offsets_local_timing() -> Result<()> {
     let segment =
         TranscriptSegmentContract::new(0, "hello").with_time_range(Some(0.0), Some(0.5))?;
-    let mut transcript =
-        transcription_from_segments(None, Some("en".to_string()), vec![segment])
-            .map_err(|error| DetectError::InvalidArgument(error.to_string()))?;
+    let mut transcript = transcription_from_segments(None, Some("en".to_string()), vec![segment])
+        .map_err(|error| DetectError::InvalidArgument(error.to_string()))?;
     let chunks = vec![SpeechSpan::new(5.0, 6.0, 0.8)?];
 
     offset_chunk_local_segments(&mut transcript, &chunks)?;
@@ -2071,16 +2115,14 @@ fn offset_chunk_local_segments_offsets_local_timing() -> Result<()> {
 fn alignment_overwrites_projected_word_timings() -> Result<()> {
     let mut segment =
         TranscriptSegmentContract::new(0, "hello").with_time_range(Some(0.0), Some(1.0))?;
-    let mut word =
-        TranscriptWordContract::new("hello").with_time_range(Some(0.0), Some(0.5))?;
+    let mut word = TranscriptWordContract::new("hello").with_time_range(Some(0.0), Some(0.5))?;
     word.attributes = BTreeMap::from([(
         "timing".to_string(),
         "whisperTimestampProjection".to_string(),
     )]);
     segment.push_word(word)?;
-    let mut transcript =
-        transcription_from_segments(None, Some("en".to_string()), vec![segment])
-            .map_err(|error| DetectError::InvalidArgument(error.to_string()))?;
+    let mut transcript = transcription_from_segments(None, Some("en".to_string()), vec![segment])
+        .map_err(|error| DetectError::InvalidArgument(error.to_string()))?;
 
     apply_alignment_words(
         &mut transcript,
@@ -2267,8 +2309,7 @@ fn decode_diagnostics_report_direct_samples_route() {
 }
 
 #[test]
-fn decode_diagnostics_report_wav_route() -> std::result::Result<(), Box<dyn std::error::Error>>
-{
+fn decode_diagnostics_report_wav_route() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let temp = tempfile::tempdir()?;
     let path = temp.path().join("diagnostic.wav");
     let spec = hound::WavSpec {
@@ -2282,9 +2323,7 @@ fn decode_diagnostics_report_wav_route() -> std::result::Result<(), Box<dyn std:
     writer.finalize()?;
 
     let (_audio, diagnostics) =
-        native_audio::mono_16khz_from_source_with_diagnostics(&TranscriptionSource::Path {
-            path,
-        })?;
+        native_audio::mono_16khz_from_source_with_diagnostics(&TranscriptionSource::Path { path })?;
 
     assert_eq!(diagnostics.decode_route, "native-wav-reader");
     assert_eq!(diagnostics.source_path_extension.as_deref(), Some("wav"));
@@ -2707,8 +2746,7 @@ fn native_pipeline_reports_diarization_diagnostics() {
     let mut diarizer = MockDiarizationProvider;
 
     let response =
-        run_transcription_pipeline(request, &mut vad, &mut asr, None, Some(&mut diarizer))
-            .unwrap();
+        run_transcription_pipeline(request, &mut vad, &mut asr, None, Some(&mut diarizer)).unwrap();
 
     assert!(response
         .diagnostics
@@ -2754,8 +2792,7 @@ fn native_pipeline_reports_onnx_diarization_diagnostics() {
     let mut diarizer = MockOnnxDiarizationProvider;
 
     let response =
-        run_transcription_pipeline(request, &mut vad, &mut asr, None, Some(&mut diarizer))
-            .unwrap();
+        run_transcription_pipeline(request, &mut vad, &mut asr, None, Some(&mut diarizer)).unwrap();
 
     assert!(response
         .diagnostics
@@ -2802,10 +2839,9 @@ fn native_onnx_diarization_missing_bundle_returns_setup_error() {
     let mut asr = MockAsrProvider;
     let mut diarizer = NativeSpeakerDiarizationProvider;
 
-    let error =
-        run_native_transcription_pipeline(request, &mut vad, &mut asr, Some(&mut diarizer))
-            .unwrap_err()
-            .to_string();
+    let error = run_native_transcription_pipeline(request, &mut vad, &mut asr, Some(&mut diarizer))
+        .unwrap_err()
+        .to_string();
 
     assert!(error.contains("setup_error"));
     assert!(error.contains("ONNX speaker embedding"));
@@ -2817,9 +2853,7 @@ fn native_onnx_diarization_missing_bundle_returns_setup_error() {
 fn native_onnx_diarization_smoke_when_requested(
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
     if std::env::var("RUN_NATIVE_SPEAKER_MODEL_TESTS").as_deref() != Ok("1") {
-        eprintln!(
-            "skipping native ONNX diarization smoke; set RUN_NATIVE_SPEAKER_MODEL_TESTS=1"
-        );
+        eprintln!("skipping native ONNX diarization smoke; set RUN_NATIVE_SPEAKER_MODEL_TESTS=1");
         return Ok(());
     }
 
@@ -2834,12 +2868,9 @@ fn native_onnx_diarization_smoke_when_requested(
         .map(|value| value.parse::<usize>())
         .transpose()?
         .unwrap_or(192);
-    let model_file =
-        optional_smoke_env_value(std::env::var("SPEAKER_EMBEDDING_MODEL_FILE").ok());
-    let input_name =
-        optional_smoke_env_value(std::env::var("SPEAKER_EMBEDDING_INPUT_NAME").ok());
-    let output_name =
-        optional_smoke_env_value(std::env::var("SPEAKER_EMBEDDING_OUTPUT_NAME").ok());
+    let model_file = optional_smoke_env_value(std::env::var("SPEAKER_EMBEDDING_MODEL_FILE").ok());
+    let input_name = optional_smoke_env_value(std::env::var("SPEAKER_EMBEDDING_INPUT_NAME").ok());
+    let output_name = optional_smoke_env_value(std::env::var("SPEAKER_EMBEDDING_OUTPUT_NAME").ok());
     let model_path = resolve_onnx_smoke_model_path(&bundle_path, model_file.as_deref())?;
     eprintln!("speakerEmbeddingResolvedModelPath={}", model_path.display());
     eprintln!("speakerEmbeddingExpectedDimension={embedding_dimension}");
@@ -3027,10 +3058,9 @@ fn native_pipeline_diarization_invalid_bounds_errors_before_provider() {
     let mut asr = MockAsrProvider;
     let mut diarizer = PanickingDiarizationProvider { called: false };
 
-    let error =
-        run_transcription_pipeline(request, &mut vad, &mut asr, None, Some(&mut diarizer))
-            .unwrap_err()
-            .to_string();
+    let error = run_transcription_pipeline(request, &mut vad, &mut asr, None, Some(&mut diarizer))
+        .unwrap_err()
+        .to_string();
 
     assert!(error.contains("invalid_request"));
     assert!(!diarizer.called);
@@ -3262,8 +3292,7 @@ fn native_pipeline_leaves_alignment_absent_when_disabled() {
     let mut vad = EnergyVoiceActivityDetector;
     let mut asr = MockAsrProvider;
 
-    let response =
-        run_native_transcription_pipeline(request, &mut vad, &mut asr, None).unwrap();
+    let response = run_native_transcription_pipeline(request, &mut vad, &mut asr, None).unwrap();
 
     assert!(response.alignment.is_none());
     assert!(response
@@ -3286,8 +3315,7 @@ fn native_pipeline_passes_translate_task_to_asr_provider() {
     let mut vad = EnergyVoiceActivityDetector;
     let mut asr = MockAsrProvider;
 
-    let response =
-        run_native_transcription_pipeline(request, &mut vad, &mut asr, None).unwrap();
+    let response = run_native_transcription_pipeline(request, &mut vad, &mut asr, None).unwrap();
 
     assert!(response
         .diagnostics
@@ -3908,19 +3936,17 @@ fn ctc_alignment_wav2vec2_smoke_when_requested() {
         eprintln!("wav2vec2 layout report: {layout:#?}");
         let transcript_text = std::env::var("ALIGNMENT_TRANSCRIPT_TEXT")
             .unwrap_or_else(|_| "hello world".to_string());
-        let audio = LoadedAudio::mono_16khz_from_source(&TranscriptionSource::Path {
-            path: audio_path,
-        })
-        .expect("alignment smoke requires readable WAV audio");
+        let audio =
+            LoadedAudio::mono_16khz_from_source(&TranscriptionSource::Path { path: audio_path })
+                .expect("alignment smoke requires readable WAV audio");
         let segment = TranscriptSegmentContract::new(0, transcript_text.clone())
             .with_time_range(
                 Some(0.0),
                 Some(audio.duration_seconds().clamp(1.0 / 16_000.0, 1.0)),
             )
             .expect("alignment smoke transcript timing should validate");
-        let transcript =
-            transcription_from_segments(None, Some("en".to_string()), vec![segment])
-                .expect("alignment smoke transcript should validate");
+        let transcript = transcription_from_segments(None, Some("en".to_string()), vec![segment])
+            .expect("alignment smoke transcript should validate");
         let request = AlignmentRequest {
             audio,
             transcript,

@@ -28,7 +28,7 @@ use crate::{
     AsrRequest, AsrResponse, CandleWhisperComputeType, CandleWhisperDecodeRequestConfig,
     CandleWhisperDecodeRuntime, CandleWhisperOptions, CandleWhisperRuntimeControls,
     CandleWhisperTimingMode, CandleWhisperTranscriptionRequestConfig, CandleWhisperWindowControls,
-    SpeechActivitySegment, TranscriptionTask,
+    SpeechSpan, TranscriptionTask,
 };
 
 const WHISPER_TIMESTAMP_SECONDS_PER_TOKEN: f64 = 0.02;
@@ -3346,7 +3346,7 @@ fn format_cache_reuse(self_attention: bool, cross_attention: bool) -> &'static s
 fn collect_chunk_windows(
     samples: &[f32],
     sample_rate: u32,
-    chunks: &[SpeechActivitySegment],
+    chunks: &[SpeechSpan],
     controls: &CandleWhisperWindowControls,
 ) -> Result<Vec<ChunkWindow>> {
     let mut windows = Vec::new();
@@ -3819,7 +3819,7 @@ struct ChunkWindow {
 fn chunk_windows(
     samples: &[f32],
     sample_rate: u32,
-    chunk: &SpeechActivitySegment,
+    chunk: &SpeechSpan,
     controls: &CandleWhisperWindowControls,
 ) -> Result<Vec<ChunkWindow>> {
     let duration = samples.len() as f64 / sample_rate as f64;
@@ -4119,8 +4119,9 @@ mod tests {
                 channels: spec.channels,
                 source: Some("pinned-german-cache-probe".to_string()),
             },
-            chunks: vec![SpeechActivitySegment::new(0.322, duration, 1.0)
-                .expect("exact WhisperX 3.8.6 speech span")],
+            chunks: vec![
+                SpeechSpan::new(0.322, duration, 1.0).expect("exact WhisperX 3.8.6 speech span")
+            ],
             task: TranscriptionTask::Transcribe,
             language: Some("de".to_string()),
             model_id: "openai/whisper-small".to_string(),
@@ -4385,7 +4386,7 @@ mod tests {
                 channels: spec.channels,
                 source: Some("retained-full-german-parity-fixture".to_string()),
             },
-            chunks: vec![SpeechActivitySegment::new(61.538, 91.504, 1.0)
+            chunks: vec![SpeechSpan::new(61.538, 91.504, 1.0)
                 .expect("exact WhisperX 3.8.6 long speech span")],
             task: TranscriptionTask::Transcribe,
             language: Some("de".to_string()),
@@ -4636,7 +4637,7 @@ mod tests {
                 channels: 1,
                 source: None,
             },
-            chunks: vec![SpeechActivitySegment::new(0.0, 1.0, 0.5).unwrap()],
+            chunks: vec![SpeechSpan::new(0.0, 1.0, 0.5).unwrap()],
             task: TranscriptionTask::Transcribe,
             language: Some("en".to_string()),
             model_id: model_id.to_string(),
@@ -5329,7 +5330,7 @@ mod tests {
                 channels: 1,
                 source: None,
             },
-            chunks: vec![SpeechActivitySegment::new(0.0, 1.0, 0.5).unwrap()],
+            chunks: vec![SpeechSpan::new(0.0, 1.0, 0.5).unwrap()],
             task: TranscriptionTask::Transcribe,
             language: Some("en".to_string()),
             model_id: "openai/whisper-tiny".to_string(),
@@ -6088,7 +6089,7 @@ mod tests {
 
     #[test]
     fn chunk_windows_carry_local_and_global_timing() {
-        let chunk = SpeechActivitySegment::new(1.0, 2.0, 0.8).unwrap();
+        let chunk = SpeechSpan::new(1.0, 2.0, 0.8).unwrap();
         let windows = chunk_windows(
             &vec![0.0; 48_000],
             16_000,
@@ -6106,7 +6107,7 @@ mod tests {
 
     #[test]
     fn chunk_windows_use_request_scoped_context() {
-        let chunk = SpeechActivitySegment::new(1.0, 2.0, 0.8).unwrap();
+        let chunk = SpeechSpan::new(1.0, 2.0, 0.8).unwrap();
         let controls = CandleWhisperWindowControls {
             leading_context_seconds: 0.1,
             trailing_context_seconds: 0.2,

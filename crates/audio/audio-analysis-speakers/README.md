@@ -8,7 +8,8 @@ This crate keeps `moritzbrantner-audio-analysis-recognition` focused on generic 
 - model-versioned speaker embeddings
 - speaker profiles and library snapshots
 - enrollment and thresholded identification
-- baseline energy VAD
+- the shared `VoiceActivityDetector` trait, `SpeechSpan`, `VadOptions` and the
+  deterministic `EnergyVoiceActivityDetector`, also used by transcription chunking
 - diarization traits and a simple VAD/window/cluster diarizer
 - shared speaker diarization options, response DTOs, and Transcript Speaker
   Assignment policies

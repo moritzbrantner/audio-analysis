@@ -2,8 +2,8 @@ use audio_analysis_transcription::{
     AsrRequest, AudioTranscriptionProvider, CandleWhisperOptions, CandleWhisperRuntimeControls,
     CandleWhisperTimingMode, CandleWhisperTranscriber, CandleWhisperTranscriptionRequestConfig,
     CandleWhisperWindowControls, LoadedAudio, NoopTranscriptionPipelineObserver,
-    RequestConfiguredCandleWhisperTranscriber, ReusableCandleWhisperTranscriber,
-    SpeechActivitySegment, TranscriptionTask,
+    RequestConfiguredCandleWhisperTranscriber, ReusableCandleWhisperTranscriber, SpeechSpan,
+    TranscriptionTask,
 };
 
 #[test]
@@ -51,7 +51,7 @@ fn candle_request_controls_reject_non_finite_or_negative_context() {
             channels: 1,
             source: Some("window-controls-contract".to_string()),
         },
-        chunks: vec![SpeechActivitySegment::new(0.0, 0.001, 1.0).unwrap()],
+        chunks: vec![SpeechSpan::new(0.0, 0.001, 1.0).unwrap()],
         task: TranscriptionTask::Transcribe,
         language: Some("en".to_string()),
         model_id: "openai/whisper-tiny.en".to_string(),
@@ -102,7 +102,7 @@ fn canonical_observer_entrypoints_validate_request_controls_before_runtime() {
             channels: 1,
             source: Some("canonical-observer-contract".to_string()),
         },
-        chunks: vec![SpeechActivitySegment::new(0.0, 0.001, 1.0).unwrap()],
+        chunks: vec![SpeechSpan::new(0.0, 0.001, 1.0).unwrap()],
         task: TranscriptionTask::Transcribe,
         language: Some("en".to_string()),
         model_id: "openai/whisper-tiny.en".to_string(),
@@ -142,7 +142,7 @@ fn request_configured_provider_adapters_forward_controls_before_runtime() {
             channels: 1,
             source: Some("configured-provider-contract".to_string()),
         },
-        chunks: vec![SpeechActivitySegment::new(0.0, 0.001, 1.0).unwrap()],
+        chunks: vec![SpeechSpan::new(0.0, 0.001, 1.0).unwrap()],
         task: TranscriptionTask::Transcribe,
         language: Some("en".to_string()),
         model_id: "openai/whisper-tiny.en".to_string(),

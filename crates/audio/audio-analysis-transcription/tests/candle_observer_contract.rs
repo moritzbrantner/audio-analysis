@@ -6,7 +6,7 @@ use audio_analysis_transcription::{
     AsrRequest, CandleWhisperComputeType, CandleWhisperDecodeConfig,
     CandleWhisperDecodeRequestConfig, CandleWhisperOptions, CandleWhisperRuntimeControls,
     CandleWhisperTimingMode, CandleWhisperTranscriptionRequestConfig, CandleWhisperWindowControls,
-    LoadedAudio, NativeDevicePreference, ReusableCandleWhisperTranscriber, SpeechActivitySegment,
+    LoadedAudio, NativeDevicePreference, ReusableCandleWhisperTranscriber, SpeechSpan,
     TranscriptionPipelineEvent, TranscriptionPipelineObserver, TranscriptionTask,
 };
 
@@ -54,7 +54,7 @@ fn request() -> AsrRequest {
             channels: 1,
             source: Some("controlled-observer-contract".to_string()),
         },
-        chunks: vec![SpeechActivitySegment::new(0.0, 1.0, 1.0).unwrap()],
+        chunks: vec![SpeechSpan::new(0.0, 1.0, 1.0).unwrap()],
         task: TranscriptionTask::Transcribe,
         language: Some("en".to_string()),
         model_id: "openai/whisper-tiny.en".to_string(),

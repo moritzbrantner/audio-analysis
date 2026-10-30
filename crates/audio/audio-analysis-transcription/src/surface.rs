@@ -12,7 +12,8 @@ use crate::{
     transcription_provider_plans, whisper_cpp_provider_plan, whisperx_provider_plan,
     AlignmentOptions, CandleWhisperDecodeRuntime, CandleWhisperOptions, DiarizationOptions,
     NativeDevicePreference, TranscriptionPipelineRequest, TranscriptionProviderSelection,
-    TranscriptionSource, TranscriptionTask, VadOptions, WhisperXCommandOptions, WhisperXDevice,
+    TranscriptionSource, TranscriptionTask, TranscriptionVadOptions, WhisperXCommandOptions,
+    WhisperXDevice,
 };
 
 /// Returns the package surface exposed by every transport wrapper.
@@ -479,7 +480,7 @@ fn vad_plan_value(input: serde_json::Value) -> serde_json::Value {
     serde_json::json!({
         "defaultProvider": "energy-vad",
         "normalizationOwner": "moenarch-audio-analysis-transcription",
-        "options": VadOptions::default(),
+        "options": TranscriptionVadOptions::default(),
         "input": input
     })
 }
@@ -684,7 +685,7 @@ pub fn default_native_request(path: impl Into<std::path::PathBuf>) -> Transcript
     TranscriptionPipelineRequest {
         source: TranscriptionSource::Path { path: path.into() },
         provider: TranscriptionProviderSelection::CandleWhisper(CandleWhisperOptions::default()),
-        vad: VadOptions::default(),
+        vad: TranscriptionVadOptions::default(),
         alignment: AlignmentOptions::default(),
         diarization: DiarizationOptions::default(),
         output: Default::default(),
@@ -702,7 +703,7 @@ pub fn default_whisperx_request(
             compute_type: Some("int8".to_string()),
             ..WhisperXCommandOptions::default()
         }),
-        vad: VadOptions::default(),
+        vad: TranscriptionVadOptions::default(),
         alignment: AlignmentOptions::default(),
         diarization: DiarizationOptions::default(),
         output: Default::default(),

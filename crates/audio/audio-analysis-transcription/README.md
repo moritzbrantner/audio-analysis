@@ -52,12 +52,15 @@ Reusable native VAD providers are opt-in and independent from diarization.
 The `silero-vad` feature exposes `SileroVadOptions` and
 `SileroVadTranscriptionProvider`; the `pyannote-vad` feature exposes
 `PyannoteVadOptions` and `PyannoteVadTranscriptionProvider`. Both implement
-`TranscriptionVadProvider`, require 16 kHz mono audio, and execute caller-
+`VoiceActivityDetector`, require 16 kHz mono audio, and execute caller-
 supplied local ONNX resources through `runtime-onnx`. Pyannote VAD validates
 compatible local model metadata or a colocated manifest and never aliases
 energy or Silero behavior. Provider IDs and diagnostics remain distinct so
 pipeline consumers can observe `silero-vad`, `pyannote-vad`, window/frame
-counts, and native completion.
+counts, and native completion. The trait, `SpeechSpan`, `VadOptions` and
+`EnergyVoiceActivityDetector` are owned by `audio-analysis-speakers` and
+re-exported here, so the same detectors serve chunking and diarization. When a
+detector finds no speech the pipeline transcribes the full source as one chunk.
 
 Native Whisper tries model timestamp tokens automatically when the tokenizer
 defines Whisper timestamp metadata. If timestamp decoding does not produce
@@ -282,7 +285,7 @@ including external WhisperX command execution when explicitly requested.
 
 Use `run_transcription_pipeline` or
 `run_transcription_pipeline_with_observer(...)` when advanced callers need to
-provide their own `TranscriptionVadProvider`, `AudioTranscriptionProvider`,
+provide their own `VoiceActivityDetector`, `AudioTranscriptionProvider`,
 `ForcedAlignmentProvider`, or `TranscriptDiarizationProvider` adapters directly.
 This is the provider-agnostic primitive seam for tests, experiments, and package
 surfaces that already own custom provider construction. The observer variant

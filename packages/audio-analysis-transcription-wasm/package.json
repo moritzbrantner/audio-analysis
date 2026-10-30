@@ -28,7 +28,7 @@
     "typecheck:alignment": "tsc --noEmit -p tsconfig.alignment.json"
   },
   "devDependencies": {
-    "onnxruntime-web": "1.30.0",
+    "onnxruntime-web": "1.31.1",
     "typescript": "7.0.2"
   }
 }

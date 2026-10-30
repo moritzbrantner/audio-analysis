@@ -33,7 +33,7 @@
   "devDependencies": {
     "fflate": "0.8.3",
     "npyjs": "1.2.0",
-    "onnxruntime-web": "1.30.0",
+    "onnxruntime-web": "1.31.1",
     "typescript": "7.0.2"
   }
 }

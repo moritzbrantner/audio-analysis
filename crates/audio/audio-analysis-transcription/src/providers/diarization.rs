@@ -413,10 +413,7 @@ pub(crate) fn diagnostic_usize(diagnostics: &[String], key: &str) -> Option<usiz
         .and_then(|value| value.parse().ok())
 }
 
-pub(crate) fn diarization_progress_provider(
-    provider_id: &str,
-    options: &DiarizationOptions,
-) -> String {
+pub(crate) fn diarization_progress_provider(provider_id: &str, options: &DiarizationOptions) -> String {
     if options
         .model_id
         .trim()
@@ -504,3 +501,4 @@ pub(crate) fn speaker_assignment_policy_value(policy: SpeakerAssignmentPolicy) -
         SpeakerAssignmentPolicy::StrictContained => "strictContained",
     }
 }
+

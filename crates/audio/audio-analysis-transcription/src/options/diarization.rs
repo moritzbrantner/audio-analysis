@@ -25,3 +25,4 @@ impl std::ops::DerefMut for DiarizationOptions {
         &mut self.speaker
     }
 }
+

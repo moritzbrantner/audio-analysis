@@ -334,3 +334,4 @@ pub(crate) fn apply_alignment_chars(
     }
     Ok(())
 }
+

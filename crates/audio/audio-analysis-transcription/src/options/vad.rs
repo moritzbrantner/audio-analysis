@@ -26,3 +26,4 @@ impl Default for TranscriptionVadOptions {
 pub(crate) fn default_vad_enabled() -> bool {
     true
 }
+

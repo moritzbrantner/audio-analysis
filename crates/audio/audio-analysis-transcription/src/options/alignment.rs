@@ -66,3 +66,4 @@ pub(crate) fn default_alignment_model() -> String {
 pub(crate) fn default_alignment_device() -> NativeDevicePreference {
     NativeDevicePreference::Cpu
 }
+

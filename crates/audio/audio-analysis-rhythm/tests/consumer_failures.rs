@@ -51,6 +51,10 @@ fn misses(case: &Value) -> Vec<String> {
         .expect("rhythm analysis");
     let expected = &case["expected"];
     let mut misses = Vec::new();
+    // `"bpm": null` expects the analysis to report no reliable tempo.
+    if expected.get("bpm").is_some_and(Value::is_null) && analysis.bpm.is_some() {
+        misses.push(format!("bpm {:?}, expected no tempo", analysis.bpm));
+    }
     if let Some(bpm) = expected["bpm"].as_f64() {
         let tolerance = expected["bpmTolerance"]
             .as_f64()

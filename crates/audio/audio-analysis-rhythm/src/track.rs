@@ -135,6 +135,10 @@ pub struct StructuralDescriptor {
 pub struct TrackRhythmAnalysis {
     /// Representative tempo, if rhythmic evidence was sufficient.
     ///
+    /// `None` for silence, and for excerpts with under two bars of onsets whose
+    /// best candidate does not clearly beat the runner-up; beats, downbeats and
+    /// the tempo map are then empty while `tempo_candidates` stay visible.
+    ///
     /// Stable maps retain the selected global candidate. Maps with at least eight
     /// local estimates and a 15% trimmed tempo spread use their trimmed median.
     pub bpm: Option<f32>,
@@ -317,6 +321,18 @@ pub fn analyze_rhythm_track(
         + 0.15 * downbeat_confidence
         + 0.15 * path_confidence)
         .clamp(0.0, 1.0);
+    if tempo_evidence_beats(&features.novelty, frame_rate, representative_bpm)
+        < SHORT_EVIDENCE_BEATS
+        && candidate_margin < SHORT_EVIDENCE_MIN_MARGIN
+    {
+        // A few rubato notes cannot separate metrical levels: beat-path
+        // support is flat and the winner is an arbitrary multiple of the
+        // tatum. Keep the hypotheses visible, but claim no tempo.
+        return Ok(TrackRhythmAnalysis {
+            tempo_candidates: candidates,
+            ..empty_analysis(hop_seconds, features.structural_descriptors)
+        });
+    }
 
     Ok(TrackRhythmAnalysis {
         bpm: Some(representative_bpm),
@@ -377,6 +393,28 @@ fn infer_beat_trajectory(
         beat_frames,
         tempo_map,
     }
+}
+
+/// Under two 4/4 bars of onset-bearing material, beat-path evidence is too
+/// thin to arbitrate between tempo hypotheses on its own...
+const SHORT_EVIDENCE_BEATS: f32 = 8.0;
+/// ...so such excerpts report a tempo only when the selected candidate beats
+/// the runner-up by this relative score margin.
+const SHORT_EVIDENCE_MIN_MARGIN: f32 = 0.03;
+/// Normalized novelty above which a frame counts as rhythmic activity.
+const ACTIVE_NOVELTY_THRESHOLD: f32 = 0.1;
+
+/// Number of beats at `bpm` between the first and last salient onset.
+/// Leading and trailing silence or reverb tails carry no tempo evidence.
+fn tempo_evidence_beats(novelty: &[f32], frame_rate: f32, bpm: f32) -> f32 {
+    let active = |value: &f32| *value >= ACTIVE_NOVELTY_THRESHOLD;
+    let (Some(first), Some(last)) = (
+        novelty.iter().position(active),
+        novelty.iter().rposition(active),
+    ) else {
+        return 0.0;
+    };
+    (last - first) as f32 / frame_rate * bpm / 60.0
 }
 
 fn empty_analysis(

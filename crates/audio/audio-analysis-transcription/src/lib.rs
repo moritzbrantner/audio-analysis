@@ -28,6 +28,8 @@ mod native_whisper_q8_cpu;
 #[cfg(feature = "candle")]
 mod native_whisper_quantized;
 #[cfg(any(feature = "silero-vad", feature = "pyannote-vad", test))]
+mod silero_stream;
+#[cfg(any(feature = "silero-vad", feature = "pyannote-vad", test))]
 mod silero_vad;
 
 use std::collections::BTreeMap;
@@ -86,6 +88,8 @@ pub use native_whisper_quantized::{
     CandleQ8WhisperBatchDiagnostics, CandleQ8WhisperBatchOutput, CandleQ8WhisperDecoder,
     CandleQ8WhisperDecoderDiagnostics, CandleQ8WhisperDecoderOutput,
 };
+#[cfg(feature = "silero-vad")]
+pub use silero_stream::{FinalizedSpeechSpan, SileroVadStream, VadStreamUpdate};
 #[cfg(feature = "pyannote-vad")]
 pub use silero_vad::{
     inspect_pyannote_vad_bundle, PyannoteVadBundleReport, PyannoteVadOptions,

@@ -2090,6 +2090,33 @@ fn chunk_windows_carry_local_and_global_timing() {
     assert_eq!(windows[0].transcript_bounds(), (1.0, 2.0));
 }
 
+#[test]
+fn full_size_chunk_drops_context_instead_of_a_remainder_window() {
+    let chunk = SpeechSpan::new(30.0, 60.0, 0.8).unwrap();
+    let windows = chunk_windows(
+        &vec![0.0; 16_000 * 62],
+        16_000,
+        &chunk,
+        &CandleWhisperWindowControls::default(),
+    )
+    .unwrap();
+    assert_eq!(windows.len(), 1);
+    assert_eq!(windows[0].samples.len(), whisper::N_SAMPLES);
+    assert_eq!(windows[0].global_start_seconds, 30.0);
+    assert_eq!(windows[0].global_end_seconds, 60.0);
+
+    let long = SpeechSpan::new(0.0, 45.0, 0.8).unwrap();
+    let windows = chunk_windows(
+        &vec![0.0; 16_000 * 62],
+        16_000,
+        &long,
+        &CandleWhisperWindowControls::default(),
+    )
+    .unwrap();
+    assert_eq!(windows.len(), 2);
+    assert_eq!(windows[1].global_end_seconds, 45.04);
+}
+
 // native-whisperx#418: the next chunk's leading context starts before the
 // previous chunk ends, so a segment at its local 0.0 used to land 0.25 s
 // before the previous chunk's last segment and fail strict validation.

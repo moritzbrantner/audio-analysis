@@ -40,13 +40,23 @@ pub(super) fn chunk_windows(
     controls: &CandleWhisperWindowControls,
 ) -> Result<Vec<ChunkWindow>> {
     let duration = samples.len() as f64 / sample_rate as f64;
-    let padded_start_seconds =
+    let mut padded_start_seconds =
         (chunk.start_seconds - controls.leading_context_seconds).clamp(0.0, duration);
     let padded_end_seconds = (chunk.end_seconds + controls.trailing_context_seconds)
         .clamp(padded_start_seconds, duration);
-    let start = seconds_to_index(padded_start_seconds, sample_rate, samples.len());
-    let end = seconds_to_index(padded_end_seconds, sample_rate, samples.len()).max(start + 1);
+    let mut start = seconds_to_index(padded_start_seconds, sample_rate, samples.len());
+    let mut end = seconds_to_index(padded_end_seconds, sample_rate, samples.len()).max(start + 1);
     let max_window = whisper::N_SAMPLES;
+    // A full-size chunk (VAD merging fills chunks up to 30 s) plus context
+    // would spill a sub-second remainder window, on which Whisper hallucinates
+    // ("you", "Thank you."). Give up context before splitting such a chunk.
+    let speech_start = seconds_to_index(chunk.start_seconds, sample_rate, samples.len());
+    let speech_end = seconds_to_index(chunk.end_seconds, sample_rate, samples.len());
+    if end - start > max_window && speech_end.saturating_sub(speech_start) <= max_window {
+        end = end.min(start + max_window).max(speech_end);
+        start = start.max(end - max_window);
+        padded_start_seconds = start as f64 / sample_rate as f64;
+    }
     let mut windows = Vec::new();
     let mut cursor = start;
     while cursor < end {

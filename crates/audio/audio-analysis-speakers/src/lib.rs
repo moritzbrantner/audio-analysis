@@ -1699,7 +1699,12 @@ pub struct WindowedSpeakerDiarizer<E, V> {
 }
 
 /// Default [`WindowedSpeakerDiarizer::min_speaker_evidence_seconds`].
-pub const DEFAULT_MIN_SPEAKER_EVIDENCE_SECONDS: f64 = 0.5;
+///
+/// Tuned on real multi-speaker conversations (issue #152): 0.5 s left a third
+/// of genuine sub-second turns and ~10% of speech unresolved on word-timed
+/// transcript spans, while spans under ~0.1 s yield non-finite WeSpeaker
+/// embeddings. 0.2 s keeps most short turns and still withholds tails.
+pub const DEFAULT_MIN_SPEAKER_EVIDENCE_SECONDS: f64 = 0.2;
 
 impl<E, V> WindowedSpeakerDiarizer<E, V> {
     /// Creates a new value.

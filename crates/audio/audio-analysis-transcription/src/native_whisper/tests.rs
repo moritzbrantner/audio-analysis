@@ -2101,14 +2101,24 @@ fn adjacent_chunk_segments_stay_chronological() {
     let second = SpeechSpan::new(29.0, 58.0, 0.8).unwrap();
     let mut next_index = 0;
     let mut segments = Vec::new();
-    for (chunk, start, end) in [(&first, 28.5, 29.04), (&second, 0.0, 2.0)] {
+    for (chunk, decoded) in [
+        (&first, vec![decoded_segment("music", 28.5, 29.04)]),
+        (
+            &second,
+            vec![
+                // Only covers the leading context: dropped.
+                decoded_segment("you", 0.0, 0.2),
+                decoded_segment("music", 0.0, 2.0),
+            ],
+        ),
+    ] {
         let windows = chunk_windows(&samples, 16_000, chunk, &controls).unwrap();
         assert_eq!(windows.len(), 1);
         segments.extend(
             decoded_window_to_contract_segments(
                 WhisperDecodedWindow {
                     text: "music".to_string(),
-                    segments: vec![decoded_segment("music", start, end)],
+                    segments: decoded,
                 },
                 &mut next_index,
                 windows[0].global_start_seconds,
@@ -2119,7 +2129,9 @@ fn adjacent_chunk_segments_stay_chronological() {
         );
     }
 
+    assert_eq!(segments.len(), 2);
     assert_eq!(segments[0].end_seconds(), Some(29.0));
+    assert_eq!(segments[1].text, "music");
     assert_eq!(segments[1].start_seconds(), Some(29.0));
     crate::transcription_from_segments(None, None, segments)
         .unwrap()

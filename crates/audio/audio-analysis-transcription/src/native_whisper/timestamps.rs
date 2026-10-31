@@ -335,6 +335,11 @@ pub(super) fn decoded_window_to_contract_segments(
             .clamp(clip_start_seconds, clip_end_seconds);
         let global_end = (window_start_seconds + decoded_segment.end_seconds)
             .clamp(clip_start_seconds, clip_end_seconds);
+        // Entirely inside the context padding, i.e. outside the speech chunk:
+        // the neighbouring chunk owns that audio.
+        if global_end <= global_start {
+            continue;
+        }
         let mut segment = TranscriptSegmentContract::new(*next_index, text)
             .with_time_range(Some(global_start), Some(global_end))?;
         *next_index += 1;

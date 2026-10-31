@@ -249,7 +249,7 @@ impl CandleWhisperSession {
                 }
                 let (clip_start, clip_end) = window.transcript_bounds();
                 if timed.timing == WhisperWindowTiming::ChunkWindow {
-                    if timed.decoded.text.trim().is_empty() {
+                    if timed.decoded.text.trim().is_empty() || clip_end <= clip_start {
                         continue;
                     }
                     segments.push(window_fallback_segment(

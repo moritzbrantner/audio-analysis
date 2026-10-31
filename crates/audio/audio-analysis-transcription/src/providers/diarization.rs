@@ -146,13 +146,11 @@ pub(crate) fn diarize_with_onnx_speaker_embeddings(
     let result = if spans.is_empty() {
         let vad = EnergyVoiceActivityDetector;
         let mut diarizer = audio_analysis_speakers::WindowedSpeakerDiarizer::new(embedder, vad)
-            .cluster_threshold(0.95)?
             .speaker_bounds(options.min_speakers, options.max_speakers)?;
         audio_analysis_speakers::SpeakerDiarizer::diarize(&mut diarizer, &speaker_audio)?
     } else {
         let vad = TranscriptSpeechSpanVad { spans };
         let mut diarizer = audio_analysis_speakers::WindowedSpeakerDiarizer::new(embedder, vad)
-            .cluster_threshold(0.95)?
             .speaker_bounds(options.min_speakers, options.max_speakers)?;
         audio_analysis_speakers::SpeakerDiarizer::diarize(&mut diarizer, &speaker_audio)?
     };

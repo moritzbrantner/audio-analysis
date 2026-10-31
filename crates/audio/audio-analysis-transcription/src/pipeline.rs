@@ -534,7 +534,6 @@ pub fn run_transcription_pipeline_with_observer(
         ensure_pipeline_active(observer)?;
         apply_alignment_words(&mut transcript, &alignment_response.words)?;
         apply_alignment_chars(&mut transcript, &alignment_response.chars)?;
-        order_aligned_segments(&mut transcript);
         alignment_summary = Some(AlignmentSummary {
             provider: provider.provider_id().to_string(),
             model_id: alignment_response.model_id,
@@ -542,6 +541,7 @@ pub fn run_transcription_pipeline_with_observer(
         });
         diagnostics.extend(alignment_response.diagnostics);
     }
+    order_segments_chronologically(&mut transcript);
 
     let mut diarization = None;
     if request.diarization.enabled {

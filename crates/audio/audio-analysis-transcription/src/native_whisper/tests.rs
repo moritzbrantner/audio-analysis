@@ -1930,7 +1930,7 @@ fn timestamp_decoded_segments_do_not_project_words() {
         decoded,
         &mut next_index,
         10.0,
-        12.0,
+        (10.0, 12.0),
         Some("en".to_string()),
     )
     .unwrap();
@@ -1953,7 +1953,8 @@ fn timestamp_decoded_multiple_segments_keep_word_timing_empty() {
     };
     let mut next_index = 0;
     let segments =
-        decoded_window_to_contract_segments(decoded, &mut next_index, 10.0, 12.0, None).unwrap();
+        decoded_window_to_contract_segments(decoded, &mut next_index, 10.0, (10.0, 12.0), None)
+            .unwrap();
 
     assert_eq!(segments.len(), 2);
     for segment in &segments {
@@ -1989,7 +1990,7 @@ fn timestamp_decoded_segments_map_to_transcript_contracts() {
         decoded,
         &mut next_index,
         10.0,
-        12.0,
+        (10.0, 12.0),
         Some("en".to_string()),
     )
     .unwrap();
@@ -2029,7 +2030,7 @@ fn projected_timestamp_words_pass_strict_transcript_validation() {
         decoded,
         &mut next_index,
         3.0,
-        5.0,
+        (3.0, 5.0),
         Some("en".to_string()),
     )
     .unwrap();
@@ -2086,6 +2087,44 @@ fn chunk_windows_carry_local_and_global_timing() {
     assert_eq!(windows[0].local_end_seconds, 1.29);
     assert_eq!(windows[0].global_start_seconds, 0.75);
     assert_eq!(windows[0].global_end_seconds, 2.04);
+    assert_eq!(windows[0].transcript_bounds(), (1.0, 2.0));
+}
+
+// native-whisperx#418: the next chunk's leading context starts before the
+// previous chunk ends, so a segment at its local 0.0 used to land 0.25 s
+// before the previous chunk's last segment and fail strict validation.
+#[test]
+fn adjacent_chunk_segments_stay_chronological() {
+    let samples = vec![0.0; 16_000 * 62];
+    let controls = CandleWhisperWindowControls::default();
+    let first = SpeechSpan::new(0.0, 29.0, 0.8).unwrap();
+    let second = SpeechSpan::new(29.0, 58.0, 0.8).unwrap();
+    let mut next_index = 0;
+    let mut segments = Vec::new();
+    for (chunk, start, end) in [(&first, 28.5, 29.04), (&second, 0.0, 2.0)] {
+        let windows = chunk_windows(&samples, 16_000, chunk, &controls).unwrap();
+        assert_eq!(windows.len(), 1);
+        segments.extend(
+            decoded_window_to_contract_segments(
+                WhisperDecodedWindow {
+                    text: "music".to_string(),
+                    segments: vec![decoded_segment("music", start, end)],
+                },
+                &mut next_index,
+                windows[0].global_start_seconds,
+                windows[0].transcript_bounds(),
+                None,
+            )
+            .unwrap(),
+        );
+    }
+
+    assert_eq!(segments[0].end_seconds(), Some(29.0));
+    assert_eq!(segments[1].start_seconds(), Some(29.0));
+    crate::transcription_from_segments(None, None, segments)
+        .unwrap()
+        .validate_strict()
+        .unwrap();
 }
 
 #[test]

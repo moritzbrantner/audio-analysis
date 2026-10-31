@@ -322,7 +322,7 @@ pub(super) fn decoded_window_to_contract_segments(
     decoded: WhisperDecodedWindow,
     next_index: &mut u64,
     window_start_seconds: f64,
-    window_end_seconds: f64,
+    (clip_start_seconds, clip_end_seconds): (f64, f64),
     language: Option<String>,
 ) -> Result<Vec<TranscriptSegmentContract>> {
     let mut segments = Vec::new();
@@ -332,9 +332,9 @@ pub(super) fn decoded_window_to_contract_segments(
             continue;
         }
         let global_start = (window_start_seconds + decoded_segment.start_seconds)
-            .clamp(window_start_seconds, window_end_seconds);
+            .clamp(clip_start_seconds, clip_end_seconds);
         let global_end = (window_start_seconds + decoded_segment.end_seconds)
-            .clamp(window_start_seconds, window_end_seconds);
+            .clamp(clip_start_seconds, clip_end_seconds);
         let mut segment = TranscriptSegmentContract::new(*next_index, text)
             .with_time_range(Some(global_start), Some(global_end))?;
         *next_index += 1;

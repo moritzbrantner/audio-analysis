@@ -14,6 +14,23 @@ pub(super) struct ChunkWindow {
     pub(super) local_end_seconds: f64,
     pub(super) global_start_seconds: f64,
     pub(super) global_end_seconds: f64,
+    pub(super) speech_start_seconds: f64,
+    pub(super) speech_end_seconds: f64,
+}
+
+impl ChunkWindow {
+    /// Global range transcript timestamps from this window may occupy: the
+    /// window intersected with its unpadded speech chunk. The context padding
+    /// is decoder input only; WhisperX likewise clips each chunk's segments to
+    /// the chunk, so neighbouring chunks never overlap in time.
+    pub(super) fn transcript_bounds(&self) -> (f64, f64) {
+        let start = self.global_start_seconds.max(self.speech_start_seconds);
+        let end = self
+            .global_end_seconds
+            .min(self.speech_end_seconds)
+            .max(start);
+        (start, end)
+    }
 }
 
 pub(super) fn chunk_windows(
@@ -43,6 +60,8 @@ pub(super) fn chunk_windows(
             local_end_seconds,
             global_start_seconds: padded_start_seconds + local_start_seconds,
             global_end_seconds: padded_start_seconds + local_end_seconds,
+            speech_start_seconds: chunk.start_seconds,
+            speech_end_seconds: chunk.end_seconds,
         });
         cursor = window_end;
     }

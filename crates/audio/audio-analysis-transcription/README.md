@@ -62,6 +62,19 @@ counts, and native completion. The trait, `SpeechSpan`, `VadOptions` and
 re-exported here, so the same detectors serve chunking and diarization. When a
 detector finds no speech the pipeline transcribes the full source as one chunk.
 
+`SileroVadStream` (also `silero-vad`) is the Silero provider for live capture.
+Push 16 kHz mono chunks of any size; each `VadStreamUpdate` carries a revision,
+the spans finalized by that push (append-only, indexed), the provisional
+window after `stableUntilSeconds` (replaced each update), and received and
+analyzed seconds. `finish` flushes the last partial window. The stream and the
+finite provider share one window feed and segmenter, so the finalized spans
+equal the finite provider's spans for the same samples in any chunking. A span
+is final after `min_silence` + `2 × speech_pad` (or `min_speech` into a close
+next span) past its raw end; until then it may move, merge, split or vanish.
+The segmenter is checked against the previous finite port, and on real audio
+against Python `silero-vad` 6.2.1 `get_speech_timestamps` with the same model
+(see the ignored `real_silero_stream_matches_the_finite_provider` test).
+
 Native Whisper tries model timestamp tokens automatically when the tokenizer
 defines Whisper timestamp metadata. If timestamp decoding does not produce
 bounded text segments, it falls back to chunk/window segment timing. Native

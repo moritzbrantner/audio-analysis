@@ -57,6 +57,11 @@ activity frames (frame RMS above a floor). Frame RMS spans all channels of the f
 20 ms frames, clip level 0.999, no-input floor 1e-4 and activity floor 0.01; the result echoes the
 configuration used. Interpretation (what is usable for a purpose) belongs to the consumer.
 
+`CaptureMetricsMeter` measures the same thing incrementally during a capture: `push` chunks of any
+length, `snapshot` at any time, `finish` at the end. It keeps one partial frame and counters, and its
+result equals `capture_metrics` over the concatenated chunks exactly (`capture_metrics` is the meter
+fed the whole buffer).
+
 `tests/fixtures/capture-metrics.json` holds shared fixtures that the Rust library and the
 `@moritzbrantner/audio-analysis-core-wasm` `captureMetrics` export must both reproduce.
 

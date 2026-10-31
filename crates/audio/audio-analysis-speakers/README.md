@@ -38,14 +38,29 @@ assigned deterministically by first occurrence as `speaker_0`, `speaker_1`, and
 so on.
 
 Uncertainty policy: speech spans shorter than `min_speaker_evidence_seconds`
-(default `DEFAULT_MIN_SPEAKER_EVIDENCE_SECONDS` = 0.5 s) carry too little
+(default `DEFAULT_MIN_SPEAKER_EVIDENCE_SECONDS` = 0.2 s) carry too little
 embedding context to attribute. They are not embedded, identified or clustered;
 they are returned as `DiarizedSpeaker::Unresolved` with their original start,
 end and VAD score, so a short fragment never creates an extra speaker. Flat
 `SpeakerSegmentPrediction` outputs omit unresolved spans, which leaves
 transcript words there unassigned. The model-backed ONNX path uses the
 default; the heuristic spectral baselines set it to `0.0` and attribute every
-span. Set `min_speaker_evidence_seconds(0.0)` to opt out.
+span. Set `min_speaker_evidence_seconds(0.0)` to opt out; with the WeSpeaker
+ONNX model keep it at or above ~0.1 s, because shorter spans produce
+non-finite embeddings and fail the whole diarization.
+
+The 0.2 s default was tuned on real multi-speaker conversations (issue #152)
+with WhisperX word timings as speech spans, the transcript provider path:
+
+| Recording | Threshold | Short (<1 s) reference turns left unresolved | Unresolved speech |
+|---|---|---|---|
+| pyannote.audio 4.0.4 `sample.wav` (2 speakers, 30 s, MIT) | 0.2 s | 1 / 3 | 1.2 s |
+| | 0.5 s | 2 / 3 | 4.2 s |
+| AMI `EN2002c` Mix-Headset 0–300 s (3 speakers, CC BY 4.0) | 0.2 s | 2 / 15 | 6.0 s |
+| | 0.5 s | 5 / 15 | 30.5 s |
+
+`tests/onnx_diarizer_external.rs` (`default_evidence_threshold_keeps_real_short_turns`)
+reproduces these numbers.
 
 The first reviewed production direction is an opt-in ONNX speaker embedding
 provider, documented in

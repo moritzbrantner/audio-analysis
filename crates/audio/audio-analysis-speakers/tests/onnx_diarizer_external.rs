@@ -16,7 +16,8 @@ use std::path::PathBuf;
 
 use audio_analysis_speakers::{
     DiarizedSpeaker, EnergyVoiceActivityDetector, OnnxSpeakerEmbedder, OnnxSpeakerEmbeddingConfig,
-    SpeakerAudio, SpeakerDiarizer, WindowedSpeakerDiarizer, DEFAULT_MIN_SPEAKER_EVIDENCE_SECONDS,
+    SpeakerAudio, SpeakerDiarizer, SpeechSpan, VadOptions, VadResponse, VoiceActivityDetector,
+    WindowedSpeakerDiarizer, DEFAULT_MIN_SPEAKER_EVIDENCE_SECONDS,
 };
 
 fn env_path(name: &str) -> Option<PathBuf> {
@@ -90,4 +91,205 @@ fn single_librispeech_speaker_is_not_split_by_short_tail_span() {
         .segments
         .iter()
         .any(|segment| segment.speaker == DiarizedSpeaker::Unresolved));
+}
+
+/// Reference speaker turn from an RTTM file.
+struct ReferenceTurn {
+    start: f64,
+    end: f64,
+}
+
+fn read_rttm(path: &PathBuf) -> Vec<ReferenceTurn> {
+    std::fs::read_to_string(path)
+        .expect("read RTTM")
+        .lines()
+        .filter_map(|line| {
+            let fields = line.split_whitespace().collect::<Vec<_>>();
+            (fields.first() == Some(&"SPEAKER")).then(|| {
+                let start = fields[3].parse::<f64>().expect("RTTM onset");
+                let duration = fields[4].parse::<f64>().expect("RTTM duration");
+                ReferenceTurn {
+                    start,
+                    end: start + duration,
+                }
+            })
+        })
+        .collect()
+}
+
+/// Word spans from a WhisperX JSON transcript, merged like the transcript
+/// diarization provider (`merge_transcript_speech_spans`, default VAD gap).
+fn read_whisperx_word_spans(path: &PathBuf) -> Vec<SpeechSpan> {
+    let json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).expect("read transcript"))
+            .expect("transcript JSON");
+    let mut words = json["segments"]
+        .as_array()
+        .expect("segments")
+        .iter()
+        .flat_map(|segment| segment["words"].as_array().cloned().unwrap_or_default())
+        .filter_map(|word| Some((word["start"].as_f64()?, word["end"].as_f64()?)))
+        .filter(|(start, end)| end > start)
+        .collect::<Vec<_>>();
+    words.sort_by(|left, right| left.0.total_cmp(&right.0));
+    let merge_gap = VadOptions::default().merge_gap_seconds;
+    let mut spans: Vec<SpeechSpan> = Vec::new();
+    for (start, end) in words {
+        match spans.last_mut() {
+            Some(last) if start - last.end_seconds <= merge_gap => {
+                last.end_seconds = last.end_seconds.max(end);
+            }
+            _ => spans.push(SpeechSpan::new(start, end, 1.0).unwrap()),
+        }
+    }
+    spans
+}
+
+struct FixedSpans(Vec<SpeechSpan>);
+
+impl VoiceActivityDetector for FixedSpans {
+    fn provider_id(&self) -> &str {
+        "transcript-word-spans"
+    }
+
+    fn detect_speech(
+        &mut self,
+        _audio: &SpeakerAudio<'_>,
+        _options: &VadOptions,
+    ) -> audio_contracts::Result<VadResponse> {
+        Ok(VadResponse {
+            segments: self.0.clone(),
+            diagnostics: Vec::new(),
+        })
+    }
+}
+
+fn overlap(a: (f64, f64), b: (f64, f64)) -> f64 {
+    (a.1.min(b.1) - a.0.max(b.0)).max(0.0)
+}
+
+/// Short-turn survival under one evidence threshold.
+#[derive(Debug)]
+#[allow(dead_code)] // fields are read through the Debug report
+struct ShortTurnReport {
+    threshold: f64,
+    predicted_speakers: usize,
+    spans: usize,
+    unresolved_spans: usize,
+    unresolved_seconds: f64,
+    /// Reference turns shorter than one second that the spans touch at all.
+    short_turns_covered: usize,
+    /// Of those, turns with less than half their duration in resolved spans.
+    short_turns_unresolved: usize,
+}
+
+fn short_turn_report(
+    threshold: f64,
+    reference: &[ReferenceTurn],
+    segments: &[audio_analysis_speakers::DiarizationSegment],
+) -> ShortTurnReport {
+    let span = |segment: &audio_analysis_speakers::DiarizationSegment| {
+        (segment.start_seconds, segment.end_seconds)
+    };
+    let unresolved = segments
+        .iter()
+        .filter(|segment| segment.speaker == DiarizedSpeaker::Unresolved)
+        .collect::<Vec<_>>();
+    let mut short_turns_covered = 0;
+    let mut short_turns_unresolved = 0;
+    for turn in reference.iter().filter(|turn| turn.end - turn.start < 1.0) {
+        let turn_span = (turn.start, turn.end);
+        let covered = segments
+            .iter()
+            .map(|segment| overlap(turn_span, span(segment)))
+            .sum::<f64>();
+        if covered <= 0.0 {
+            continue;
+        }
+        short_turns_covered += 1;
+        let resolved = segments
+            .iter()
+            .filter(|segment| segment.speaker != DiarizedSpeaker::Unresolved)
+            .map(|segment| overlap(turn_span, span(segment)))
+            .sum::<f64>();
+        if resolved < 0.5 * (turn.end - turn.start) {
+            short_turns_unresolved += 1;
+        }
+    }
+    ShortTurnReport {
+        threshold,
+        predicted_speakers: segments
+            .iter()
+            .filter_map(|segment| match &segment.speaker {
+                DiarizedSpeaker::Unknown(label) => Some(label.as_str()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>()
+            .len(),
+        spans: segments.len(),
+        unresolved_spans: unresolved.len(),
+        unresolved_seconds: unresolved
+            .iter()
+            .map(|segment| segment.end_seconds - segment.start_seconds)
+            .sum(),
+        short_turns_covered,
+        short_turns_unresolved,
+    }
+}
+
+/// Real multi-speaker check for issue #152: the default evidence threshold
+/// must not swallow genuine short turns on the transcript-span provider path
+/// (merged word spans, cluster threshold 0.95, as in
+/// `audio-analysis-transcription`).
+///
+/// Inputs (free, public):
+/// - `AUDIO_SPEAKERS_WESPEAKER_ONNX`: as above.
+/// - `AUDIO_SPEAKERS_MULTI_SPEAKER_WAV`: 16 kHz mono conversation, e.g. the
+///   pyannote.audio 4.0.4 `sample.wav` (MIT) or AMI `EN2002c` Mix-Headset
+///   0–300 s (CC BY 4.0).
+/// - `AUDIO_SPEAKERS_MULTI_SPEAKER_RTTM`: matching human reference turns
+///   (`sample.rttm`, or pyannote AMI-diarization-setup `only_words` RTTM).
+/// - `AUDIO_SPEAKERS_MULTI_SPEAKER_TRANSCRIPT`: WhisperX JSON with word timings.
+#[test]
+#[ignore = "requires AUDIO_SPEAKERS_WESPEAKER_ONNX and AUDIO_SPEAKERS_MULTI_SPEAKER_* inputs"]
+fn default_evidence_threshold_keeps_real_short_turns() {
+    let (Some(model), Some(wav), Some(rttm), Some(transcript)) = (
+        env_path("AUDIO_SPEAKERS_WESPEAKER_ONNX"),
+        env_path("AUDIO_SPEAKERS_MULTI_SPEAKER_WAV"),
+        env_path("AUDIO_SPEAKERS_MULTI_SPEAKER_RTTM"),
+        env_path("AUDIO_SPEAKERS_MULTI_SPEAKER_TRANSCRIPT"),
+    ) else {
+        return;
+    };
+    let samples = read_mono_16k(&wav);
+    let audio = SpeakerAudio::mono(&samples, 16_000).unwrap();
+    let reference = read_rttm(&rttm);
+    let spans = read_whisperx_word_spans(&transcript);
+
+    // The former 0.5 s default is reported for comparison.
+    let mut reports = Vec::new();
+    for threshold in [DEFAULT_MIN_SPEAKER_EVIDENCE_SECONDS, 0.5] {
+        let embedder = OnnxSpeakerEmbedder::from_config(OnnxSpeakerEmbeddingConfig {
+            bundle_path: model.clone(),
+            embedding_dimension: 256,
+            ..OnnxSpeakerEmbeddingConfig::default()
+        })
+        .unwrap();
+        let mut diarizer = WindowedSpeakerDiarizer::new(embedder, FixedSpans(spans.clone()))
+            .cluster_threshold(0.95)
+            .unwrap()
+            .min_speaker_evidence_seconds(threshold)
+            .unwrap();
+        let result = diarizer.diarize(&audio).unwrap();
+        let report = short_turn_report(threshold, &reference, &result.segments);
+        eprintln!("{report:?}");
+        reports.push(report);
+    }
+
+    let default = &reports[0];
+    assert!(default.short_turns_covered > 0, "{default:?}");
+    assert!(
+        default.short_turns_unresolved * 2 < default.short_turns_covered,
+        "default threshold leaves most real short turns unresolved: {default:?}"
+    );
 }

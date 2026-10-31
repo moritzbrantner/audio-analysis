@@ -68,4 +68,3 @@ pub fn whisperx_provider_plan() -> TranscriptionProviderPlan {
         ],
     }
 }
-

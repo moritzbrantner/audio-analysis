@@ -21,4 +21,3 @@ pub(crate) fn timeout_error(message: impl Into<String>) -> DetectError {
 pub(crate) fn unsupported_runtime(message: impl Into<String>) -> DetectError {
     DetectError::InvalidArgument(format!("unsupported_runtime: {}", message.into()))
 }
-

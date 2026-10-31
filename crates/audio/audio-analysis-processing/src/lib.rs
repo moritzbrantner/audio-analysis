@@ -13,11 +13,11 @@ use audio_analysis_core::{
     interleaved_to_mono, normalized_samples, peak, rms, windowed_level_series, AudioFeatureSeries,
     ChannelMix, FrameSpec,
 };
+use audio_analysis_io::{AudioFrameSource, MediaSourceInfo};
 use audio_contracts::{
     AnalysisEvent, AudioAnalyzer, AudioBuffer, AudioFrame, DetectError, OwnedAudioFrame, Result,
 };
 use math_signal_core::{BiquadCoefficients as DesignedBiquadCoefficients, SampleRate};
-use audio_analysis_io::{AudioFrameSource, MediaSourceInfo};
 
 /// Trait for audio transform implementations.
 pub trait AudioTransform {
@@ -755,9 +755,9 @@ fn coefficients(spec: BiquadSpec, sample_rate: u32) -> Result<DesignedBiquadCoef
 #[cfg(test)]
 mod tests {
     use super::*;
+    use audio_analysis_io::{analyze_audio_source, AudioStreamInfo, SourceMode};
     use audio_contracts::{AudioPipeline, Timebase, Timestamp};
     use proptest::prelude::*;
-    use audio_analysis_io::{analyze_audio_source, AudioStreamInfo, SourceMode};
 
     fn assert_approx_eq(actual: f32, expected: f32, tolerance: f32) {
         assert!(

@@ -165,9 +165,7 @@ pub fn build_ultrastar_from_audio(
         }
         KaraokeTempoSource::AnalyzeFullMix => {
             let full_mix = full_mix.ok_or_else(|| {
-                invalid_argument(
-                    "full-mix audio is required when tempo_source is AnalyzeFullMix",
-                )
+                invalid_argument("full-mix audio is required when tempo_source is AnalyzeFullMix")
             })?;
             validate_sample_rate(full_mix.sample_rate)?;
             validate_samples(full_mix.samples, "full-mix")?;
@@ -228,15 +226,10 @@ fn resolve_tempo(
         }),
         KaraokeTempoSource::AnalyzeFullMix => {
             let full_mix = full_mix.ok_or_else(|| {
-                invalid_argument(
-                    "full-mix audio is required when tempo_source is AnalyzeFullMix",
-                )
+                invalid_argument("full-mix audio is required when tempo_source is AnalyzeFullMix")
             })?;
-            let analysis = analyze_rhythm_track(
-                full_mix.samples,
-                full_mix.sample_rate,
-                options.rhythm,
-            )?;
+            let analysis =
+                analyze_rhythm_track(full_mix.samples, full_mix.sample_rate, options.rhythm)?;
             let bpm = analysis.bpm.ok_or_else(|| {
                 invalid_argument("whole-track rhythm analysis did not select a karaoke tempo")
             })?;
@@ -269,8 +262,7 @@ fn analyze_vocal_pitch(
         let copied_end = start_sample.saturating_add(frame_size).min(samples.len());
         let copied_len = copied_end - start_sample;
         analysis_window.fill(0.0);
-        analysis_window[..copied_len]
-            .copy_from_slice(&samples[start_sample..copied_end]);
+        analysis_window[..copied_len].copy_from_slice(&samples[start_sample..copied_end]);
 
         let estimate = detector.estimate_samples(&analysis_window, sample_rate)?;
         let Some(frequency_hz) = estimate.frequency_hz else {
@@ -500,8 +492,10 @@ mod tests {
         };
 
         assert_eq!(result.evidence.tempo_confidence, None);
-        assert!(result.ultrastar_text.contains("#BPM:120
-"));
+        assert!(result.ultrastar_text.contains(
+            "#BPM:120
+"
+        ));
     }
 
     #[test]
@@ -542,8 +536,7 @@ mod tests {
         assert_eq!(analysis_frame_count, vocals.len().div_ceil(128));
         assert!(analysis_frame_count > 1);
         assert!(frames.iter().any(|frame| {
-            (frame.end_seconds - vocals.len() as f32 / sample_rate as f32).abs()
-                < 1.0e-6
+            (frame.end_seconds - vocals.len() as f32 / sample_rate as f32).abs() < 1.0e-6
         }));
     }
 

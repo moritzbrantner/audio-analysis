@@ -37,6 +37,16 @@ reached or there are too few unknown speech windows. Unknown labels are
 assigned deterministically by first occurrence as `speaker_0`, `speaker_1`, and
 so on.
 
+Uncertainty policy: speech spans shorter than `min_speaker_evidence_seconds`
+(default `DEFAULT_MIN_SPEAKER_EVIDENCE_SECONDS` = 0.5 s) carry too little
+embedding context to attribute. They are not embedded, identified or clustered;
+they are returned as `DiarizedSpeaker::Unresolved` with their original start,
+end and VAD score, so a short fragment never creates an extra speaker. Flat
+`SpeakerSegmentPrediction` outputs omit unresolved spans, which leaves
+transcript words there unassigned. The model-backed ONNX path uses the
+default; the heuristic spectral baselines set it to `0.0` and attribute every
+span. Set `min_speaker_evidence_seconds(0.0)` to opt out.
+
 The first reviewed production direction is an opt-in ONNX speaker embedding
 provider, documented in
 `docs/adr/0003-native-speaker-diarization-provider.md`. Heuristic diarization

@@ -38,24 +38,12 @@ pub struct MediaSourceInfo {
 impl MediaSourceInfo {
     /// Creates finite source metadata.
     pub fn recorded(input: impl Into<String>) -> Self {
-        Self {
-            input: input.into(),
-            mode: SourceMode::Recorded,
-            video: None,
-            audio: Vec::new(),
-            text: Vec::new(),
-        }
+        Self { input: input.into(), mode: SourceMode::Recorded, video: None, audio: Vec::new(), text: Vec::new() }
     }
 
     /// Creates live source metadata.
     pub fn live(input: impl Into<String>) -> Self {
-        Self {
-            input: input.into(),
-            mode: SourceMode::Live,
-            video: None,
-            audio: Vec::new(),
-            text: Vec::new(),
-        }
+        Self { input: input.into(), mode: SourceMode::Live, video: None, audio: Vec::new(), text: Vec::new() }
     }
 
     /// Appends an audio stream.

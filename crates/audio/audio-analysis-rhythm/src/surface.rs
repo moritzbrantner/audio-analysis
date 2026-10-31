@@ -7,7 +7,8 @@ use runtime_core::{
 };
 
 use crate::track::{
-    analyze_rhythm_track, StructuralDescriptor, TrackRhythmAnalysis, TrackRhythmConfig, TrackedBeat,
+    analyze_rhythm_track, StructuralDescriptor, TrackRhythmAnalysis, TrackRhythmConfig,
+    TrackedBeat,
 };
 use crate::{
     beat_grid, detect_onsets, estimate_tempo, onset_envelope, Onset, OnsetDetectorConfig,
@@ -381,24 +382,25 @@ fn structural_sections(
         let left_start = analysis.beats[left_start_index].timestamp_seconds;
         let boundary = analysis.beats[boundary_index].timestamp_seconds;
         let right_end = analysis.beats[right_end_index].timestamp_seconds;
-        let Some(left) = mean_descriptor(&analysis.structural_descriptors, left_start, boundary)
-        else {
+        let Some(left) = mean_descriptor(&analysis.structural_descriptors, left_start, boundary) else {
             continue;
         };
-        let Some(right) = mean_descriptor(&analysis.structural_descriptors, boundary, right_end)
-        else {
+        let Some(right) = mean_descriptor(&analysis.structural_descriptors, boundary, right_end) else {
             continue;
         };
 
         let direct_change = descriptor_distance(&left, &right);
-        let repetition_change =
-            mean_descriptor(&analysis.structural_descriptors, 0.0, left_start.max(0.0))
-                .map(|history| {
-                    let left_similarity = 1.0 - descriptor_distance(&left, &history);
-                    let right_similarity = 1.0 - descriptor_distance(&right, &history);
-                    (left_similarity - right_similarity).abs()
-                })
-                .unwrap_or(0.0);
+        let repetition_change = mean_descriptor(
+            &analysis.structural_descriptors,
+            0.0,
+            left_start.max(0.0),
+        )
+        .map(|history| {
+            let left_similarity = 1.0 - descriptor_distance(&left, &history);
+            let right_similarity = 1.0 - descriptor_distance(&right, &history);
+            (left_similarity - right_similarity).abs()
+        })
+        .unwrap_or(0.0);
         let confidence = (0.82 * direct_change + 0.18 * repetition_change).clamp(0.0, 1.0);
         if confidence < SECTION_CHANGE_THRESHOLD
             || boundary < MIN_SECTION_SECONDS
@@ -507,8 +509,7 @@ fn assign_section_identities(
 ) {
     let mut prototypes: Vec<DescriptorMean> = Vec::new();
     for section in sections {
-        let Some(descriptor) =
-            mean_descriptor(descriptors, section.start_seconds, section.end_seconds)
+        let Some(descriptor) = mean_descriptor(descriptors, section.start_seconds, section.end_seconds)
         else {
             section.identity = section_identity_label(prototypes.len());
             continue;
@@ -555,13 +556,7 @@ fn contextualize_beats(beats: &[TrackedBeat], sections: &[StructuralSection]) ->
                         && beat.timestamp_seconds < section.end_seconds
                 })
                 .map(|index| index + 1)
-                .unwrap_or_else(|| {
-                    if sections.is_empty() {
-                        0
-                    } else {
-                        sections.len()
-                    }
-                });
+                .unwrap_or_else(|| if sections.is_empty() { 0 } else { sections.len() });
             BeatContext {
                 bar_index,
                 section_index,
@@ -675,7 +670,11 @@ fn positive_usize(
         .ok_or_else(|| format!("{field} must be positive"))
 }
 
-fn finite_f64(input: &serde_json::Value, field: &str, default_value: f64) -> Result<f64, String> {
+fn finite_f64(
+    input: &serde_json::Value,
+    field: &str,
+    default_value: f64,
+) -> Result<f64, String> {
     let value = input
         .get(field)
         .and_then(serde_json::Value::as_f64)

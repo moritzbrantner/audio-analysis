@@ -21,3 +21,4 @@ impl Default for TranscriptionOutputOptions {
 pub(crate) fn default_output_formats() -> Vec<String> {
     vec!["json".to_string()]
 }
+

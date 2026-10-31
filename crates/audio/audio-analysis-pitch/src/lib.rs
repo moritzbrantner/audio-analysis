@@ -597,7 +597,8 @@ mod tests {
                     .enumerate()
                     .map(|(harmonic, amplitude)| {
                         let frequency_hz = fundamental_hz * (harmonic + 1) as f32;
-                        amplitude * (2.0 * std::f32::consts::PI * frequency_hz * t).sin()
+                        amplitude
+                            * (2.0 * std::f32::consts::PI * frequency_hz * t).sin()
                     })
                     .sum()
             })

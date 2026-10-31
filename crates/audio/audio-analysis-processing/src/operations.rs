@@ -376,6 +376,9 @@ mod tests {
                 max: -0.5
             }
         );
-        assert_eq!(extrema[2], WaveformExtrema { min: 1.0, max: 1.0 });
+        assert_eq!(
+            extrema[2],
+            WaveformExtrema { min: 1.0, max: 1.0 }
+        );
     }
 }

@@ -157,7 +157,13 @@ pub fn analyze_key_track(
     harmonic_config: HarmonicKeyConfig,
     timeline_config: KeyTimelineConfig,
 ) -> Result<TrackKeyAnalysis> {
-    analyze_key_track_with_boundaries(samples, sample_rate, harmonic_config, timeline_config, &[])
+    analyze_key_track_with_boundaries(
+        samples,
+        sample_rate,
+        harmonic_config,
+        timeline_config,
+        &[],
+    )
 }
 
 /// Analyzes a complete mono track with optional musical boundaries.
@@ -329,11 +335,11 @@ fn boundary_ranges(
     (ranges, count == requested)
 }
 
-fn fixed_ranges(duration_seconds: f64, config: KeyTimelineConfig) -> (Vec<ObservationRange>, bool) {
-    let window_seconds = config
-        .window_seconds
-        .min(duration_seconds)
-        .max(f64::EPSILON);
+fn fixed_ranges(
+    duration_seconds: f64,
+    config: KeyTimelineConfig,
+) -> (Vec<ObservationRange>, bool) {
+    let window_seconds = config.window_seconds.min(duration_seconds).max(f64::EPSILON);
     let mut ranges = Vec::new();
     let mut start = 0.0_f64;
     let mut complete = true;
@@ -527,7 +533,8 @@ fn build_segments(timeline: &[KeyTimelineWindow]) -> Vec<KeySegment> {
     }
     for index in 0..segments.len().saturating_sub(1) {
         if segments[index].end_seconds > segments[index + 1].start_seconds {
-            let boundary = (segments[index].end_seconds + segments[index + 1].start_seconds) * 0.5;
+            let boundary =
+                (segments[index].end_seconds + segments[index + 1].start_seconds) * 0.5;
             segments[index].end_seconds = boundary;
             segments[index + 1].start_seconds = boundary;
         }

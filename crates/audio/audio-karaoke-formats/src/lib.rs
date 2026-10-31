@@ -64,7 +64,10 @@ impl QuantizedNote {
 /// `~` continuation convention; that spelling never leaks into the neutral
 /// chart model. The exporter never changes neutral note boundaries to force a
 /// valid file.
-pub fn export_ultrastar_v1(chart: &KaraokeChart, metadata: &UltraStarV1Metadata) -> Result<String> {
+pub fn export_ultrastar_v1(
+    chart: &KaraokeChart,
+    metadata: &UltraStarV1Metadata,
+) -> Result<String> {
     chart.validate()?;
     metadata.validate()?;
 
@@ -127,7 +130,8 @@ pub fn export_ultrastar_v1(chart: &KaraokeChart, metadata: &UltraStarV1Metadata)
 }
 
 fn quantize_chart(chart: &KaraokeChart) -> Result<Vec<Vec<QuantizedNote>>> {
-    let units_per_second = f64::from(chart.tempo_bpm) * GRID_UNITS_PER_QUARTER_NOTE / 60.0;
+    let units_per_second =
+        f64::from(chart.tempo_bpm) * GRID_UNITS_PER_QUARTER_NOTE / 60.0;
     let gap_seconds = f64::from(chart.beat_zero_seconds);
     let mut previous_end = None;
     let mut phrases = Vec::with_capacity(chart.phrases.len());
@@ -174,10 +178,18 @@ fn quantize_note(
         )));
     }
 
-    let start_beat =
-        quantize_non_negative_time(start_seconds, gap_seconds, units_per_second, "note start")?;
-    let end_beat =
-        quantize_non_negative_time(end_seconds, gap_seconds, units_per_second, "note end")?;
+    let start_beat = quantize_non_negative_time(
+        start_seconds,
+        gap_seconds,
+        units_per_second,
+        "note start",
+    )?;
+    let end_beat = quantize_non_negative_time(
+        end_seconds,
+        gap_seconds,
+        units_per_second,
+        "note end",
+    )?;
     if end_beat <= start_beat {
         return Err(invalid_argument(format!(
             "UltraStar quantization collapses phrase {phrase_index} note {note_index} to zero duration"
@@ -340,7 +352,10 @@ mod tests {
             beat_zero_seconds: 0.5,
             phrases: vec![
                 KaraokePhrase {
-                    notes: vec![note("Hel", 0.5, 0.75, 60), note("lo", 0.75, 1.0, 64)],
+                    notes: vec![
+                        note("Hel", 0.5, 0.75, 60),
+                        note("lo", 0.75, 1.0, 64),
+                    ],
                 },
                 KaraokePhrase {
                     notes: vec![note(" world", 1.5, 1.75, 58)],
@@ -362,8 +377,20 @@ mod tests {
             phrases: vec![KaraokePhrase {
                 notes: vec![
                     note("lo", 0.0, 0.25, 60),
-                    note_with_role("lo", KaraokeLyricRole::Continuation, 0.25, 0.50, 62),
-                    note_with_role("lo", KaraokeLyricRole::Continuation, 0.50, 0.75, 64),
+                    note_with_role(
+                        "lo",
+                        KaraokeLyricRole::Continuation,
+                        0.25,
+                        0.50,
+                        62,
+                    ),
+                    note_with_role(
+                        "lo",
+                        KaraokeLyricRole::Continuation,
+                        0.50,
+                        0.75,
+                        64,
+                    ),
                 ],
             }],
         };
@@ -428,10 +455,7 @@ mod tests {
             "https://example.test/song.ogg",
         ] {
             let metadata = UltraStarV1Metadata::new("Example", "Artist", audio_file);
-            assert!(
-                metadata.validate().is_err(),
-                "{audio_file} must be rejected"
-            );
+            assert!(metadata.validate().is_err(), "{audio_file} must be rejected");
         }
     }
 

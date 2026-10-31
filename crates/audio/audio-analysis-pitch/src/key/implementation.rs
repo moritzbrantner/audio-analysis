@@ -350,11 +350,7 @@ fn validate_samples(samples: &[f32], sample_rate: u32) -> Result<()> {
 
 fn resolution_bands(config: HarmonicKeyConfig) -> Vec<ResolutionBand> {
     let edges = [
-        (
-            config.min_frequency_hz,
-            config.max_frequency_hz.min(LOW_BAND_MAX_HZ),
-            4,
-        ),
+        (config.min_frequency_hz, config.max_frequency_hz.min(LOW_BAND_MAX_HZ), 4),
         (
             config.min_frequency_hz.max(LOW_BAND_MAX_HZ),
             config.max_frequency_hz.min(MID_BAND_MAX_HZ),
@@ -369,13 +365,11 @@ fn resolution_bands(config: HarmonicKeyConfig) -> Vec<ResolutionBand> {
     edges
         .into_iter()
         .filter(|(min_frequency_hz, max_frequency_hz, _)| max_frequency_hz > min_frequency_hz)
-        .map(
-            |(min_frequency_hz, max_frequency_hz, fft_factor)| ResolutionBand {
-                min_frequency_hz,
-                max_frequency_hz,
-                fft_factor,
-            },
-        )
+        .map(|(min_frequency_hz, max_frequency_hz, fft_factor)| ResolutionBand {
+            min_frequency_hz,
+            max_frequency_hz,
+            fft_factor,
+        })
         .collect()
 }
 
@@ -388,15 +382,11 @@ fn collect_peak_frames(
     let fft_size = config
         .fft_size
         .checked_mul(band.fft_factor)
-        .ok_or_else(|| {
-            DetectError::InvalidArgument("harmonic key FFT pyramid is too large".to_string())
-        })?;
+        .ok_or_else(|| DetectError::InvalidArgument("harmonic key FFT pyramid is too large".to_string()))?;
     let hop_size = config
         .hop_size
         .checked_mul(band.fft_factor)
-        .ok_or_else(|| {
-            DetectError::InvalidArgument("harmonic key hop pyramid is too large".to_string())
-        })?;
+        .ok_or_else(|| DetectError::InvalidArgument("harmonic key hop pyramid is too large".to_string()))?;
     let stft = StftConfig::new(fft_size, hop_size)?.pad_final_frame(true);
     let frames = spectrogram(samples, sample_rate, &stft)?;
     Ok(frames
@@ -434,13 +424,10 @@ fn frame_peaks(
             {
                 return None;
             }
-            let neighborhood = (window[0].magnitude
-                + window[1].magnitude
-                + window[3].magnitude
-                + window[4].magnitude)
-                * 0.25;
-            let tonal_mask =
-                center.magnitude / (center.magnitude + 2.0 * neighborhood + f32::EPSILON);
+            let neighborhood =
+                (window[0].magnitude + window[1].magnitude + window[3].magnitude + window[4].magnitude)
+                    * 0.25;
+            let tonal_mask = center.magnitude / (center.magnitude + 2.0 * neighborhood + f32::EPSILON);
             let weighted_magnitude = center.magnitude * tonal_mask * tonal_mask;
             (weighted_magnitude > f32::EPSILON).then_some(SpectralPeak {
                 frequency_hz: center.frequency_hz,
@@ -473,7 +460,11 @@ fn estimate_tuning_cents(frames: &[Vec<SpectralPeak>]) -> f32 {
     (fractional * 100.0).clamp(-50.0, 50.0)
 }
 
-fn add_peak_to_hpcp(hpcp: &mut [f32; HPCP_BINS_PER_OCTAVE], peak: SpectralPeak, tuning_cents: f32) {
+fn add_peak_to_hpcp(
+    hpcp: &mut [f32; HPCP_BINS_PER_OCTAVE],
+    peak: SpectralPeak,
+    tuning_cents: f32,
+) {
     if peak.frequency_hz <= 0.0 || peak.magnitude <= 0.0 {
         return;
     }

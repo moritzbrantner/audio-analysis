@@ -27,3 +27,4 @@ pub enum NativeDevicePreference {
     Cpu,
     Cuda,
 }
+

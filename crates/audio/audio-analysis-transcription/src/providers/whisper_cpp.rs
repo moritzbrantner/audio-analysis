@@ -63,3 +63,4 @@ impl AudioTranscriptionProvider for WhisperCppTranscriber {
         ))
     }
 }
+

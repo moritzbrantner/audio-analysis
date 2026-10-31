@@ -325,10 +325,7 @@ pub(crate) fn number_field(object: &serde_json::Map<String, Value>, names: &[&st
         .filter(|value| value.is_finite())
 }
 
-pub(crate) fn confidence_field(
-    object: &serde_json::Map<String, Value>,
-    names: &[&str],
-) -> Option<f32> {
+pub(crate) fn confidence_field(object: &serde_json::Map<String, Value>, names: &[&str]) -> Option<f32> {
     for name in names {
         let Some(value) = object.get(*name).and_then(Value::as_f64) else {
             continue;
@@ -344,3 +341,4 @@ pub(crate) fn confidence_field(
     }
     None
 }
+

@@ -62,7 +62,11 @@ impl KaraokeNote {
                 "karaoke note text must not contain line breaks",
             ));
         }
-        validate_time_range(self.start_seconds, self.end_seconds, "karaoke note")?;
+        validate_time_range(
+            self.start_seconds,
+            self.end_seconds,
+            "karaoke note",
+        )?;
         MidiNote::new(self.midi_note)?;
         validate_confidence(self.evidence.pitch_confidence, "pitch confidence")?;
         validate_optional_confidence(self.evidence.lyric_confidence, "lyric confidence")?;
@@ -88,10 +92,7 @@ impl KaraokePhrase {
         for (index, note) in self.notes.iter().enumerate() {
             note.validate()?;
             if note.lyric_role == KaraokeLyricRole::Continuation {
-                let Some(previous) = index
-                    .checked_sub(1)
-                    .and_then(|previous| self.notes.get(previous))
-                else {
+                let Some(previous) = index.checked_sub(1).and_then(|previous| self.notes.get(previous)) else {
                     return Err(invalid_argument(
                         "karaoke continuation note must follow a primary or continuation note",
                     ));
@@ -193,12 +194,16 @@ impl KaraokeChartBuildOptions {
                 "beat_zero_seconds must be finite and non-negative",
             ));
         }
-        if !self.min_overlap_ratio.is_finite() || !(0.0..=1.0).contains(&self.min_overlap_ratio) {
+        if !self.min_overlap_ratio.is_finite()
+            || !(0.0..=1.0).contains(&self.min_overlap_ratio)
+        {
             return Err(invalid_argument(
                 "min_overlap_ratio must be finite and between 0.0 and 1.0",
             ));
         }
-        if !self.min_note_duration_seconds.is_finite() || self.min_note_duration_seconds <= 0.0 {
+        if !self.min_note_duration_seconds.is_finite()
+            || self.min_note_duration_seconds <= 0.0
+        {
             return Err(invalid_argument(
                 "min_note_duration_seconds must be finite and greater than zero",
             ));
@@ -357,8 +362,12 @@ fn fuse_single_best_note(
         if overlap_ratio < options.min_overlap_ratio {
             continue;
         }
-        let pitch_confidence =
-            pitch_confidence_for_interval(pitch_frames, note.note, overlap_start, overlap_end)?;
+        let pitch_confidence = pitch_confidence_for_interval(
+            pitch_frames,
+            note.note,
+            overlap_start,
+            overlap_end,
+        )?;
         let score = overlap * pitch_confidence;
         let replace = best
             .as_ref()
@@ -368,7 +377,8 @@ fn fuse_single_best_note(
                         && compare_f32(overlap, *current_overlap) == Ordering::Greater)
                     || (compare_f32(score, *current_score) == Ordering::Equal
                         && compare_f32(overlap, *current_overlap) == Ordering::Equal
-                        && compare_f32(pitch_confidence, *current_confidence) == Ordering::Greater)
+                        && compare_f32(pitch_confidence, *current_confidence)
+                            == Ordering::Greater)
             })
             .unwrap_or(true);
         if replace {
@@ -803,8 +813,12 @@ mod tests {
         ];
         let pitch = vec![pitch_frame(0.0, 0.25, 60, 0.9)];
 
-        let result =
-            build_karaoke_chart(&lyrics, &pitch, KaraokeChartBuildOptions::default()).unwrap();
+        let result = build_karaoke_chart(
+            &lyrics,
+            &pitch,
+            KaraokeChartBuildOptions::default(),
+        )
+        .unwrap();
 
         assert_eq!(result.chart.phrases[0].notes.len(), 1);
         assert!(result
@@ -818,8 +832,12 @@ mod tests {
         let lyrics = vec![TimedTextWordContract::new("word")];
         let pitch = vec![pitch_frame(0.0, 0.25, 60, 0.9)];
 
-        let error =
-            build_karaoke_chart(&lyrics, &pitch, KaraokeChartBuildOptions::default()).unwrap_err();
+        let error = build_karaoke_chart(
+            &lyrics,
+            &pitch,
+            KaraokeChartBuildOptions::default(),
+        )
+        .unwrap_err();
 
         assert!(error.to_string().contains("aligned start_seconds"));
     }
@@ -872,8 +890,12 @@ mod tests {
             pitch_frame(0.2, 0.4, 64, 0.9),
         ];
 
-        let error =
-            build_karaoke_chart(&lyrics, &pitch, KaraokeChartBuildOptions::default()).unwrap_err();
+        let error = build_karaoke_chart(
+            &lyrics,
+            &pitch,
+            KaraokeChartBuildOptions::default(),
+        )
+        .unwrap_err();
         assert!(error.to_string().contains("single lead voice"));
     }
 }

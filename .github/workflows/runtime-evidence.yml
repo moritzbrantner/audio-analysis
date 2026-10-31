@@ -12,7 +12,7 @@ permissions:
 
 env:
   RUNTIME_PROFILER_REV: 8280c95feb2a1075efa0480a9622e40c723e0b3a
-  MOONLIGHT_REV: a615843b6497cfa0e746224673592c107d969bda
+  MOONLIGHT_REV: 7fad88180edc96335aabaa818fccfa7dd10ba32e
 
 jobs:
   rhythm-evidence:

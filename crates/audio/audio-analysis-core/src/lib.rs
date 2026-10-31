@@ -4,7 +4,7 @@ pub mod capture;
 mod clip;
 pub mod spectral;
 pub mod surface;
-pub use capture::{capture_metrics, CaptureMetrics, CaptureMetricsConfig};
+pub use capture::{capture_metrics, CaptureMetrics, CaptureMetricsConfig, CaptureMetricsMeter};
 pub use clip::{AudioClip, ConcatPolicy, FadeCurve, MixPolicy};
 /// Re-exports the math signal core API.
 pub use math_signal_core::{

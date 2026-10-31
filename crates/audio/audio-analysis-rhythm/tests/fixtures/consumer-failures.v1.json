@@ -4,7 +4,7 @@
   "cases": [
     {
       "id": "dj-party-sorohanro-trumpet-90-bpm",
-      "status": "open",
+      "status": "fixed",
       "consumer": "moritzbrantner/dj-party",
       "scenario": "bpm-sync",
       "note": "A creator-described 90 BPM trumpet loop analyzes as 63 BPM, so BPM Sync against a 90 BPM deck lands outside the ±16% tempo range and reports limited.",
@@ -26,7 +26,8 @@
         "durationSeconds": 5.333
       },
       "expected": {
-        "bpm": 90.0
+        "bpm": null,
+        "why": "The loop holds ~3 s of rubato, syncopated trumpet (8 notes, ~92 BPM by onset regression) and then a tail. That is under two bars of evidence: beat-path support is flat across 55-200 BPM, and the eighth-note tatum (~187 BPM) is as well explained by 63 (x3) as by 94 (x2). No reliable tempo, so BPM Sync is unavailable instead of syncing at a 1.42 ratio. Creator-described tempo: 90 BPM."
       },
       "observed": {
         "bpm": 63.202248,

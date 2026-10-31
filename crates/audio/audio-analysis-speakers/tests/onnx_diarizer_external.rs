@@ -97,6 +97,7 @@ fn single_librispeech_speaker_is_not_split_by_short_tail_span() {
 struct ReferenceTurn {
     start: f64,
     end: f64,
+    speaker: String,
 }
 
 fn read_rttm(path: &PathBuf) -> Vec<ReferenceTurn> {
@@ -111,10 +112,120 @@ fn read_rttm(path: &PathBuf) -> Vec<ReferenceTurn> {
                 ReferenceTurn {
                     start,
                     end: start + duration,
+                    speaker: fields[7].to_string(),
                 }
             })
         })
         .collect()
+}
+
+/// Frame-level (10 ms, no collar, overlap scored) diarization error against an
+/// RTTM reference, with the optimal one-to-one speaker mapping.
+#[derive(Debug)]
+#[allow(dead_code)] // fields are read through the Debug report
+struct DiarizationError {
+    reference_speakers: usize,
+    predicted_speakers: usize,
+    /// Missed + false alarm + confusion, over reference speech.
+    der: f64,
+    /// Reference speech with no resolved prediction. Word-timed spans leave
+    /// pauses and overlaps uncovered, so this is mostly a span-coverage cost.
+    missed: f64,
+    false_alarm: f64,
+    /// Speech attributed to the wrong speaker: the who-spoke-when error.
+    confusion: f64,
+}
+
+fn diarization_error(
+    reference: &[ReferenceTurn],
+    segments: &[audio_analysis_speakers::DiarizationSegment],
+    audio_seconds: f64,
+) -> DiarizationError {
+    // Excerpt RTTMs keep turns that run past the cut, so clip to the audio.
+    let frames = (audio_seconds * 100.0).round() as usize;
+    let frame = |seconds: f64| ((seconds * 100.0).round() as usize).min(frames);
+    let reference_labels = reference
+        .iter()
+        .map(|turn| turn.speaker.as_str())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let predicted_labels = segments
+        .iter()
+        .filter_map(|segment| match &segment.speaker {
+            DiarizedSpeaker::Unknown(label) => Some(label.as_str()),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let mut reference_frames = vec![0_u64; frames];
+    for turn in reference {
+        let bit = reference_labels
+            .iter()
+            .position(|label| *label == turn.speaker)
+            .unwrap();
+        for value in &mut reference_frames[frame(turn.start)..frame(turn.end)] {
+            *value |= 1 << bit;
+        }
+    }
+    // Transcript spans never overlap, so each frame has at most one prediction.
+    let mut predicted_frames = vec![None::<usize>; frames];
+    for segment in segments {
+        let DiarizedSpeaker::Unknown(label) = &segment.speaker else {
+            continue;
+        };
+        let index = predicted_labels.iter().position(|value| value == label);
+        for value in &mut predicted_frames[frame(segment.start_seconds)..frame(segment.end_seconds)]
+        {
+            *value = index;
+        }
+    }
+    // co[p][r]: frames where predicted speaker p and reference speaker r overlap.
+    let mut co = vec![vec![0_usize; reference_labels.len()]; predicted_labels.len()];
+    let (mut total, mut missed, mut false_alarm, mut matched) = (0, 0, 0, 0);
+    for (reference_bits, predicted) in reference_frames.iter().zip(&predicted_frames) {
+        let r = reference_bits.count_ones() as usize;
+        let p = usize::from(predicted.is_some());
+        total += r;
+        missed += r.saturating_sub(p);
+        false_alarm += p.saturating_sub(r);
+        matched += r.min(p);
+        if let Some(pi) = predicted {
+            for (ri, count) in co[*pi].iter_mut().enumerate() {
+                if reference_bits & (1 << ri) != 0 {
+                    *count += 1;
+                }
+            }
+        }
+    }
+    // Optimal one-to-one mapping: DP over subsets of reference speakers.
+    let mut best = vec![None::<usize>; 1 << reference_labels.len()];
+    best[0] = Some(0);
+    for row in &co {
+        let mut next = best.clone();
+        for (mask, value) in best.iter().enumerate() {
+            let Some(value) = value else { continue };
+            for (ri, count) in row.iter().enumerate() {
+                if mask & (1 << ri) == 0 {
+                    let slot = &mut next[mask | (1 << ri)];
+                    *slot = Some(slot.unwrap_or(0).max(value + count));
+                }
+            }
+        }
+        best = next;
+    }
+    let correct = best.into_iter().flatten().max().unwrap_or(0);
+    let total = total as f64;
+    let confusion = (matched - correct) as f64;
+    DiarizationError {
+        reference_speakers: reference_labels.len(),
+        predicted_speakers: predicted_labels.len(),
+        der: (missed as f64 + false_alarm as f64 + confusion) / total,
+        missed: missed as f64 / total,
+        false_alarm: false_alarm as f64 / total,
+        confusion: confusion / total,
+    }
 }
 
 /// Word spans from a WhisperX JSON transcript, merged like the transcript
@@ -237,10 +348,12 @@ fn short_turn_report(
     }
 }
 
-/// Real multi-speaker check for issue #152: the default evidence threshold
-/// must not swallow genuine short turns on the transcript-span provider path
-/// (merged word spans, cluster threshold 0.95, as in
-/// `audio-analysis-transcription`).
+/// Real multi-speaker check on the transcript-span provider path (merged word
+/// spans and default clustering, as in `audio-analysis-transcription`):
+/// - issue #152: the default evidence threshold must not swallow genuine short
+///   turns;
+/// - issue #204: the speaker count must match the reference and few frames may
+///   go to the wrong speaker.
 ///
 /// Inputs (free, public):
 /// - `AUDIO_SPEAKERS_WESPEAKER_ONNX`: as above.
@@ -252,7 +365,7 @@ fn short_turn_report(
 /// - `AUDIO_SPEAKERS_MULTI_SPEAKER_TRANSCRIPT`: WhisperX JSON with word timings.
 #[test]
 #[ignore = "requires AUDIO_SPEAKERS_WESPEAKER_ONNX and AUDIO_SPEAKERS_MULTI_SPEAKER_* inputs"]
-fn default_evidence_threshold_keeps_real_short_turns() {
+fn transcript_spans_keep_short_turns_and_reference_speakers() {
     let (Some(model), Some(wav), Some(rttm), Some(transcript)) = (
         env_path("AUDIO_SPEAKERS_WESPEAKER_ONNX"),
         env_path("AUDIO_SPEAKERS_MULTI_SPEAKER_WAV"),
@@ -276,20 +389,28 @@ fn default_evidence_threshold_keeps_real_short_turns() {
         })
         .unwrap();
         let mut diarizer = WindowedSpeakerDiarizer::new(embedder, FixedSpans(spans.clone()))
-            .cluster_threshold(0.95)
-            .unwrap()
             .min_speaker_evidence_seconds(threshold)
             .unwrap();
         let result = diarizer.diarize(&audio).unwrap();
         let report = short_turn_report(threshold, &reference, &result.segments);
-        eprintln!("{report:?}");
-        reports.push(report);
+        let error = diarization_error(
+            &reference,
+            &result.segments,
+            samples.len() as f64 / 16_000.0,
+        );
+        eprintln!("{report:?}\n{error:?}");
+        reports.push((report, error));
     }
 
-    let default = &reports[0];
+    let (default, error) = &reports[0];
     assert!(default.short_turns_covered > 0, "{default:?}");
     assert!(
         default.short_turns_unresolved * 2 < default.short_turns_covered,
         "default threshold leaves most real short turns unresolved: {default:?}"
     );
+    assert_eq!(
+        error.predicted_speakers, error.reference_speakers,
+        "{error:?}"
+    );
+    assert!(error.confusion < 0.1, "{error:?}");
 }

@@ -359,4 +359,3 @@ pub(crate) fn validate_alignment_setup(options: &AlignmentOptions) -> Result<()>
 pub(crate) fn validate_model_bundle_files(bundle: &Path, files: &[&str]) -> Result<()> {
     native_bundles::validate_required_bundle_files(bundle, files)
 }
-

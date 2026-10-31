@@ -196,7 +196,10 @@ impl NativeTranscriptionRunner {
             .map_err(SelectedMediaTranscriptionError::Pipeline)
     }
 
-    pub(crate) fn prepare_for_request(&mut self, request: &TranscriptionPipelineRequest) -> Result<()> {
+    pub(crate) fn prepare_for_request(
+        &mut self,
+        request: &TranscriptionPipelineRequest,
+    ) -> Result<()> {
         match self.mode {
             NativeTranscriptionRunnerMode::CallerProviders => {
                 self.validate_compatible_request(request)
@@ -235,4 +238,3 @@ impl NativeTranscriptionRunner {
         Ok(())
     }
 }
-

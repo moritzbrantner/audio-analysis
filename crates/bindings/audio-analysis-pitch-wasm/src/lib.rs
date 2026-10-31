@@ -113,7 +113,9 @@ fn timeline_config(options: &Map<String, Value>) -> Result<KeyTimelineConfig, St
         "minConfidence",
         config.min_confidence as f64,
     )? as f32;
-    if let Some(value) = option_alias(options, "timelineMaxWindows", "maxWindows").and_then(Value::as_u64) {
+    if let Some(value) =
+        option_alias(options, "timelineMaxWindows", "maxWindows").and_then(Value::as_u64)
+    {
         config.max_windows = usize::try_from(value)
             .ok()
             .filter(|value| *value > 0)
@@ -142,9 +144,7 @@ fn boundary_seconds(options: &Map<String, Value>) -> Result<Vec<f64>, String> {
             value
                 .as_f64()
                 .filter(|value| value.is_finite())
-                .ok_or_else(|| {
-                    format!("barBoundariesSeconds[{index}] must be a finite number")
-                })
+                .ok_or_else(|| format!("barBoundariesSeconds[{index}] must be a finite number"))
         })
         .collect()
 }
@@ -204,11 +204,7 @@ fn positive_f64_alias(
     }
 }
 
-fn unit_f64(
-    options: &Map<String, Value>,
-    field: &str,
-    default_value: f64,
-) -> Result<f64, String> {
+fn unit_f64(options: &Map<String, Value>, field: &str, default_value: f64) -> Result<f64, String> {
     let value = options
         .get(field)
         .and_then(Value::as_f64)

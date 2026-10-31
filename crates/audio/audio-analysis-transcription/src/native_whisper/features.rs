@@ -153,6 +153,19 @@ pub(super) fn transformers_whisper_pcm_to_mel(
     let mut buffer = vec![Complex32::new(0.0, 0.0); n_fft];
     let mut mel = vec![0.0_f32; n_mel * whisper::N_FRAMES];
     let center = n_fft as isize / 2;
+    // Mel filters are about 97% zeros; only sum the bins between each filter's
+    // first and last non-zero weight.
+    let filter_bounds = filters
+        .chunks_exact(n_freqs)
+        .map(|filter| {
+            let start = filter.iter().position(|weight| *weight != 0.0);
+            let end = filter.iter().rposition(|weight| *weight != 0.0);
+            match (start, end) {
+                (Some(start), Some(end)) => (start, end + 1),
+                _ => (0, 0),
+            }
+        })
+        .collect::<Vec<_>>();
 
     // Center padding produces N_FRAMES + 1 frames. Whisper drops the final one.
     for frame in 0..whisper::N_FRAMES {
@@ -162,11 +175,21 @@ pub(super) fn transformers_whisper_pcm_to_mel(
             *value = Complex32::new(audio[index] * hann[offset], 0.0);
         }
         fft.process(&mut buffer);
+        // A zero weight only cancels a finite bin: an overflowed bin turns into
+        // NaN, so such a frame keeps the full sum to produce the same output.
+        let overflowed = buffer[..n_freqs]
+            .iter()
+            .any(|value| !value.norm_sqr().is_finite());
         for mel_index in 0..n_mel {
             let filter = &filters[mel_index * n_freqs..(mel_index + 1) * n_freqs];
-            let energy = buffer[..n_freqs]
+            let (start, end) = if overflowed {
+                (0, n_freqs)
+            } else {
+                filter_bounds[mel_index]
+            };
+            let energy = buffer[start..end]
                 .iter()
-                .zip(filter)
+                .zip(&filter[start..end])
                 .map(|(value, weight)| value.norm_sqr() * weight)
                 .sum::<f32>()
                 .max(1e-10);

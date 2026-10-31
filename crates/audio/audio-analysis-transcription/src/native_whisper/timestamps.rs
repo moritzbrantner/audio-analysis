@@ -411,3 +411,9 @@ pub(super) fn project_words_from_timestamp_segment(
 pub(super) fn token_id(tokenizer: &Tokenizer, token: &str) -> Option<u32> {
     tokenizer.token_to_id(token)
 }
+
+/// Whisper's no-speech token: `<|nospeech|>` from large-v3 on, `<|nocaptions|>`
+/// in earlier vocabularies (tiny through large-v2), as in OpenAI's tokenizer.
+pub(super) fn no_speech_token_id(tokenizer: &Tokenizer) -> Option<u32> {
+    token_id(tokenizer, "<|nospeech|>").or_else(|| token_id(tokenizer, "<|nocaptions|>"))
+}

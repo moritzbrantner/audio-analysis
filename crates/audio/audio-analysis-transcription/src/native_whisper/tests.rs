@@ -786,6 +786,23 @@ fn test_tokenizer() -> Tokenizer {
     Tokenizer::new(model)
 }
 
+// native-whisperx#418: tiny..large-v2 call the token <|nocaptions|>, so
+// no-speech rejection never fired for them.
+#[test]
+fn no_speech_token_resolves_in_pre_v3_vocabularies() {
+    assert_eq!(no_speech_token_id(&test_tokenizer()), Some(10));
+    let temp = tempfile::tempdir().unwrap();
+    let vocab = temp.path().join("vocab.json");
+    std::fs::write(
+        &vocab,
+        serde_json::json!({ "<unk>": 0, "<|nocaptions|>": 50362 }).to_string(),
+    )
+    .unwrap();
+    let tokenizer =
+        Tokenizer::new(WordLevel::from_file(vocab.to_str().unwrap(), "<unk>".to_string()).unwrap());
+    assert_eq!(no_speech_token_id(&tokenizer), Some(50362));
+}
+
 fn timestamp_test_tokenizer() -> Tokenizer {
     let temp = tempfile::tempdir().unwrap();
     let vocab = temp.path().join("vocab.json");

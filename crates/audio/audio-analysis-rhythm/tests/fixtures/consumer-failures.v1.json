@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "audio-analysis-consumer-failures/v1",
+  "about": "Wrong or failed analyses reported by product consumers. Captured with dj-party's `cargo run --example capture_analysis_case`. `open` cases must still fail; flip to `fixed` when the analysis is corrected so they gate as regressions. `private` audio records features only and is not run.",
+  "cases": [
+    {
+      "id": "dj-party-sorohanro-trumpet-90-bpm",
+      "status": "open",
+      "consumer": "moritzbrantner/dj-party",
+      "scenario": "bpm-sync",
+      "note": "A creator-described 90 BPM trumpet loop analyzes as 63 BPM, so BPM Sync against a 90 BPM deck lands outside the ±16% tempo range and reports limited.",
+      "provenance": {
+        "consumerRevision": "32a2e27f971a2cb90be857ac6be7d297e9c7edcf",
+        "audioAnalysisRevision": "fdbd75ce044eefacf72971183be34b329bd7b11f",
+        "entryPoint": "dj_party::analyze_track_rhythm (TrackRhythmConfig::default)",
+        "reportedIn": "https://github.com/moritzbrantner/dj-party/issues/25",
+        "issue": "https://github.com/moritzbrantner/audio-analysis/issues/212"
+      },
+      "audio": {
+        "kind": "excerpt",
+        "path": "consumer-audio/sorohanro-trumpet-06.wav",
+        "sha256": "6225d35ffeae167303b8b5254624626af5cb1564ea8cd3466549f18eaa82065a",
+        "license": "CC-BY-3.0",
+        "attribution": "sorohanro, \"solo-trumpet-06\" (Freesound 77711), CC BY 3.0, via librosa/data; decoded to mono 48 kHz 16-bit",
+        "sourceUrl": "https://raw.githubusercontent.com/librosa/data/38f4b06556fa0ff1acda5e677d8ba05d1bc0fff0/audio/sorohanro_-_solo-trumpet-06.ogg",
+        "startSeconds": 0.0,
+        "durationSeconds": 5.333
+      },
+      "expected": {
+        "bpm": 90.0
+      },
+      "observed": {
+        "bpm": 63.202248,
+        "confidence": 0.227,
+        "beatCount": 5,
+        "medianBeatPeriodSeconds": 0.971,
+        "firstDownbeatSeconds": 2.027
+      }
+    }
+  ]
+}

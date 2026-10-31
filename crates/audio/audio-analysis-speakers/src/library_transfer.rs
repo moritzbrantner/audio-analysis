@@ -5,10 +5,10 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{
-    DetectError, Result, SpeakerEmbeddingModel, SpeakerLibrary, SpeakerLibrarySnapshot,
-    SpeakerProfile, SNAPSHOT_VERSION,
-};
+use audio_contracts::{DetectError, Result};
+
+use crate::library::SNAPSHOT_VERSION;
+use crate::{SpeakerEmbeddingModel, SpeakerLibrary, SpeakerLibrarySnapshot, SpeakerProfile};
 
 impl SpeakerLibrary {
     /// Exports canonical identities to a new file without replacing an existing destination.

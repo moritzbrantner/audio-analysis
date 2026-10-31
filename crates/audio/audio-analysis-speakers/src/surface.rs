@@ -12,8 +12,9 @@ use crate::{
     SpeakerDiarizationResponse, SpeakerDiarizer, SpeakerEmbedding, SpeakerEmbeddingExtractor,
     SpeakerId, SpeakerIdentificationOptions, SpeakerLabel, SpeakerLibrary,
     SpeakerSegmentPrediction, SpeakerTranscriptAssignmentPolicy, SpectralSpeakerEmbedder,
-    TranscriptionContract, VadOptions, VoiceActivityDetector, WindowedSpeakerDiarizer,
+    VadOptions, VoiceActivityDetector, WindowedSpeakerDiarizer,
 };
+use audio_analysis_recognition::TranscriptionContract;
 
 const MAX_SAMPLES: usize = 192_000;
 const DEFAULT_PREVIEW_VALUES: usize = 32;

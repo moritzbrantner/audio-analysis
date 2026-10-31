@@ -259,10 +259,11 @@ pub(crate) fn apply_alignment_words(
     Ok(())
 }
 
-// Independently aligned overlapping ASR intervals can change their relative starts.
-// Restore chronology only after attaching every word/character by stable segment ID:
-// move complete segments, never timestamps or text independently.
-pub(crate) fn order_aligned_segments(transcript: &mut TranscriptionContract) {
+// Overlapping ASR intervals (overlapping VAD chunks, or independent alignment of
+// them) can change segments' relative starts. Restore chronology after attaching
+// every word/character by stable segment ID: move complete segments, never
+// timestamps or text independently.
+pub(crate) fn order_segments_chronologically(transcript: &mut TranscriptionContract) {
     if transcript
         .segments
         .iter()

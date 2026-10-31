@@ -247,15 +247,16 @@ impl CandleWhisperSession {
                     }
                     rejected_timestamp_segments |= reason == "unstableTimestampSegments";
                 }
+                let (clip_start, clip_end) = window.transcript_bounds();
                 if timed.timing == WhisperWindowTiming::ChunkWindow {
-                    if timed.decoded.text.trim().is_empty() {
+                    if timed.decoded.text.trim().is_empty() || clip_end <= clip_start {
                         continue;
                     }
                     segments.push(window_fallback_segment(
                         next_index,
                         timed.decoded.text,
-                        window.global_start_seconds,
-                        window.global_end_seconds,
+                        clip_start,
+                        clip_end,
                         self.setup.language.clone(),
                     )?);
                     next_index += 1;
@@ -265,7 +266,7 @@ impl CandleWhisperSession {
                         timed.decoded,
                         &mut next_index,
                         window.global_start_seconds,
-                        window.global_end_seconds,
+                        (clip_start, clip_end),
                         self.setup.language.clone(),
                     )?;
                     if timestamp_segments
@@ -740,6 +741,8 @@ impl CandleWhisperSession {
                 local_end_seconds: samples.len() as f64 / whisper::SAMPLE_RATE as f64,
                 global_start_seconds: 0.0,
                 global_end_seconds: samples.len() as f64 / whisper::SAMPLE_RATE as f64,
+                speech_start_seconds: 0.0,
+                speech_end_seconds: samples.len() as f64 / whisper::SAMPLE_RATE as f64,
             }],
             mode,
             feature_extractor_mode,

@@ -2698,6 +2698,53 @@ fn pipeline_preserves_aligned_segment_associations_in_chronological_order() {
     );
 }
 
+// native-whisperx#418: unaligned segments from overlapping chunks are ordered,
+// not rejected by strict chronology validation.
+#[test]
+fn unaligned_pipeline_orders_overlapping_chunk_segments() {
+    struct BackwardAsr;
+    impl AudioTranscriptionProvider for BackwardAsr {
+        fn provider_id(&self) -> &str {
+            "frozen-backward-asr"
+        }
+        fn transcribe(&mut self, request: AsrRequest) -> Result<AsrResponse> {
+            let mut segments = Vec::new();
+            for (index, text, start, end) in [(0, "you", 1.0, 1.04), (1, "I'm a", 0.75, 1.5)] {
+                let mut segment = TranscriptSegmentContract::new(index, text)
+                    .with_time_range(Some(start), Some(end))?;
+                segment.attributes.insert("timing".into(), "global".into());
+                segments.push(segment);
+            }
+            Ok(AsrResponse {
+                model_id: request.model_id,
+                language: Some("en".into()),
+                transcript: transcription_from_segments(
+                    request.audio.source,
+                    Some("en".into()),
+                    segments,
+                )?,
+                diagnostics: Vec::new(),
+            })
+        }
+    }
+    let mut request = sample_request();
+    request.source = TranscriptionSource::Samples {
+        samples: vec![0.1; 32_000],
+        sample_rate: 16_000,
+        channels: 1,
+        source: Some("backward.wav".into()),
+    };
+    request.alignment.enabled = false;
+    let mut vad = FixedVadProvider {
+        segments: vec![SpeechSpan::new(0.0, 2.0, 1.0).unwrap()],
+    };
+    let transcript = run_transcription_pipeline(request, &mut vad, &mut BackwardAsr, None, None)
+        .expect("backward unaligned segments must not fail the file")
+        .transcript;
+    transcript.validate_strict().unwrap();
+    assert_eq!(transcript.text.as_deref(), Some("I'm a you"));
+}
+
 #[test]
 fn mock_pipeline_normalizes_offsets_alignment_and_diarization() {
     let mut request = sample_request();

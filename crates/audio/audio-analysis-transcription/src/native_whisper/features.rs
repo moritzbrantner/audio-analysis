@@ -14,6 +14,23 @@ pub(super) struct ChunkWindow {
     pub(super) local_end_seconds: f64,
     pub(super) global_start_seconds: f64,
     pub(super) global_end_seconds: f64,
+    pub(super) speech_start_seconds: f64,
+    pub(super) speech_end_seconds: f64,
+}
+
+impl ChunkWindow {
+    /// Global range transcript timestamps from this window may occupy: the
+    /// window intersected with its unpadded speech chunk. The context padding
+    /// is decoder input only; WhisperX likewise clips each chunk's segments to
+    /// the chunk, so neighbouring chunks never overlap in time.
+    pub(super) fn transcript_bounds(&self) -> (f64, f64) {
+        let start = self.global_start_seconds.max(self.speech_start_seconds);
+        let end = self
+            .global_end_seconds
+            .min(self.speech_end_seconds)
+            .max(start);
+        (start, end)
+    }
 }
 
 pub(super) fn chunk_windows(
@@ -23,13 +40,23 @@ pub(super) fn chunk_windows(
     controls: &CandleWhisperWindowControls,
 ) -> Result<Vec<ChunkWindow>> {
     let duration = samples.len() as f64 / sample_rate as f64;
-    let padded_start_seconds =
+    let mut padded_start_seconds =
         (chunk.start_seconds - controls.leading_context_seconds).clamp(0.0, duration);
     let padded_end_seconds = (chunk.end_seconds + controls.trailing_context_seconds)
         .clamp(padded_start_seconds, duration);
-    let start = seconds_to_index(padded_start_seconds, sample_rate, samples.len());
-    let end = seconds_to_index(padded_end_seconds, sample_rate, samples.len()).max(start + 1);
+    let mut start = seconds_to_index(padded_start_seconds, sample_rate, samples.len());
+    let mut end = seconds_to_index(padded_end_seconds, sample_rate, samples.len()).max(start + 1);
     let max_window = whisper::N_SAMPLES;
+    // A full-size chunk (VAD merging fills chunks up to 30 s) plus context
+    // would spill a sub-second remainder window, on which Whisper hallucinates
+    // ("you", "Thank you."). Give up context before splitting such a chunk.
+    let speech_start = seconds_to_index(chunk.start_seconds, sample_rate, samples.len());
+    let speech_end = seconds_to_index(chunk.end_seconds, sample_rate, samples.len());
+    if end - start > max_window && speech_end.saturating_sub(speech_start) <= max_window {
+        end = end.min(start + max_window).max(speech_end);
+        start = start.max(end - max_window);
+        padded_start_seconds = start as f64 / sample_rate as f64;
+    }
     let mut windows = Vec::new();
     let mut cursor = start;
     while cursor < end {
@@ -43,6 +70,8 @@ pub(super) fn chunk_windows(
             local_end_seconds,
             global_start_seconds: padded_start_seconds + local_start_seconds,
             global_end_seconds: padded_start_seconds + local_end_seconds,
+            speech_start_seconds: chunk.start_seconds,
+            speech_end_seconds: chunk.end_seconds,
         });
         cursor = window_end;
     }

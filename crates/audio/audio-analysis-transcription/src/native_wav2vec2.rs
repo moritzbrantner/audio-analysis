@@ -349,7 +349,7 @@ pub(crate) fn emit_wav2vec2_ctc_segments_with_load_observer(
         let segment_end = segment.end_seconds().unwrap_or(audio_duration);
         if !segment_start.is_finite()
             || !segment_end.is_finite()
-            || segment_end <= segment_start
+            || segment_end < segment_start
             || segment_end > audio_duration + 1e-6
         {
             return Err(invalid_request(
@@ -357,7 +357,8 @@ pub(crate) fn emit_wav2vec2_ctc_segments_with_load_observer(
             ));
         }
         let transcript_words = segment_words(segment);
-        if transcript_words.is_empty() {
+        // A zero-length segment has no audio to align; keep it unaligned.
+        if transcript_words.is_empty() || segment_end == segment_start {
             continue;
         }
         let fallback_words =

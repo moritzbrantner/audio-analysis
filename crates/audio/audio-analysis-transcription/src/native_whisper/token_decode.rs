@@ -156,7 +156,7 @@ impl CandleWhisperSession {
             model_output_mismatch(format!("Whisper search logits projection failed: {error}"))
         })?;
         if generated.is_empty() && no_speech_probability.is_none() {
-            *no_speech_probability = token_id(&self.tokenizer, "<|nospeech|>")
+            *no_speech_probability = no_speech_token_id(&self.tokenizer)
                 .map(|token| tensor_token_probability_at_position(&logits, 0, sot_position, token))
                 .transpose()?
                 .flatten();
@@ -263,7 +263,7 @@ impl CandleWhisperSession {
                         ))
                     })?;
                 if active.row.generated_tokens().is_empty() {
-                    active.no_speech_probability = token_id(&self.tokenizer, "<|nospeech|>")
+                    active.no_speech_probability = no_speech_token_id(&self.tokenizer)
                         .map(|token| {
                             tensor_token_probability_at_position(
                                 &logits,

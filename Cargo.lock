@@ -2024,6 +2024,7 @@ name = "moenarch-audio-analysis-rhythm"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "hound",
  "moenarch-audio-analysis-core",
  "moenarch-audio-analysis-io",
  "moenarch-audio-analysis-pitch",
@@ -2031,6 +2032,7 @@ dependencies = [
  "moenarch-audio-contracts",
  "moenarch-runtime-core",
  "serde_json",
+ "sha2 0.11.1",
 ]
 
 [[package]]

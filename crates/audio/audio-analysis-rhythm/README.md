@@ -98,6 +98,25 @@ gate. Media Player issue #8 remains a planned integration: these tests do not
 claim downstream playback, queue, crossfade, or audible acceptance. Consumer
 policy and calibrated confidence thresholds stay downstream.
 
+## Consumer-reported failures
+
+When a product gets a wrong or failed analysis on a real track, the case goes
+into `tests/fixtures/consumer-failures.v1.json`. DJ Party produces cases with
+`cargo run --example capture_analysis_case -- <file> --id … --scenario … --expected-bpm …`,
+which runs its exact deck analysis path and records expected vs observed values
+plus consumer and audio-analysis revisions.
+
+- Free-licensed (CC0, CC-BY, CC-BY-SA, CC-PDM) audio is committed as a short
+  mono 16-bit excerpt under `tests/fixtures/consumer-audio/`, checksum-pinned,
+  with license and attribution in the case.
+- Other audio is recorded as `"kind": "private"`: features, expected vs
+  observed values and provenance only, with no audio committed. Reduce it to a
+  free or authored excerpt to make it runnable.
+- `cargo test -p moenarch-audio-analysis-rhythm --test consumer_failures` runs
+  every excerpt case. `open` cases must still fail. Once a fix makes one pass,
+  the test fails until its status is flipped to `fixed`, and from then on it
+  gates as a regression.
+
 ## Related crates
 
 - `audio-analysis-core`

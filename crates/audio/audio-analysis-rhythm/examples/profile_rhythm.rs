@@ -26,9 +26,18 @@ fn main() {
         let tempo = estimate_tempo(black_box(&onsets), TempoEstimatorConfig::default())
             .expect("profile tempo");
 
-        assert!(!envelope.is_empty(), "profile workload must emit envelope frames");
-        assert!(!onsets.is_empty(), "profile workload must detect deterministic clicks");
-        assert!(tempo.bpm.is_some(), "profile workload must estimate a tempo");
+        assert!(
+            !envelope.is_empty(),
+            "profile workload must emit envelope frames"
+        );
+        assert!(
+            !onsets.is_empty(),
+            "profile workload must detect deterministic clicks"
+        );
+        assert!(
+            tempo.bpm.is_some(),
+            "profile workload must estimate a tempo"
+        );
         checksum ^= envelope.len() ^ onsets.len() ^ tempo.onset_count;
         black_box((&envelope, &onsets, tempo));
     }

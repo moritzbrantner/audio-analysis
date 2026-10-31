@@ -44,4 +44,3 @@ impl Default for WhisperCppProviderOptions {
 pub(crate) fn default_whisper_cpp_model() -> String {
     "large-v3-turbo".to_string()
 }
-

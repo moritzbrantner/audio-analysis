@@ -342,7 +342,9 @@ mod tests {
 
         let error = aligned_lyrics_from_transcription(&transcription)
             .expect_err("overlapping aligned words must fail before media decoding");
-        assert!(error.to_string().contains("chronological and non-overlapping"));
+        assert!(error
+            .to_string()
+            .contains("chronological and non-overlapping"));
     }
 
     #[test]
@@ -355,9 +357,7 @@ mod tests {
         let mut segment = TimedTextSegmentContract::new(0, "brief")
             .with_time_range(Some(start_seconds), Some(end_seconds))
             .expect("f64 segment timing must be valid");
-        segment
-            .push_word(word)
-            .expect("word must fit its segment");
+        segment.push_word(word).expect("word must fit its segment");
         let transcription = TranscriptionContract {
             text: Some("brief".to_string()),
             segments: vec![segment],

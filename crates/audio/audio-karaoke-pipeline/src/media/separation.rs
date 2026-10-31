@@ -32,9 +32,16 @@ pub enum KaraokeSeparationPipelineError {
 impl Display for KaraokeSeparationPipelineError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Validation(error) => write!(formatter, "karaoke request validation failed: {error}"),
-            Self::Separation(error) => write!(formatter, "karaoke vocal separation failed: {error}"),
-            Self::Media(error) => write!(formatter, "karaoke separated-media pipeline failed: {error}"),
+            Self::Validation(error) => {
+                write!(formatter, "karaoke request validation failed: {error}")
+            }
+            Self::Separation(error) => {
+                write!(formatter, "karaoke vocal separation failed: {error}")
+            }
+            Self::Media(error) => write!(
+                formatter,
+                "karaoke separated-media pipeline failed: {error}"
+            ),
         }
     }
 }
@@ -132,8 +139,8 @@ pub fn build_ultrastar_with_demucs(
 fn validated_vocal_separator(
     options: HtdemucsOptions,
 ) -> KaraokeSeparationPipelineResult<HtdemucsSeparator> {
-    let separator = HtdemucsSeparator::new(options)
-        .map_err(KaraokeSeparationPipelineError::Separation)?;
+    let separator =
+        HtdemucsSeparator::new(options).map_err(KaraokeSeparationPipelineError::Separation)?;
     if !separator.expected_stems().contains(&Stem::Vocals) {
         return Err(KaraokeSeparationPipelineError::Separation(
             SeparationDetectError::InvalidArgument(
@@ -144,20 +151,16 @@ fn validated_vocal_separator(
     Ok(separator)
 }
 
-fn required_vocal_path(
-    separation: &SeparationResult,
-) -> KaraokeSeparationPipelineResult<PathBuf> {
+fn required_vocal_path(separation: &SeparationResult) -> KaraokeSeparationPipelineResult<PathBuf> {
     separation
         .stems
         .iter()
         .find(|stem| stem.stem == Stem::Vocals && stem.exists)
         .map(|stem| stem.path.clone())
         .ok_or_else(|| {
-            KaraokeSeparationPipelineError::Separation(
-                SeparationDetectError::Source(
-                    "Demucs result did not contain a non-empty vocals stem".to_string(),
-                ),
-            )
+            KaraokeSeparationPipelineError::Separation(SeparationDetectError::Source(
+                "Demucs result did not contain a non-empty vocals stem".to_string(),
+            ))
         })
 }
 
@@ -169,10 +172,8 @@ mod tests {
 
     #[test]
     fn default_karaoke_plan_requests_two_stem_vocals_without_execution() {
-        let execution = plan_vocal_separation(
-            "song.wav",
-            karaoke_vocal_separation_options("separated"),
-        );
+        let execution =
+            plan_vocal_separation("song.wav", karaoke_vocal_separation_options("separated"));
         let Ok(execution) = execution else {
             panic!("valid dry-run separation plan should succeed");
         };
@@ -187,9 +188,9 @@ mod tests {
             .iter()
             .map(|arg| arg.to_string_lossy())
             .collect::<Vec<_>>();
-        assert!(args.windows(2).any(|pair| {
-            pair[0].as_ref() == "--two-stems" && pair[1].as_ref() == "vocals"
-        }));
+        assert!(args
+            .windows(2)
+            .any(|pair| { pair[0].as_ref() == "--two-stems" && pair[1].as_ref() == "vocals" }));
     }
 
     #[test]

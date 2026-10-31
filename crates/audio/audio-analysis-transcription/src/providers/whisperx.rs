@@ -229,7 +229,10 @@ pub(crate) fn whisperx_stdout_vad_segments(stdout: &[u8]) -> Vec<SpeechSpan> {
         .collect()
 }
 
-pub(crate) fn find_json_artifact_for_source(output_dir: &Path, source_path: &Path) -> Option<PathBuf> {
+pub(crate) fn find_json_artifact_for_source(
+    output_dir: &Path,
+    source_path: &Path,
+) -> Option<PathBuf> {
     let expected = source_path
         .file_stem()
         .and_then(|stem| stem.to_str())
@@ -280,4 +283,3 @@ pub(crate) fn wait_with_optional_timeout(
         std::thread::sleep(Duration::from_millis(25));
     }
 }
-

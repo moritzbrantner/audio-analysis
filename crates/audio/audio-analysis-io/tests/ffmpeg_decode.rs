@@ -3,11 +3,11 @@ use audio_analysis_io::{
     decode_audio_to_mono_f32, decode_selected_media_to_mono_f32, open_audio_input,
     AudioFrameSource, AudioInput, AudioInputOptions, AudioIoError, SelectedMediaSource,
 };
-use audio_contracts::{AudioBuffer, AudioSampleFormat};
 use audio_analysis_io::{
     is_ffmpeg_available, is_ffprobe_available, write_two_audio_stream_test_media,
     AudioStreamSelection, AudioStreamSelectionErrorReason, FfmpegError, MediaType,
 };
+use audio_contracts::{AudioBuffer, AudioSampleFormat};
 
 fn sine(freq_hz: f32, sample_rate: u32, seconds: f32) -> Vec<f32> {
     let samples = (sample_rate as f32 * seconds) as usize;

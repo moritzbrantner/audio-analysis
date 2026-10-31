@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use audio_contracts::{DetectError, Result};
 use crate::is_ffmpeg_available;
+use audio_contracts::{DetectError, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Supported audio output file formats.

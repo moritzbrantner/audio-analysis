@@ -377,6 +377,7 @@ fn diarize_value(input: serde_json::Value) -> Result<serde_json::Value, String> 
     let embedder = speaker_embedder(&input)?;
     let mut diarizer = WindowedSpeakerDiarizer::new(embedder, EnergyVoiceActivityDetector)
         .vad_options(vad_options)
+        .and_then(|diarizer| diarizer.min_speaker_evidence_seconds(0.0))
         .map_err(|error| error.to_string())?;
     if let Some(threshold) = finite_f32(&input, "clusterThreshold")? {
         diarizer = diarizer
@@ -389,11 +390,13 @@ fn diarize_value(input: serde_json::Value) -> Result<serde_json::Value, String> 
     let segments = result
         .segments
         .into_iter()
-        .map(|segment| SpeakerSegmentPrediction {
-            speaker: diarized_speaker_label(segment.speaker),
-            start_seconds: segment.start_seconds as f32,
-            end_seconds: segment.end_seconds as f32,
-            score: Some(segment.score),
+        .filter_map(|segment| {
+            Some(SpeakerSegmentPrediction {
+                speaker: diarized_speaker_label(segment.speaker)?,
+                start_seconds: segment.start_seconds as f32,
+                end_seconds: segment.end_seconds as f32,
+                score: Some(segment.score),
+            })
         })
         .collect::<Vec<_>>();
     Ok(serde_json::json!({
@@ -407,10 +410,11 @@ fn diarize_value(input: serde_json::Value) -> Result<serde_json::Value, String> 
     }))
 }
 
-fn diarized_speaker_label(speaker: DiarizedSpeaker) -> String {
+fn diarized_speaker_label(speaker: DiarizedSpeaker) -> Option<String> {
     match speaker {
-        DiarizedSpeaker::Known(id) => id.as_str().to_string(),
-        DiarizedSpeaker::Unknown(label) => label,
+        DiarizedSpeaker::Known(id) => Some(id.as_str().to_string()),
+        DiarizedSpeaker::Unknown(label) => Some(label),
+        DiarizedSpeaker::Unresolved => None,
     }
 }
 

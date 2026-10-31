@@ -9,13 +9,14 @@
 //!   (SHA-256 `7bb2f06e9df17cdf1ef14ee8a15ab08ed28e8d0ef5054ee135741560df2ec068`).
 //! - `AUDIO_SPEAKERS_SINGLE_SPEAKER_WAV`: LibriSpeech `1272-128104-0000` decoded to
 //!   16 kHz mono.
+//! - `ORT_DYLIB_PATH`: ONNX Runtime 1.24 shared library (`load-dynamic`).
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use audio_analysis_speakers::{
     DiarizedSpeaker, EnergyVoiceActivityDetector, OnnxSpeakerEmbedder, OnnxSpeakerEmbeddingConfig,
-    SpeakerAudio, SpeakerDiarizer, WindowedSpeakerDiarizer,
+    SpeakerAudio, SpeakerDiarizer, WindowedSpeakerDiarizer, DEFAULT_MIN_SPEAKER_EVIDENCE_SECONDS,
 };
 
 fn env_path(name: &str) -> Option<PathBuf> {
@@ -79,4 +80,14 @@ fn single_librispeech_speaker_is_not_split_by_short_tail_span() {
         })
         .collect::<BTreeSet<_>>();
     assert_eq!(speakers.len(), 1, "single-speaker reference: {speakers:?}");
+    // The 180 ms tail stays an explicit unresolved observation.
+    for segment in &result.segments {
+        let short =
+            segment.end_seconds - segment.start_seconds < DEFAULT_MIN_SPEAKER_EVIDENCE_SECONDS;
+        assert_eq!(short, segment.speaker == DiarizedSpeaker::Unresolved);
+    }
+    assert!(result
+        .segments
+        .iter()
+        .any(|segment| segment.speaker == DiarizedSpeaker::Unresolved));
 }

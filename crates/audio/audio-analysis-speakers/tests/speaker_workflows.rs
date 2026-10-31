@@ -163,6 +163,8 @@ fn public_diarizer_maps_known_speaker_and_labels_unknown_cluster() {
             ],
         },
     )
+    .min_speaker_evidence_seconds(0.0)
+    .unwrap()
     .library(library);
     diarizer.identification_options = options;
 

@@ -1667,6 +1667,9 @@ pub enum DiarizedSpeaker {
     Known(SpeakerId),
     /// Unenrolled cluster label.
     Unknown(String),
+    /// Speech span too short to attribute to any speaker. Its embedding is
+    /// neither computed nor clustered, so it never creates a new speaker.
+    Unresolved,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1689,7 +1692,14 @@ pub struct WindowedSpeakerDiarizer<E, V> {
     pub min_speakers: Option<usize>,
     /// Maximum number of unknown speaker clusters to produce.
     pub max_speakers: Option<usize>,
+    /// Minimum speech span duration, in seconds, required before a span is
+    /// embedded and attributed. Shorter spans are returned as
+    /// [`DiarizedSpeaker::Unresolved`] with their observation times intact.
+    pub min_speaker_evidence_seconds: f64,
 }
+
+/// Default [`WindowedSpeakerDiarizer::min_speaker_evidence_seconds`].
+pub const DEFAULT_MIN_SPEAKER_EVIDENCE_SECONDS: f64 = 0.5;
 
 impl<E, V> WindowedSpeakerDiarizer<E, V> {
     /// Creates a new value.
@@ -1703,7 +1713,21 @@ impl<E, V> WindowedSpeakerDiarizer<E, V> {
             cluster_threshold: 0.72,
             min_speakers: None,
             max_speakers: None,
+            min_speaker_evidence_seconds: DEFAULT_MIN_SPEAKER_EVIDENCE_SECONDS,
         }
+    }
+
+    /// Returns this value with the minimum span duration required to attribute
+    /// a speaker. `0.0` attributes every span.
+    pub fn min_speaker_evidence_seconds(mut self, seconds: f64) -> Result<Self> {
+        if !seconds.is_finite() || seconds < 0.0 {
+            return Err(DetectError::InvalidArgument(
+                "speaker diarization min_speaker_evidence_seconds must be finite and non-negative"
+                    .to_string(),
+            ));
+        }
+        self.min_speaker_evidence_seconds = seconds;
+        Ok(self)
     }
 
     /// Returns this value with voice activity detection options.
@@ -1753,8 +1777,13 @@ where
         let spans = self.vad.detect_speech(audio, &self.vad_options)?.segments;
         let mono = audio.to_mono()?;
         let mut windows = Vec::new();
+        let mut unresolved = Vec::new();
 
         for span in spans {
+            if span.end_seconds - span.start_seconds < self.min_speaker_evidence_seconds {
+                unresolved.push(span);
+                continue;
+            }
             let start = (span.start_seconds * audio.sample_rate() as f64).round() as usize;
             let end = (span.end_seconds * audio.sample_rate() as f64).round() as usize;
             let segment_samples = &mono[start.min(mono.len())..end.min(mono.len())];
@@ -1784,7 +1813,7 @@ where
             self.min_speakers,
             self.max_speakers,
         )?;
-        let segments = windows
+        let mut segments: Vec<DiarizationSegment> = windows
             .into_iter()
             .enumerate()
             .map(|(index, window)| {
@@ -1805,6 +1834,13 @@ where
                 }
             })
             .collect();
+        segments.extend(unresolved.into_iter().map(|span| DiarizationSegment {
+            start_seconds: span.start_seconds,
+            end_seconds: span.end_seconds,
+            speaker: DiarizedSpeaker::Unresolved,
+            score: span.score,
+        }));
+        segments.sort_by(|left, right| left.start_seconds.total_cmp(&right.start_seconds));
 
         Ok(DiarizationResult { segments })
     }
@@ -2755,8 +2791,10 @@ pub fn diarize_speaker_audio_baseline(
 ) -> Result<SpeakerDiarizationResponse> {
     let audio = SpeakerAudio::mono(samples, sample_rate)?;
     let embedder = SpectralSpeakerEmbedder::default();
+    // Heuristic baseline: attribute every span, including very short ones.
     let mut diarizer = WindowedSpeakerDiarizer::new(embedder, EnergyVoiceActivityDetector)
-        .cluster_threshold(0.95)?;
+        .cluster_threshold(0.95)?
+        .min_speaker_evidence_seconds(0.0)?;
     let merge_gap_seconds = diarizer.vad_options.merge_gap_seconds as f32;
     let result = diarizer.diarize(&audio)?;
     let segments = stable_speaker_predictions(result.segments, merge_gap_seconds)?;
@@ -2779,6 +2817,7 @@ fn stable_speaker_predictions(
     let mut predictions = Vec::new();
     for segment in segments {
         let speaker = match segment.speaker {
+            DiarizedSpeaker::Unresolved => continue,
             DiarizedSpeaker::Known(id) => id.as_str().to_string(),
             DiarizedSpeaker::Unknown(label) => {
                 if let Some((_, stable)) = unknown_labels
@@ -4482,6 +4521,8 @@ mod tests {
             SpectralSpeakerEmbedder::new(SpectralEmbeddingConfig::new(512, 256, 8).unwrap())
                 .unwrap();
         let mut diarizer = WindowedSpeakerDiarizer::new(embedder, EnergyVoiceActivityDetector)
+            .min_speaker_evidence_seconds(0.0)
+            .unwrap()
             .vad_options(VadOptions {
                 rms_threshold: 0.01,
                 frame_seconds: 0.05,
@@ -4523,6 +4564,8 @@ mod tests {
         let mut options = SpeakerIdentificationOptions::new(0.8).unwrap();
         options.min_margin = None;
         let mut diarizer = WindowedSpeakerDiarizer::new(MeanSignSpeakerEmbedder::new(), vad)
+            .min_speaker_evidence_seconds(0.0)
+            .unwrap()
             .library(library)
             .cluster_threshold(0.8)
             .unwrap();
@@ -4555,6 +4598,8 @@ mod tests {
             ],
         };
         let mut diarizer = WindowedSpeakerDiarizer::new(MeanSignSpeakerEmbedder::new(), vad)
+            .min_speaker_evidence_seconds(0.0)
+            .unwrap()
             .cluster_threshold(0.95)
             .unwrap()
             .speaker_bounds(Some(2), Some(2))
@@ -4566,7 +4611,7 @@ mod tests {
             .iter()
             .filter_map(|segment| match &segment.speaker {
                 DiarizedSpeaker::Unknown(label) => Some(label.clone()),
-                DiarizedSpeaker::Known(_) => None,
+                DiarizedSpeaker::Known(_) | DiarizedSpeaker::Unresolved => None,
             })
             .collect::<std::collections::BTreeSet<_>>();
 
@@ -4587,6 +4632,8 @@ mod tests {
             ],
         };
         let mut diarizer = WindowedSpeakerDiarizer::new(MeanSignSpeakerEmbedder::new(), vad)
+            .min_speaker_evidence_seconds(0.0)
+            .unwrap()
             .cluster_threshold(0.95)
             .unwrap()
             .speaker_bounds(None, Some(1))
@@ -4611,6 +4658,8 @@ mod tests {
             ],
         };
         let mut diarizer = WindowedSpeakerDiarizer::new(MeanSignSpeakerEmbedder::new(), vad)
+            .min_speaker_evidence_seconds(0.0)
+            .unwrap()
             .cluster_threshold(0.95)
             .unwrap()
             .speaker_bounds(Some(3), None)
@@ -4622,7 +4671,7 @@ mod tests {
             .iter()
             .filter_map(|segment| match &segment.speaker {
                 DiarizedSpeaker::Unknown(label) => Some(label.clone()),
-                DiarizedSpeaker::Known(_) => None,
+                DiarizedSpeaker::Known(_) | DiarizedSpeaker::Unresolved => None,
             })
             .collect::<std::collections::BTreeSet<_>>();
 
@@ -4667,6 +4716,8 @@ mod tests {
             ],
         };
         let mut diarizer = WindowedSpeakerDiarizer::new(MeanSignSpeakerEmbedder::new(), vad)
+            .min_speaker_evidence_seconds(0.0)
+            .unwrap()
             .cluster_threshold(0.95)
             .unwrap();
 
@@ -4682,6 +4733,58 @@ mod tests {
                 DiarizedSpeaker::Unknown("speaker_1".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn default_diarizer_leaves_short_spans_unresolved_instead_of_new_speaker() {
+        // A long positive span followed by a short negative tail: with full
+        // attribution the tail would become `speaker_1`.
+        let mut samples = vec![0.4_f32; 1_000];
+        samples.extend(vec![-0.4_f32; 180]);
+        let audio = SpeakerAudio::mono(&samples, 1_000).unwrap();
+        let vad = FixedVad {
+            spans: vec![
+                SpeechSpan::new(0.0, 1.0, 0.9).unwrap(),
+                SpeechSpan::new(1.0, 1.18, 0.7).unwrap(),
+            ],
+        };
+        let mut diarizer = WindowedSpeakerDiarizer::new(MeanSignSpeakerEmbedder::new(), vad);
+        assert_eq!(
+            diarizer.min_speaker_evidence_seconds,
+            DEFAULT_MIN_SPEAKER_EVIDENCE_SECONDS
+        );
+
+        let result = diarizer.diarize(&audio).unwrap();
+
+        assert_eq!(
+            result
+                .segments
+                .iter()
+                .map(|segment| (
+                    segment.start_seconds,
+                    segment.end_seconds,
+                    segment.speaker.clone()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (0.0, 1.0, DiarizedSpeaker::Unknown("speaker_0".to_string())),
+                (1.0, 1.18, DiarizedSpeaker::Unresolved),
+            ]
+        );
+        assert_eq!(result.segments[1].score, 0.7);
+    }
+
+    #[test]
+    fn min_speaker_evidence_seconds_rejects_negative_and_non_finite() {
+        for seconds in [-0.1, f64::NAN, f64::INFINITY] {
+            let error = WindowedSpeakerDiarizer::new(
+                MeanSignSpeakerEmbedder::new(),
+                FixedVad { spans: vec![] },
+            )
+            .min_speaker_evidence_seconds(seconds)
+            .unwrap_err();
+            assert!(matches!(error, DetectError::InvalidArgument(_)));
+        }
     }
 
     #[test]

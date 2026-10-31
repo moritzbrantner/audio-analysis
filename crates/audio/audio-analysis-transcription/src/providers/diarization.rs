@@ -44,7 +44,8 @@ impl TranscriptDiarizationProvider for NativeSpeakerDiarizationProvider {
             let vad = TranscriptSpeechSpanVad { spans };
             let mut diarizer = audio_analysis_speakers::WindowedSpeakerDiarizer::new(embedder, vad)
                 .cluster_threshold(0.95)?
-                .speaker_bounds(options.min_speakers, options.max_speakers)?;
+                .speaker_bounds(options.min_speakers, options.max_speakers)?
+                .min_speaker_evidence_seconds(0.0)?;
             let result =
                 audio_analysis_speakers::SpeakerDiarizer::diarize(&mut diarizer, &speaker_audio)?;
             return Ok(SpeakerDiarizationResponse {
@@ -64,7 +65,8 @@ impl TranscriptDiarizationProvider for NativeSpeakerDiarizationProvider {
         let vad = EnergyVoiceActivityDetector;
         let mut diarizer = audio_analysis_speakers::WindowedSpeakerDiarizer::new(embedder, vad)
             .cluster_threshold(0.95)?
-            .speaker_bounds(options.min_speakers, options.max_speakers)?;
+            .speaker_bounds(options.min_speakers, options.max_speakers)?
+            .min_speaker_evidence_seconds(0.0)?;
         let result =
             audio_analysis_speakers::SpeakerDiarizer::diarize(&mut diarizer, &speaker_audio)?;
         Ok(SpeakerDiarizationResponse {
@@ -318,6 +320,8 @@ pub(crate) fn stable_speaker_predictions_from_diarization(
     let mut predictions = Vec::new();
     for segment in segments {
         let speaker = match segment.speaker {
+            // Too-short spans assert no speaker; transcript words there stay unassigned.
+            audio_analysis_speakers::DiarizedSpeaker::Unresolved => continue,
             audio_analysis_speakers::DiarizedSpeaker::Known(id) => id.as_str().to_string(),
             audio_analysis_speakers::DiarizedSpeaker::Unknown(label) => {
                 if let Some((_, stable)) = unknown_labels
@@ -413,7 +417,10 @@ pub(crate) fn diagnostic_usize(diagnostics: &[String], key: &str) -> Option<usiz
         .and_then(|value| value.parse().ok())
 }
 
-pub(crate) fn diarization_progress_provider(provider_id: &str, options: &DiarizationOptions) -> String {
+pub(crate) fn diarization_progress_provider(
+    provider_id: &str,
+    options: &DiarizationOptions,
+) -> String {
     if options
         .model_id
         .trim()
@@ -501,4 +508,3 @@ pub(crate) fn speaker_assignment_policy_value(policy: SpeakerAssignmentPolicy) -
         SpeakerAssignmentPolicy::StrictContained => "strictContained",
     }
 }
-

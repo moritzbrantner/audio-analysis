@@ -137,9 +137,7 @@ impl CandleWhisperSession {
         let decode = self.resolve_request_decode_config(&config.decode)?;
         let decode = &decode;
         let window_controls = &config.window;
-        debug_assert!(
-            decode.preserves_legacy_greedy_path() || !decode.search.temperature_schedule.is_empty()
-        );
+        debug_assert!(!decode.search.temperature_schedule.is_empty());
         let mut segments = Vec::new();
         let mut next_index = 0_u64;
         let mut used_timestamp_tokens = false;
@@ -334,10 +332,10 @@ impl CandleWhisperSession {
                 "timing=expandedVadWindow".to_string()
             },
         ]);
-        let decode_strategy = if decode.preserves_legacy_greedy_path() {
-            "greedy"
-        } else if decode.search.beam_size > 1 {
+        let decode_strategy = if decode.search.beam_size > 1 {
             "beamSearch"
+        } else if decode.search.starts_with_greedy() {
+            "greedy"
         } else {
             "temperatureSampling"
         };

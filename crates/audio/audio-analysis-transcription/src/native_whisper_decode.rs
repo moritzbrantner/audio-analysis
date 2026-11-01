@@ -82,6 +82,8 @@ pub(crate) fn decode_with_config(
 /// Decodes and ranks candidates for one declared temperature. The native
 /// fallback controller invokes this in declaration order and decides whether
 /// the next temperature is needed from the completed attempt's thresholds.
+/// As in faster-whisper, a zero temperature uses beam search when
+/// `beam_size > 1`, and a positive temperature samples `best_of` candidates.
 pub(crate) fn decode_at_temperature(
     config: &CandleWhisperDecodeConfig,
     temperature_index: usize,
@@ -90,7 +92,7 @@ pub(crate) fn decode_at_temperature(
     max_generated_tokens: usize,
     logits_for: &mut impl FnMut(&[u32]) -> Result<Vec<f32>>,
 ) -> Result<WhisperSearchResult> {
-    if config.beam_size > 1 {
+    if temperature == 0.0 && config.beam_size > 1 {
         return decode_beam_search(config, eos_token_id, max_generated_tokens, logits_for);
     }
     let mut candidates = Vec::new();
@@ -462,6 +464,24 @@ mod tests {
         .unwrap();
 
         assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn beam_size_only_applies_to_the_zero_temperature_attempt() {
+        let config = CandleWhisperDecodeConfig {
+            beam_size: 3,
+            best_of: 2,
+            ..CandleWhisperDecodeConfig::default()
+        };
+        let calls = Cell::new(0);
+
+        decode_at_temperature(&config, 1, 0.2, 1, 1, &mut |_| {
+            calls.set(calls.get() + 1);
+            Ok(vec![f32::NEG_INFINITY, 0.0])
+        })
+        .unwrap();
+
+        assert_eq!(calls.get(), 2, "one call per best_of sample, no beams");
     }
 
     #[test]

@@ -196,15 +196,16 @@ tokens are supplied only through standard Hugging Face authentication.
 Token selection is independently request-scoped through the additive
 `CandleWhisperDecodeConfig` API and the `transcribe_with_decode_config` or
 `transcribe_with_runtime_controls_and_decode_config` provider methods. The
-default temperature schedule `[0.0]` uses the unchanged deterministic,
-KV-cached greedy path. Positive temperatures use the caller's `seed` and
-`bestOf` candidates, ranked by average log probability. An all-zero schedule
-with `beamSize > 1` enables independent beam hypotheses; `patience` controls
-how many completed hypotheses are collected and `lengthPenalty` applies
-length-normalized ranking. Sampling and beam search are mutually exclusive,
-and invalid widths, temperatures, or search-only combinations return
-`DetectError::InvalidArgument`. Non-default search recomputes each independent
-hypothesis instead of sharing branched decoder caches. Diagnostics report the
+defaults are faster-whisper's: temperature schedule
+`[0.0, 0.2, 0.4, 0.6, 0.8, 1.0]` and `bestOf = 5`, with `beamSize = 1`. A
+zero temperature decodes greedily (batched, KV-cached) or, with
+`beamSize > 1`, with independent beam hypotheses; `patience` controls how many
+completed hypotheses are collected and `lengthPenalty` applies
+length-normalized ranking. A positive temperature samples `bestOf` seeded
+candidates ranked by average log probability. Invalid widths, temperatures,
+or search-only controls return `DetectError::InvalidArgument`. Beam search
+recomputes each hypothesis instead of sharing branched decoder caches;
+sequential sampling reuses the decoder KV cache. Diagnostics report the
 selected strategy and controls.
 
 Complete request-scoped decoding is available through the additive
@@ -219,17 +220,19 @@ Previous-text conditioning uses the sequential autoregressive runtime because
 later windows depend on earlier output.
 
 Threshold fallback evaluates `temperatureSchedule` strictly in declaration
-order. A high no-speech probability rejects the window when average log
-probability is also below its configured minimum (or when no minimum is set),
-so confident text is retained. A low average log probability or high zlib
-compression ratio advances to
-the next temperature, and the first passing attempt is returned (or the final
-attempt when none pass). Candidates from different temperatures are never
-ranked against one another. Response diagnostics expose
+order, with faster-whisper's default thresholds: `minAverageLogProbability =
+-1.0`, `maxNoSpeechProbability = 0.6` and `maxCompressionRatio = 2.4` (`null`
+disables a check). A high no-speech probability rejects the window when
+average log probability is also below its configured minimum (or when no
+minimum is set), so confident text is retained. A low average log probability
+or high zlib compression ratio (for example a repetition loop) advances to the
+next temperature, and the first passing attempt is returned. When every
+temperature fails, the attempt with the highest average log probability among
+those under the compression-ratio threshold is kept (or among all attempts
+when none is), as faster-whisper does. Only windows that fail the
+temperature-0 attempt are re-decoded. Response diagnostics expose
 `averageLogProbability`, `noSpeechProbability`, `compressionRatio`, the ordered
-`temperatureFallbackAttempts`, and whether no-speech rejection occurred. The
-default request config still dispatches the exact pre-existing KV-cached greedy
-path.
+`temperatureFallbackAttempts`, and whether no-speech rejection occurred.
 
 The external WhisperX command provider remains compatibility and parity tooling.
 It keeps Python-based execution explicit for callers that still need WhisperX

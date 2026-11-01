@@ -1,6 +1,6 @@
 //! Decode configuration, per-row state, fallback decisions and diagnostics.
 
-use crate::{invalid_request, model_output_mismatch, CandleWhisperDecodeRequestConfig};
+use crate::{model_output_mismatch, CandleWhisperDecodeRequestConfig};
 use candle_core::{DType, IndexOp, Tensor};
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
@@ -218,36 +218,72 @@ pub(super) fn fallback_attempt_decision(
     WhisperFallbackAttemptDecision::Accept
 }
 
-pub(super) fn apply_no_speech_rejection(
-    decision: WhisperFallbackAttemptDecision,
-    token_ids: &mut Vec<u32>,
-) -> bool {
-    let rejected = decision == WhisperFallbackAttemptDecision::RejectNoSpeech;
-    if rejected {
-        token_ids.clear();
-    }
-    rejected
+/// One completed decode at one temperature of the fallback schedule.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct WhisperFallbackAttempt {
+    pub(super) token_ids: Vec<u32>,
+    pub(super) temperature: f64,
+    pub(super) average_log_probability: f64,
+    pub(super) no_speech_probability: Option<f64>,
+    pub(super) compression_ratio: f64,
+    pub(super) decision: WhisperFallbackAttemptDecision,
 }
 
-pub(super) fn run_ordered_temperature_fallback<T>(
-    temperatures: &[f64],
-    mut attempt: impl FnMut(usize, f64) -> Result<T>,
-    mut should_retry: impl FnMut(&T) -> bool,
-) -> Result<(T, Vec<f64>)> {
-    if temperatures.is_empty() {
-        return Err(invalid_request(
-            "Candle Whisper temperature_schedule must not be empty",
-        ));
+/// Picks the decode result from the ordered attempts, as faster-whisper's
+/// `generate_with_fallback` does: the last attempt when it passed (or was
+/// rejected as silence); when every temperature still needed fallback, the
+/// attempt with the highest average log probability among those under the
+/// compression-ratio threshold, or among all attempts when none is.
+pub(super) fn select_fallback_attempt(
+    config: &CandleWhisperDecodeRequestConfig,
+    mut attempts: Vec<WhisperFallbackAttempt>,
+) -> WhisperFallbackAttempt {
+    let last = attempts
+        .pop()
+        .expect("temperature fallback always records at least one attempt");
+    if last.decision != WhisperFallbackAttemptDecision::Retry {
+        return last;
     }
-    let mut attempted = Vec::new();
-    for (index, temperature) in temperatures.iter().copied().enumerate() {
-        let result = attempt(index, temperature)?;
-        attempted.push(temperature);
-        if !should_retry(&result) || index + 1 == temperatures.len() {
-            return Ok((result, attempted));
-        }
+    attempts.push(last);
+    let below_compression_threshold = |attempt: &WhisperFallbackAttempt| {
+        config
+            .max_compression_ratio
+            .is_none_or(|maximum| attempt.compression_ratio <= maximum)
+    };
+    let pool_has_passing_ratio = attempts.iter().any(below_compression_threshold);
+    attempts
+        .into_iter()
+        .filter(|attempt| !pool_has_passing_ratio || below_compression_threshold(attempt))
+        .reduce(|best, attempt| {
+            if attempt.average_log_probability > best.average_log_probability {
+                attempt
+            } else {
+                best
+            }
+        })
+        .expect("filtered pool keeps at least one attempt")
+}
+
+pub(super) fn finish_temperature_fallback(
+    config: &CandleWhisperDecodeRequestConfig,
+    attempts: Vec<WhisperFallbackAttempt>,
+    mut stats: WhisperGenerationStats,
+) -> WhisperTokenDecodeResult {
+    let attempted_temperatures = attempts.iter().map(|attempt| attempt.temperature).collect();
+    let mut selected = select_fallback_attempt(config, attempts);
+    let no_speech_rejected = selected.decision == WhisperFallbackAttemptDecision::RejectNoSpeech;
+    if no_speech_rejected {
+        selected.token_ids.clear();
     }
-    unreachable!("non-empty temperature schedule always returns its final attempt")
+    stats.record_completed_row();
+    WhisperTokenDecodeResult {
+        token_ids: selected.token_ids,
+        stats,
+        average_log_probability: selected.average_log_probability,
+        no_speech_probability: selected.no_speech_probability,
+        attempted_temperatures,
+        no_speech_rejected,
+    }
 }
 
 fn token_probability(logits: &[f32], token_id: u32) -> Option<f64> {

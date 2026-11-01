@@ -219,11 +219,11 @@ fn german_no_align_fp32_matches_pinned_transformers_greedy_trace() {
     let first_logits = session
         .configured_search_logits(
             &features,
-            &initial.token_ids,
-            initial.sot_position,
+            &initial,
             &[],
             WhisperDecodeMode::WithoutTimestamps,
             &config.decode,
+            &mut None,
             &mut no_speech_probability,
             &mut stats,
         )
@@ -435,11 +435,11 @@ fn german_long_window_stops_at_whisperx_greedy_generation_limit() {
     let full_prefix_logits = session
         .configured_search_logits(
             &features,
-            &initial.token_ids,
-            initial.sot_position,
+            &initial,
             &oracle_tokens,
             WhisperDecodeMode::WithoutTimestamps,
             &config.decode,
+            &mut None,
             &mut no_speech_probability,
             &mut stats,
         )
@@ -984,9 +984,125 @@ fn no_speech_threshold_rejects_before_temperature_retry() {
     };
 
     let decision = fallback_attempt_decision(&config, -5.0, Some(0.8), 1.0);
-    let mut tokens = vec![10, 11];
-    assert!(apply_no_speech_rejection(decision, &mut tokens));
-    assert!(tokens.is_empty());
+    assert_eq!(decision, WhisperFallbackAttemptDecision::RejectNoSpeech);
+    let result = finish_temperature_fallback(
+        &config,
+        vec![fallback_attempt(0.0, vec![10, 11], -5.0, 1.0, decision)],
+        WhisperGenerationStats::default(),
+    );
+    assert!(result.no_speech_rejected);
+    assert!(result.token_ids.is_empty());
+}
+
+fn fallback_attempt(
+    temperature: f64,
+    token_ids: Vec<u32>,
+    average_log_probability: f64,
+    compression_ratio: f64,
+    decision: WhisperFallbackAttemptDecision,
+) -> WhisperFallbackAttempt {
+    WhisperFallbackAttempt {
+        token_ids,
+        temperature,
+        average_log_probability,
+        no_speech_probability: Some(0.01),
+        compression_ratio,
+        decision,
+    }
+}
+
+/// Regression for native-whisperx#419: large-v3-turbo looped
+/// "go back to go back to ..." to the token limit on noisy speech with a
+/// confident average log probability, and the default request kept it.
+#[test]
+fn default_thresholds_retry_a_confident_repetition_loop() {
+    let config = CandleWhisperDecodeRequestConfig::default();
+    let looped = format!("and then{}", " go back to".repeat(110));
+    let ratio = text_compression_ratio(&looped).unwrap();
+    assert!(ratio > 2.4, "loop compression ratio {ratio}");
+
+    assert_eq!(
+        fallback_attempt_decision(&config, -0.15, Some(0.02), ratio),
+        WhisperFallbackAttemptDecision::Retry
+    );
+    let ordinary = "and then we go back to the house for lunch";
+    assert_eq!(
+        fallback_attempt_decision(
+            &config,
+            -0.3,
+            Some(0.02),
+            text_compression_ratio(ordinary).unwrap()
+        ),
+        WhisperFallbackAttemptDecision::Accept
+    );
+}
+
+#[test]
+fn default_request_config_uses_faster_whisper_fallback_defaults() {
+    let config = CandleWhisperDecodeRequestConfig::default();
+    assert_eq!(
+        config.search.temperature_schedule,
+        vec![0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+    );
+    assert_eq!(config.search.best_of, 5);
+    assert_eq!(config.search.beam_size, 1);
+    assert_eq!(config.min_average_log_probability, Some(-1.0));
+    assert_eq!(config.max_no_speech_probability, Some(0.6));
+    assert_eq!(config.max_compression_ratio, Some(2.4));
+    assert!(config.search.starts_with_greedy());
+
+    let deserialized: CandleWhisperDecodeRequestConfig =
+        serde_json::from_str("{}").expect("empty request config");
+    assert_eq!(deserialized, config);
+}
+
+#[test]
+fn passing_attempt_ends_the_fallback_in_declared_order() {
+    let config = CandleWhisperDecodeRequestConfig::default();
+    let retry = WhisperFallbackAttemptDecision::Retry;
+    let result = finish_temperature_fallback(
+        &config,
+        vec![
+            fallback_attempt(0.0, vec![1], -0.1, 9.0, retry),
+            fallback_attempt(0.2, vec![2], -1.5, 1.2, retry),
+            fallback_attempt(
+                0.4,
+                vec![3],
+                -0.6,
+                1.3,
+                WhisperFallbackAttemptDecision::Accept,
+            ),
+        ],
+        WhisperGenerationStats::default(),
+    );
+    assert_eq!(result.token_ids, vec![3]);
+    assert_eq!(result.attempted_temperatures, vec![0.0, 0.2, 0.4]);
+    assert!(!result.no_speech_rejected);
+}
+
+#[test]
+fn exhausted_fallback_keeps_the_most_likely_attempt_under_the_compression_threshold() {
+    let config = CandleWhisperDecodeRequestConfig::default();
+    let retry = WhisperFallbackAttemptDecision::Retry;
+    let attempts = vec![
+        fallback_attempt(0.0, vec![1], -0.1, 9.0, retry),
+        fallback_attempt(0.2, vec![2], -1.4, 1.2, retry),
+        fallback_attempt(0.4, vec![3], -1.2, 1.3, retry),
+        fallback_attempt(0.6, vec![4], -2.0, 1.1, retry),
+    ];
+    assert_eq!(
+        select_fallback_attempt(&config, attempts).token_ids,
+        vec![3]
+    );
+
+    let all_looping = vec![
+        fallback_attempt(0.0, vec![1], -0.4, 9.0, retry),
+        fallback_attempt(0.2, vec![2], -0.2, 8.0, retry),
+    ];
+    assert_eq!(
+        select_fallback_attempt(&config, all_looping).token_ids,
+        vec![2]
+    );
 }
 
 #[test]
@@ -1004,39 +1120,11 @@ fn high_no_speech_probability_accepts_high_confidence_text() {
 }
 
 #[test]
-fn threshold_fallback_visits_temperatures_in_declared_order_until_acceptance() {
-    let observations = [
-        WhisperFallbackAttemptDecision::Retry,
-        WhisperFallbackAttemptDecision::Retry,
-        WhisperFallbackAttemptDecision::Accept,
-    ];
-    let mut called = Vec::new();
-    let (selected, attempted) = run_ordered_temperature_fallback(
-        &[0.0, 0.4, 0.8, 1.0],
-        |index, temperature| {
-            called.push(temperature);
-            Ok(observations[index])
-        },
-        |decision| *decision == WhisperFallbackAttemptDecision::Retry,
-    )
-    .unwrap();
-
-    assert_eq!(selected, WhisperFallbackAttemptDecision::Accept);
-    assert_eq!(called, vec![0.0, 0.4, 0.8]);
-    assert_eq!(attempted, vec![0.0, 0.4, 0.8]);
-}
-
-#[test]
 fn compression_ratio_is_zero_for_empty_output_and_detects_repetition() {
     assert_eq!(text_compression_ratio("").unwrap(), 0.0);
     let repeated = "the quick brown fox jumps over the lazy dog ".repeat(20);
     assert!(text_compression_ratio(&repeated).unwrap() > 2.4);
     assert!(text_compression_ratio("ordinary short text").unwrap() < 2.4);
-}
-
-#[test]
-fn default_request_config_preserves_the_exact_legacy_greedy_path() {
-    assert!(CandleWhisperDecodeRequestConfig::default().preserves_legacy_greedy_path());
 }
 
 #[test]

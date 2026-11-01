@@ -1151,6 +1151,10 @@ fn map_onnx_session_error(error: runtime_onnx::OnnxRuntimeError) -> DetectError 
             setup_error("failed to initialize pyannote ONNX model")
         }
         runtime_onnx::OnnxRuntimeError::Io(_) => setup_error("failed to read pyannote ONNX model"),
+        error @ (runtime_onnx::OnnxRuntimeError::RuntimeUnavailable { .. }
+        | runtime_onnx::OnnxRuntimeError::RuntimeTooOld { .. }) => {
+            DetectError::InvalidArgument(format!("unsupported_runtime: {error}"))
+        }
         _ => DetectError::InvalidArgument(
             "unsupported_runtime: failed to initialize pyannote ONNX model".to_string(),
         ),

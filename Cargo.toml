@@ -85,3 +85,7 @@ tokenizers = { version = "0.23.0", default-features = false, features = ["unstab
 # compatible published Candle release includes ZIP 9 (Native WhisperX #366).
 [patch.crates-io]
 candle-core = { git = "https://github.com/moritzbrantner/candle", rev = "b57f9eb7ccc6bf5cebf0c3822ed69573b06877a9", version = "0.10.2" }
+# Published 0.1.1 builds on ort 2.0.0-rc.12, which deadlocks instead of returning an
+# error when ONNX Runtime is missing or older than 1.24 (vox#159). The foundation
+# source returns typed RuntimeUnavailable / RuntimeTooOld errors.
+moenarch-runtime-onnx = { git = "https://github.com/moritzbrantner/moenarch-foundation", rev = "cf8d6f1052ad1d5c567e797a56d3bb8910828920" }

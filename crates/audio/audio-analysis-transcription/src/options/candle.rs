@@ -129,15 +129,17 @@ impl CandleWhisperWindowControls {
 
 /// Request-scoped token selection controls for native Candle Whisper decoding.
 ///
-/// The default configuration preserves the existing deterministic greedy path.
-/// Positive temperatures enable seeded sampling, while `beam_size > 1` enables
-/// beam search for an all-zero temperature schedule.
+/// The defaults follow faster-whisper's temperature fallback: the first
+/// attempt decodes at temperature 0 (greedy, or beam search when
+/// `beam_size > 1`), and each later positive temperature samples `best_of`
+/// seeded candidates. `beam_size` only applies to zero temperatures and
+/// `best_of` only to positive ones.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CandleWhisperDecodeConfig {
     #[serde(default = "default_candle_whisper_temperature_schedule")]
     pub temperature_schedule: Vec<f64>,
-    #[serde(default = "default_candle_whisper_search_width")]
+    #[serde(default = "default_candle_whisper_best_of")]
     pub best_of: usize,
     #[serde(default = "default_candle_whisper_search_width")]
     pub beam_size: usize,
@@ -153,7 +155,7 @@ impl Default for CandleWhisperDecodeConfig {
     fn default() -> Self {
         Self {
             temperature_schedule: default_candle_whisper_temperature_schedule(),
-            best_of: default_candle_whisper_search_width(),
+            best_of: default_candle_whisper_best_of(),
             beam_size: default_candle_whisper_search_width(),
             patience: default_candle_whisper_score_factor(),
             length_penalty: default_candle_whisper_score_factor(),
@@ -198,26 +200,6 @@ impl CandleWhisperDecodeConfig {
                 "Candle Whisper length_penalty must be finite and greater than or equal to zero",
             ));
         }
-
-        let samples = self
-            .temperature_schedule
-            .iter()
-            .any(|temperature| *temperature > 0.0);
-        if self.beam_size > 1 && samples {
-            return Err(invalid_request(
-                "Candle Whisper beam search requires an all-zero temperature_schedule",
-            ));
-        }
-        if self.beam_size > 1 && self.best_of != 1 {
-            return Err(invalid_request(
-                "Candle Whisper best_of must be 1 when beam_size is greater than 1",
-            ));
-        }
-        if self.beam_size == 1 && self.best_of > 1 && !samples {
-            return Err(invalid_request(
-                "Candle Whisper best_of greater than 1 requires a positive temperature",
-            ));
-        }
         if self.beam_size == 1 && self.patience != 1.0 {
             return Err(invalid_request(
                 "Candle Whisper patience only applies when beam_size is greater than 1",
@@ -231,23 +213,25 @@ impl CandleWhisperDecodeConfig {
         Ok(())
     }
 
+    /// True when the first attempt is plain greedy decoding, which runs on
+    /// the batched KV-cached path before any per-window fallback.
     #[cfg_attr(not(feature = "candle"), allow(dead_code))]
-    pub(crate) fn uses_default_greedy_path(&self) -> bool {
-        self.temperature_schedule == [0.0]
-            && self.best_of == 1
-            && self.beam_size == 1
-            && self.patience == 1.0
-            && self.length_penalty == 1.0
+    pub(crate) fn starts_with_greedy(&self) -> bool {
+        self.beam_size == 1 && self.temperature_schedule.first() == Some(&0.0)
     }
 }
 
 /// Complete request-scoped native Whisper decode configuration.
 ///
-/// This additive wrapper keeps [`CandleWhisperDecodeConfig`] exhaustively
+/// This wrapper keeps [`CandleWhisperDecodeConfig`] exhaustively
 /// constructible while adding prompt, suppression, conditioning, and fallback
 /// controls. All state derived from these fields is owned by one transcription
 /// request and is never retained in reusable model sessions.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+///
+/// The fallback thresholds default to faster-whisper's
+/// (`log_prob_threshold=-1.0`, `no_speech_threshold=0.6`,
+/// `compression_ratio_threshold=2.4`); `None` disables a check.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CandleWhisperDecodeRequestConfig {
     /// Token search settings used by each ordered fallback attempt.
@@ -273,15 +257,31 @@ pub struct CandleWhisperDecodeRequestConfig {
     #[serde(default)]
     pub condition_on_previous_text: bool,
     /// Retries at the next temperature when average log probability is lower.
-    #[serde(default)]
+    #[serde(default = "default_candle_whisper_min_average_log_probability")]
     pub min_average_log_probability: Option<f64>,
     /// Rejects when SOT no-speech is higher and text confidence is low.
-    #[serde(default)]
+    #[serde(default = "default_candle_whisper_max_no_speech_probability")]
     pub max_no_speech_probability: Option<f64>,
     /// Retries when the decoded text's zlib-compatible Whisper compression
     /// ratio is higher.
-    #[serde(default)]
+    #[serde(default = "default_candle_whisper_max_compression_ratio")]
     pub max_compression_ratio: Option<f64>,
+}
+
+impl Default for CandleWhisperDecodeRequestConfig {
+    fn default() -> Self {
+        Self {
+            search: CandleWhisperDecodeConfig::default(),
+            initial_prompt: None,
+            initial_prompt_tokens: Vec::new(),
+            suppressed_token_ids: Vec::new(),
+            suppress_numerals: false,
+            condition_on_previous_text: false,
+            min_average_log_probability: default_candle_whisper_min_average_log_probability(),
+            max_no_speech_probability: default_candle_whisper_max_no_speech_probability(),
+            max_compression_ratio: default_candle_whisper_max_compression_ratio(),
+        }
+    }
 }
 
 impl From<CandleWhisperDecodeConfig> for CandleWhisperDecodeRequestConfig {
@@ -323,19 +323,6 @@ impl CandleWhisperDecodeRequestConfig {
         Ok(())
     }
 
-    #[cfg_attr(not(feature = "candle"), allow(dead_code))]
-    pub(crate) fn preserves_legacy_greedy_path(&self) -> bool {
-        self.search.uses_default_greedy_path()
-            && self.initial_prompt.as_ref().is_none_or(String::is_empty)
-            && self.initial_prompt_tokens.is_empty()
-            && self.suppressed_token_ids.is_empty()
-            && !self.suppress_numerals
-            && !self.condition_on_previous_text
-            && self.min_average_log_probability.is_none()
-            && self.max_no_speech_probability.is_none()
-            && self.max_compression_ratio.is_none()
-    }
-
     pub(crate) fn validate_runtime(&self, options: &CandleWhisperOptions) -> Result<()> {
         if self.condition_on_previous_text
             && options.decode_runtime == CandleWhisperDecodeRuntime::ActiveRowTensorBatch
@@ -372,8 +359,29 @@ impl CandleWhisperTranscriptionRequestConfig {
     }
 }
 
+/// faster-whisper's `temperature=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0]`.
 pub(crate) fn default_candle_whisper_temperature_schedule() -> Vec<f64> {
-    vec![0.0]
+    vec![0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+}
+
+/// faster-whisper's `best_of=5`.
+pub(crate) const fn default_candle_whisper_best_of() -> usize {
+    5
+}
+
+/// faster-whisper's `log_prob_threshold=-1.0`.
+pub(crate) const fn default_candle_whisper_min_average_log_probability() -> Option<f64> {
+    Some(-1.0)
+}
+
+/// faster-whisper's `no_speech_threshold=0.6`.
+pub(crate) const fn default_candle_whisper_max_no_speech_probability() -> Option<f64> {
+    Some(0.6)
+}
+
+/// faster-whisper's `compression_ratio_threshold=2.4`.
+pub(crate) const fn default_candle_whisper_max_compression_ratio() -> Option<f64> {
+    Some(2.4)
 }
 
 pub(crate) const fn default_candle_whisper_leading_context_seconds() -> f64 {

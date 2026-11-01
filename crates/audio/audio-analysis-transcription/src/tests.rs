@@ -621,20 +621,6 @@ fn candle_whisper_decode_validation_rejects_invalid_search_combinations() {
             ..CandleWhisperDecodeConfig::default()
         },
         CandleWhisperDecodeConfig {
-            temperature_schedule: vec![0.4],
-            beam_size: 2,
-            ..CandleWhisperDecodeConfig::default()
-        },
-        CandleWhisperDecodeConfig {
-            best_of: 2,
-            ..CandleWhisperDecodeConfig::default()
-        },
-        CandleWhisperDecodeConfig {
-            beam_size: 2,
-            best_of: 2,
-            ..CandleWhisperDecodeConfig::default()
-        },
-        CandleWhisperDecodeConfig {
             patience: 2.0,
             ..CandleWhisperDecodeConfig::default()
         },
@@ -653,18 +639,36 @@ fn candle_whisper_decode_validation_rejects_invalid_search_combinations() {
 }
 
 #[test]
-fn candle_whisper_default_decode_config_selects_the_legacy_greedy_path() {
-    assert!(CandleWhisperDecodeConfig::default().uses_default_greedy_path());
+fn candle_whisper_beam_search_and_sampling_share_one_fallback_schedule() {
+    // faster-whisper: beam_size applies at temperature 0, best_of at the
+    // positive fallback temperatures.
+    let config = CandleWhisperDecodeConfig {
+        beam_size: 5,
+        ..CandleWhisperDecodeConfig::default()
+    };
+    assert!(config.validate().is_ok());
+    assert!(!config.starts_with_greedy());
+    assert!(CandleWhisperDecodeConfig {
+        temperature_schedule: vec![0.0],
+        ..CandleWhisperDecodeConfig::default()
+    }
+    .validate()
+    .is_ok());
+}
+
+#[test]
+fn candle_whisper_default_decode_config_starts_with_batched_greedy() {
+    assert!(CandleWhisperDecodeConfig::default().starts_with_greedy());
     assert!(!CandleWhisperDecodeConfig {
         temperature_schedule: vec![0.2],
         ..CandleWhisperDecodeConfig::default()
     }
-    .uses_default_greedy_path());
+    .starts_with_greedy());
     assert!(!CandleWhisperDecodeConfig {
         beam_size: 2,
         ..CandleWhisperDecodeConfig::default()
     }
-    .uses_default_greedy_path());
+    .starts_with_greedy());
 }
 
 #[test]

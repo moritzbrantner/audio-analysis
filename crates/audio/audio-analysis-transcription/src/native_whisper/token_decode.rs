@@ -11,6 +11,17 @@ use tokenizers::Tokenizer;
 
 use super::*;
 
+fn select_feature_row(audio_features: &Tensor, row_index: usize) -> Result<Tensor> {
+    audio_features
+        .i(row_index)
+        .and_then(|features| features.unsqueeze(0))
+        .map_err(|error| {
+            model_output_mismatch(format!(
+                "failed to select Whisper search row {row_index}: {error}"
+            ))
+        })
+}
+
 impl CandleWhisperSession {
     pub(super) fn decode_tokens_batch(
         &mut self,
@@ -19,21 +30,43 @@ impl CandleWhisperSession {
         mode: WhisperDecodeMode,
         decode: &CandleWhisperDecodeRequestConfig,
     ) -> Result<Vec<WhisperTokenDecodeResult>> {
-        if decode.preserves_legacy_greedy_path() {
-            return self.decode_tokens_batch_greedy(audio_features, row_count, mode, decode);
+        if !decode.search.starts_with_greedy() {
+            let mut outputs = Vec::with_capacity(row_count);
+            for row_index in 0..row_count {
+                let row_features = select_feature_row(audio_features, row_index)?;
+                outputs.push(self.decode_tokens_configured(&row_features, mode, decode)?);
+            }
+            return Ok(outputs);
         }
 
+        // The temperature-0 attempt runs batched with a shared KV cache; only
+        // windows that fail the fallback thresholds are re-decoded one by one
+        // at the following temperatures, as faster-whisper does per segment.
+        let greedy = self.decode_tokens_batch_greedy(audio_features, row_count, mode, decode)?;
         let mut outputs = Vec::with_capacity(row_count);
-        for row_index in 0..row_count {
-            let row_features = audio_features
-                .i(row_index)
-                .and_then(|features| features.unsqueeze(0))
-                .map_err(|error| {
-                    model_output_mismatch(format!(
-                        "failed to select Whisper search row {row_index}: {error}"
-                    ))
-                })?;
-            outputs.push(self.decode_tokens_configured(&row_features, mode, decode)?);
+        for (row_index, first) in greedy.into_iter().enumerate() {
+            let attempt = self.evaluate_fallback_attempt(
+                decode,
+                0.0,
+                first.token_ids,
+                first.average_log_probability,
+                first.no_speech_probability,
+            )?;
+            let output = if attempt.decision == WhisperFallbackAttemptDecision::Retry
+                && decode.search.temperature_schedule.len() > 1
+            {
+                let row_features = select_feature_row(audio_features, row_index)?;
+                self.continue_temperature_fallback(
+                    &row_features,
+                    mode,
+                    decode,
+                    vec![attempt],
+                    first.stats,
+                )?
+            } else {
+                finish_temperature_fallback(decode, vec![attempt], first.stats)
+            };
+            outputs.push(output);
         }
         Ok(outputs)
     }
@@ -44,6 +77,30 @@ impl CandleWhisperSession {
         mode: WhisperDecodeMode,
         decode: &CandleWhisperDecodeRequestConfig,
     ) -> Result<WhisperTokenDecodeResult> {
+        self.continue_temperature_fallback(
+            audio_features,
+            mode,
+            decode,
+            Vec::new(),
+            WhisperGenerationStats::default(),
+        )
+    }
+
+    /// Runs the remaining temperatures after `attempts` (in declaration
+    /// order) until one passes the thresholds, then selects the result.
+    fn continue_temperature_fallback(
+        &mut self,
+        audio_features: &Tensor,
+        mode: WhisperDecodeMode,
+        decode: &CandleWhisperDecodeRequestConfig,
+        mut attempts: Vec<WhisperFallbackAttempt>,
+        mut stats: WhisperGenerationStats,
+    ) -> Result<WhisperTokenDecodeResult> {
+        if decode.search.temperature_schedule.is_empty() {
+            return Err(invalid_request(
+                "Candle Whisper temperature_schedule must not be empty",
+            ));
+        }
         let eos = self.eos_token_id()?;
         let initial_tokens = self.initial_tokens(mode, &decode.initial_prompt_tokens)?;
         let max_generated_tokens = whisper_max_generated_tokens(
@@ -51,92 +108,122 @@ impl CandleWhisperSession {
             self.model.config(),
             initial_tokens.token_ids.len(),
         );
-        let mut stats = WhisperGenerationStats::default();
-        let temperatures = decode.search.temperature_schedule.clone();
-        let (
-            (mut search, average_log_probability, no_speech_probability, decision),
-            attempted_temperatures,
-        ) = run_ordered_temperature_fallback(
-            &temperatures,
-            |temperature_index, temperature| {
-                let mut no_speech_probability = None;
-                let search = crate::native_whisper_decode::decode_at_temperature(
-                    &decode.search,
-                    temperature_index,
-                    temperature,
-                    eos,
-                    max_generated_tokens,
-                    &mut |generated| {
-                        self.configured_search_logits(
-                            audio_features,
-                            &initial_tokens.token_ids,
-                            initial_tokens.sot_position,
-                            generated,
-                            mode,
-                            decode,
-                            &mut no_speech_probability,
-                            &mut stats,
-                        )
-                    },
-                )?;
-                for _ in &search.token_ids {
-                    stats.record_generated_token();
-                }
-                let average_log_probability = search.average_log_probability();
-                let text = decode_text_tokens(&self.tokenizer, &search.token_ids)?;
-                let compression_ratio = text_compression_ratio(&text)?;
-                let decision = fallback_attempt_decision(
-                    decode,
-                    average_log_probability,
-                    no_speech_probability,
-                    compression_ratio,
-                );
-                Ok((
-                    search,
-                    average_log_probability,
-                    no_speech_probability,
-                    decision,
-                ))
-            },
-            |attempt| attempt.3 == WhisperFallbackAttemptDecision::Retry,
-        )?;
-        let no_speech_rejected = apply_no_speech_rejection(decision, &mut search.token_ids);
-        stats.record_completed_row();
-        Ok(WhisperTokenDecodeResult {
-            token_ids: search.token_ids,
-            stats,
+        let mut cached_tokens = None;
+        for (temperature_index, temperature) in decode
+            .search
+            .temperature_schedule
+            .iter()
+            .copied()
+            .enumerate()
+            .skip(attempts.len())
+        {
+            let mut no_speech_probability = None;
+            let search = crate::native_whisper_decode::decode_at_temperature(
+                &decode.search,
+                temperature_index,
+                temperature,
+                eos,
+                max_generated_tokens,
+                &mut |generated| {
+                    self.configured_search_logits(
+                        audio_features,
+                        &initial_tokens,
+                        generated,
+                        mode,
+                        decode,
+                        &mut cached_tokens,
+                        &mut no_speech_probability,
+                        &mut stats,
+                    )
+                },
+            )?;
+            for _ in &search.token_ids {
+                stats.record_generated_token();
+            }
+            let average_log_probability = search.average_log_probability();
+            let attempt = self.evaluate_fallback_attempt(
+                decode,
+                temperature,
+                search.token_ids,
+                average_log_probability,
+                no_speech_probability,
+            )?;
+            let retry = attempt.decision == WhisperFallbackAttemptDecision::Retry;
+            attempts.push(attempt);
+            if !retry {
+                break;
+            }
+        }
+        Ok(finish_temperature_fallback(decode, attempts, stats))
+    }
+
+    fn evaluate_fallback_attempt(
+        &self,
+        decode: &CandleWhisperDecodeRequestConfig,
+        temperature: f64,
+        token_ids: Vec<u32>,
+        average_log_probability: f64,
+        no_speech_probability: Option<f64>,
+    ) -> Result<WhisperFallbackAttempt> {
+        let text = decode_text_tokens(&self.tokenizer, &token_ids)?;
+        let compression_ratio = text_compression_ratio(&text)?;
+        Ok(WhisperFallbackAttempt {
+            decision: fallback_attempt_decision(
+                decode,
+                average_log_probability,
+                no_speech_probability,
+                compression_ratio,
+            ),
+            token_ids,
+            temperature,
             average_log_probability,
             no_speech_probability,
-            attempted_temperatures,
-            no_speech_rejected,
+            compression_ratio,
         })
     }
 
+    /// Returns next-token logits for `generated` after the initial tokens.
+    ///
+    /// When `generated` extends the previously forwarded sequence by one
+    /// token (sequential greedy or sampling), only that token is fed through
+    /// the decoder KV cache; any other prefix (beam search) is re-prefilled.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn configured_search_logits(
         &mut self,
         audio_features: &Tensor,
-        initial_tokens: &[u32],
-        sot_position: usize,
+        initial_tokens: &WhisperInitialTokens,
         generated: &[u32],
         mode: WhisperDecodeMode,
         decode: &CandleWhisperDecodeRequestConfig,
+        cached_tokens: &mut Option<Vec<u32>>,
         no_speech_probability: &mut Option<f64>,
         stats: &mut WhisperGenerationStats,
     ) -> Result<Vec<f32>> {
-        self.model.reset_cache();
-        let mut tokens = Vec::with_capacity(initial_tokens.len() + generated.len());
-        tokens.extend_from_slice(initial_tokens);
+        let mut tokens = Vec::with_capacity(initial_tokens.token_ids.len() + generated.len());
+        tokens.extend_from_slice(&initial_tokens.token_ids);
         tokens.extend_from_slice(generated);
-        let input = WhisperDecoderInput {
-            token_ids: tokens.clone(),
-            position_offset: 0,
-            flush_cache: true,
-            kind: WhisperDecoderInputKind::PromptPrefill,
+        let extends_cache = cached_tokens
+            .as_ref()
+            .is_some_and(|cached| cached.len() + 1 == tokens.len() && tokens.starts_with(cached));
+        let input = if extends_cache {
+            WhisperDecoderInput {
+                token_ids: vec![*tokens.last().expect("extended sequence is non-empty")],
+                position_offset: tokens.len() - 1,
+                flush_cache: false,
+                kind: WhisperDecoderInputKind::CachedTokenStep,
+            }
+        } else {
+            self.model.reset_cache();
+            WhisperDecoderInput {
+                token_ids: tokens.clone(),
+                position_offset: 0,
+                flush_cache: true,
+                kind: WhisperDecoderInputKind::PromptPrefill,
+            }
         };
         stats.record_input(&input);
         stats.record_active_row_batch_size(1);
-        let token_tensor = Tensor::new(tokens.as_slice(), &self.device)
+        let token_tensor = Tensor::new(input.token_ids.as_slice(), &self.device)
             .and_then(|tokens| tokens.unsqueeze(0))
             .map_err(|error| {
                 model_output_mismatch(format!(
@@ -146,7 +233,12 @@ impl CandleWhisperSession {
         let decoder_started = std::time::Instant::now();
         let (decoded, decoder_stats) = self
             .model
-            .decode(&token_tensor, audio_features, 0, true)
+            .decode(
+                &token_tensor,
+                audio_features,
+                input.position_offset,
+                input.flush_cache,
+            )
             .map_err(|error| {
                 model_output_mismatch(format!("Whisper search decoder failed: {error}"))
             })?;
@@ -157,12 +249,20 @@ impl CandleWhisperSession {
         })?;
         if generated.is_empty() && no_speech_probability.is_none() {
             *no_speech_probability = no_speech_token_id(&self.tokenizer)
-                .map(|token| tensor_token_probability_at_position(&logits, 0, sot_position, token))
+                .map(|token| {
+                    tensor_token_probability_at_position(
+                        &logits,
+                        0,
+                        initial_tokens.sot_position,
+                        token,
+                    )
+                })
                 .transpose()?
                 .flatten();
         }
+        *cached_tokens = Some(tokens);
         let mut next_logits = logits
-            .i((0, tokens.len() - 1, ..))
+            .i((0, input.token_ids.len() - 1, ..))
             .and_then(|logits| logits.to_dtype(DType::F32))
             .and_then(|logits| logits.to_vec1::<f32>())
             .map_err(|error| {

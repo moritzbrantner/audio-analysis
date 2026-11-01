@@ -8,7 +8,7 @@ use crate::{
     CandleWhisperOptions, CandleWhisperRuntimeControls, CandleWhisperTimingMode,
     CandleWhisperTranscriptionRequestConfig,
 };
-use candle_core::{Device, Tensor};
+use candle_core::{DType, Device, IndexOp, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::whisper;
 use media_core::Result;
@@ -18,6 +18,9 @@ use super::*;
 
 pub(super) struct CandleWhisperSession {
     pub(super) setup: WhisperRunSetup,
+    /// Decode language of the current request: the requested one, or the one
+    /// detected from the first window when none was requested.
+    pub(super) language: Option<String>,
     pub(super) device: Device,
     pub(super) model: WhisperModel,
     pub(super) tokenizer: Tokenizer,
@@ -111,6 +114,7 @@ impl CandleWhisperSession {
         let transformers_mel_filters =
             transformers_mel_filter_bank(config.num_mel_bins, whisper::N_FFT, whisper::SAMPLE_RATE);
         Ok(Self {
+            language: setup.language.clone(),
             setup,
             device,
             model,
@@ -163,6 +167,17 @@ impl CandleWhisperSession {
         self.encoder_duration_seconds = 0.0;
         self.decoder_duration_seconds = 0.0;
         let request_started = std::time::Instant::now();
+        let detected_language = match &self.setup.language {
+            Some(language) => {
+                self.language = Some(language.clone());
+                None
+            }
+            None => {
+                let detected = self.detect_language(&request.audio.samples)?;
+                self.language = detected.as_ref().map(|(language, _)| language.clone());
+                detected
+            }
+        };
         let max_prompt_tokens = (self.model.config().max_target_positions / 2).saturating_sub(1);
         let batch_size = candle_batch_size(options, request.chunks.len());
         let feature_extractor_mode =
@@ -257,7 +272,7 @@ impl CandleWhisperSession {
                         timed.decoded.text,
                         clip_start,
                         clip_end,
-                        self.setup.language.clone(),
+                        self.language.clone(),
                     )?);
                     next_index += 1;
                 } else {
@@ -267,7 +282,7 @@ impl CandleWhisperSession {
                         &mut next_index,
                         window.global_start_seconds,
                         (clip_start, clip_end),
-                        self.setup.language.clone(),
+                        self.language.clone(),
                     )?;
                     if timestamp_segments
                         .iter()
@@ -281,7 +296,7 @@ impl CandleWhisperSession {
         }
         let transcript = crate::transcription_from_segments(
             request.audio.source,
-            request.language.clone(),
+            self.language.clone(),
             segments,
         )
         .map_err(|error| model_output_mismatch(error.to_string()))?;
@@ -384,8 +399,12 @@ impl CandleWhisperSession {
             ),
             format!("noSpeechRejected={no_speech_rejected}"),
         ]);
-        if let Some(language) = &self.setup.language {
+        if let Some(language) = &self.language {
             diagnostics.push(format!("language={language}"));
+        }
+        if let Some((_, probability)) = &detected_language {
+            diagnostics.push("languageDetection=whisperFirstWindow".to_string());
+            diagnostics.push(format!("languageProbability={probability}"));
         }
         let observed_batch_execution = observed_candle_batch_execution(
             options.decode_runtime,
@@ -471,10 +490,59 @@ impl CandleWhisperSession {
                 .task
                 .output_language_hint()
                 .map(str::to_string)
-                .or_else(|| self.setup.language.clone()),
+                .or_else(|| self.language.clone()),
             transcript,
             diagnostics,
         })
+    }
+
+    /// Whisper language identification, as in OpenAI Whisper and WhisperX:
+    /// encode the first 30 s of the request audio, run the decoder on the
+    /// start-of-transcript token alone and take the most probable language
+    /// token. English-only models define no language tokens and return `None`.
+    pub(super) fn detect_language(&mut self, samples: &[f32]) -> Result<Option<(String, f64)>> {
+        let candidates = language_candidates(&self.generation);
+        if candidates.is_empty() || samples.is_empty() {
+            return Ok(None);
+        }
+        let samples = &samples[..samples.len().min(whisper::N_SAMPLES)];
+        let seconds = samples.len() as f64 / whisper::SAMPLE_RATE as f64;
+        let window = ChunkWindow {
+            samples: samples.to_vec(),
+            chunk_start_seconds: 0.0,
+            local_start_seconds: 0.0,
+            local_end_seconds: seconds,
+            global_start_seconds: 0.0,
+            global_end_seconds: seconds,
+            speech_start_seconds: 0.0,
+            speech_end_seconds: seconds,
+        };
+        let features = self.encode_window_batch(
+            std::slice::from_ref(&window),
+            WhisperFeatureExtractorMode::Legacy,
+        )?;
+        let start = Self::decoder_start_token_id(&self.generation, &self.tokenizer)?;
+        let failed = |error: candle_core::Error| {
+            model_output_mismatch(format!("Whisper language detection failed: {error}"))
+        };
+        let tokens = Tensor::new(&[start], &self.device)
+            .and_then(|tokens| tokens.unsqueeze(0))
+            .map_err(failed)?;
+        self.model.reset_cache();
+        let decoder_started = std::time::Instant::now();
+        let (decoded, _) = self
+            .model
+            .decode(&tokens, &features, 0, true)
+            .map_err(failed)?;
+        self.decoder_duration_seconds += decoder_started.elapsed().as_secs_f64();
+        let logits = self
+            .model
+            .project_logits(&decoded)
+            .and_then(|logits| logits.i((0, 0, ..)))
+            .and_then(|logits| logits.to_dtype(DType::F32))
+            .and_then(|logits| logits.to_vec1::<f32>())
+            .map_err(failed)?;
+        Ok(pick_language(&logits, &candidates))
     }
 
     fn resolve_request_decode_config(
@@ -984,6 +1052,41 @@ pub(super) fn format_effective_active_batch_sizes(sizes: &[usize]) -> String {
         .map(|size| size.to_string())
         .collect::<Vec<_>>()
         .join(",")
+}
+
+/// Language codes and token ids from `generation_config.json`'s `lang_to_id`
+/// (empty for English-only models). Using the configured ids keeps detection
+/// correct for both the pre-v3 (99) and v3 (100) language vocabularies.
+pub(super) fn language_candidates(generation: &GenerationConfig) -> Vec<(String, u32)> {
+    generation
+        .lang_to_id
+        .iter()
+        .map(|(token, id)| {
+            let code = token.trim_start_matches("<|").trim_end_matches("|>");
+            (code.to_string(), *id)
+        })
+        .collect()
+}
+
+/// Softmax over the language-token logits only, then the most probable
+/// language with its probability.
+pub(super) fn pick_language(logits: &[f32], candidates: &[(String, u32)]) -> Option<(String, f64)> {
+    let scored = candidates
+        .iter()
+        .filter_map(|(code, id)| {
+            let logit = f64::from(*logits.get(*id as usize)?);
+            logit.is_finite().then_some((code, logit))
+        })
+        .collect::<Vec<_>>();
+    let (code, max) = scored
+        .iter()
+        .copied()
+        .max_by(|left, right| left.1.total_cmp(&right.1))?;
+    let total = scored
+        .iter()
+        .map(|(_, logit)| (logit - max).exp())
+        .sum::<f64>();
+    Some((code.clone(), 1.0 / total))
 }
 
 pub(super) fn format_cache_reuse(self_attention: bool, cross_attention: bool) -> &'static str {

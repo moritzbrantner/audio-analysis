@@ -1357,6 +1357,10 @@ pub(crate) fn map_onnx_runtime_error(error: runtime_onnx::OnnxRuntimeError) -> D
         | runtime_onnx::OnnxRuntimeError::UnsupportedTensorType(message)
         | runtime_onnx::OnnxRuntimeError::Source(message) => model_output_mismatch(message),
         runtime_onnx::OnnxRuntimeError::Io(error) => setup_error(error.to_string()),
+        error @ (runtime_onnx::OnnxRuntimeError::RuntimeUnavailable { .. }
+        | runtime_onnx::OnnxRuntimeError::RuntimeTooOld { .. }) => {
+            unsupported_runtime(error.to_string())
+        }
     }
 }
 

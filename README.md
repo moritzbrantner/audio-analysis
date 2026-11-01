@@ -43,6 +43,18 @@ The reference workflow pins Python 3.12.13; the pinned Essentia release has no P
 
 Analyzer disagreement remains evidence rather than ground truth. Analyzer-derived key references declare their source and remain non-gating unless a fixture explicitly enables `assertKey` against an independently justified reference. Coverage completeness means the declared scenario families are represented; it does not by itself establish Mixxx-class accuracy.
 
+### DJ oracle gate
+
+librosa and Essentia are the oracle for BPM, beats, key and sections. Their outputs for every corpus fixture are captured once into `tests/fixtures/dj/oracle-references.v1.json` (pinned to each fixture's SHA-256), so ordinary CI needs neither analyzer. The `dj-oracle` CI job runs the Rust whole-track analyzer on the same bytes and scores it per oracle: tempo family and exact octave (3.5%, half/double reported explicitly), beat F1 ≥ 0.70 at 70 ms, exact dominant key, and section-boundary F ≥ 0.5 at ±3 s, plus creator-described BPM/key where the manifest has them. Failing checks must match `tests/fixtures/dj/oracle-known-gaps.v1.json` exactly: a new failure fails the gate, and a listed gap that now passes must be removed. On PRs the list may not grow against the base branch unless that fixture's references are new or recaptured.
+
+```sh
+python3 scripts/dj-oracle.py gate                 # report in target/dj-goldens/oracle/report.md
+python3 scripts/dj-oracle.py gate --write-gaps    # after a fix: shrink the list
+.venv-dj/bin/python scripts/dj-oracle.py capture  # re-record references (librosa + Essentia)
+```
+
+Oracle agreement is not ground truth; the report shows where librosa and Essentia disagree with each other.
+
 ### Direct Mixxx comparison benchmark
 
 The local benchmark requires Docker, Python 3, the declared Rust toolchain, and `ffmpeg`/`ffprobe` on `PATH` for the Rust decoder.

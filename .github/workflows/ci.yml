@@ -112,14 +112,19 @@ jobs:
     if: github.event_name == 'pull_request' && needs.docs-scope.outputs.docs-only != 'true'
     uses: ./.github/workflows/runtime-evidence.yml
 
+  dj-oracle:
+    needs: docs-scope
+    if: needs.docs-scope.outputs.docs-only != 'true'
+    uses: ./.github/workflows/dj-oracle.yml
+
   merge-ready:
     name: ${{ github.event_name == 'pull_request' && 'merge-ready' || 'validation-summary' }}
     if: ${{ always() }}
-    needs: [docs-scope, verification, structural-validation, runtime-validation]
+    needs: [docs-scope, verification, structural-validation, runtime-validation, dj-oracle]
     runs-on: ubuntu-latest
     steps:
       - uses: moritzbrantner/reusable-workflows/.github/actions/merge-ready@b0f25f241d76af2584dfc9e375084ff5c5cb97da
         with:
           needs: ${{ toJSON(needs) }}
-          required: '["docs-scope", "verification", "structural-validation", "runtime-validation"]'
-          allow-skipped: ${{ needs.docs-scope.outputs.docs-only == 'true' && '["verification", "structural-validation", "runtime-validation"]' || github.event_name == 'pull_request' && '[]' || '["runtime-validation"]' }}
+          required: '["docs-scope", "verification", "structural-validation", "runtime-validation", "dj-oracle"]'
+          allow-skipped: ${{ needs.docs-scope.outputs.docs-only == 'true' && '["verification", "structural-validation", "runtime-validation", "dj-oracle"]' || github.event_name == 'pull_request' && '[]' || '["runtime-validation"]' }}

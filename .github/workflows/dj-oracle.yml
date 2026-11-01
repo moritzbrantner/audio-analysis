@@ -1,0 +1,47 @@
+name: DJ Oracle Gate
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dj-oracle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - name: Install FFmpeg runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+      - name: Restore checksum-pinned corpus
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/dj-goldens/*.ogg
+          key: dj-corpus-${{ hashFiles('tests/fixtures/dj/real-music-corpus.v1.json') }}
+      - name: Offline gate checks
+        run: python3 -m unittest tests/dj/test_oracle_gate.py
+      - name: Fetch base known-gap list
+        if: github.event_name == 'pull_request'
+        run: git fetch --depth=1 origin "${{ github.base_ref }}"
+      - name: Score audio-analysis against librosa and Essentia
+        run: |
+          args=()
+          if test "${{ github.event_name }}" = pull_request; then
+            args+=(--base-ref FETCH_HEAD)
+          fi
+          python3 scripts/dj-oracle.py gate "${args[@]}"
+          cat target/dj-goldens/oracle/report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload oracle report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dj-oracle-${{ github.event.pull_request.head.sha || github.sha }}
+          path: target/dj-goldens/oracle/report.*
+          if-no-files-found: ignore

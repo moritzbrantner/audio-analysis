@@ -398,7 +398,7 @@ impl CandleWhisperSession {
         Self::build_initial_tokens(
             &self.generation,
             &self.tokenizer,
-            self.setup.language.as_deref(),
+            self.language.as_deref(),
             self.setup.task,
             mode,
             request_prompt,
@@ -532,7 +532,10 @@ impl CandleWhisperSession {
         Ok(tokens)
     }
 
-    fn decoder_start_token_id(generation: &GenerationConfig, tokenizer: &Tokenizer) -> Result<u32> {
+    pub(super) fn decoder_start_token_id(
+        generation: &GenerationConfig,
+        tokenizer: &Tokenizer,
+    ) -> Result<u32> {
         generation
             .decoder_start_token_id
             .or_else(|| token_id(tokenizer, whisper::SOT_TOKEN))

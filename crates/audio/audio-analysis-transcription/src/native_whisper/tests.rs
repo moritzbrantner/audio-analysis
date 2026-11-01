@@ -2312,3 +2312,97 @@ fn whisper_bundle_resolution_accepts_manifest_layout() {
         root.join("snapshots/model.safetensors")
     );
 }
+
+#[test]
+fn language_detection_softmaxes_only_the_configured_language_tokens() {
+    let candidates = language_candidates(&test_generation());
+    assert_eq!(
+        candidates,
+        vec![("de".to_string(), 4), ("en".to_string(), 3)]
+    );
+    // Token 0 (a text token) has the highest logit overall; detection must
+    // still pick among the language tokens 3 and 4 only.
+    let logits = [9.0, 0.0, 0.0, 2.0, 0.0, 5.0, 0.0, 0.0];
+    let (language, probability) = pick_language(&logits, &candidates).expect("a language");
+    assert_eq!(language, "en");
+    let expected = 1.0 / (1.0 + (-2.0_f64).exp());
+    assert!((probability - expected).abs() < 1e-12);
+}
+
+#[test]
+fn english_only_models_skip_language_detection() {
+    let generation = GenerationConfig {
+        lang_to_id: Default::default(),
+        ..test_generation()
+    };
+    assert!(language_candidates(&generation).is_empty());
+    assert_eq!(pick_language(&[1.0, 2.0], &[]), None);
+}
+
+/// Native WhisperX #434: with no language the Candle provider never ran
+/// language identification and decoded `<|startoftranscript|><|transcribe|>`
+/// without a language token, so Whisper-small produced punctuation only.
+///
+/// Audio: "Blender Conference 2026 Recap" by Blender
+/// (https://www.youtube.com/watch?v=sO_lhW8av3U), CC BY, English speech over
+/// music. Kept out of Git; prepare it with
+/// `yt-dlp -f bestaudio -x --audio-format wav -o recap.wav https://www.youtube.com/watch?v=sO_lhW8av3U`
+/// then `ffmpeg -i recap.wav -ac 1 -ar 16000 -c:a pcm_s16le blender-conference-2026-recap.wav`.
+/// OpenAI Whisper / WhisperX 3.8 detect `en` (p = 0.93) on its first 30 s.
+#[test]
+#[ignore = "requires CANDLE_WHISPER_SMALL_BUNDLE and the CC BY recap WAV in CANDLE_WHISPER_LANGUAGE_ID_WAV"]
+fn language_detection_picks_english_for_music_under_speech() {
+    let bundle = std::env::var_os("CANDLE_WHISPER_SMALL_BUNDLE")
+        .map(PathBuf::from)
+        .expect("CANDLE_WHISPER_SMALL_BUNDLE must point at a Whisper-small snapshot");
+    let audio_path = std::env::var_os("CANDLE_WHISPER_LANGUAGE_ID_WAV")
+        .map(PathBuf::from)
+        .expect("CANDLE_WHISPER_LANGUAGE_ID_WAV must point at the 16 kHz recap WAV");
+    let mut reader = hound::WavReader::open(&audio_path).expect("recap WAV");
+    let spec = reader.spec();
+    assert_eq!(spec.sample_rate, whisper::SAMPLE_RATE as u32);
+    assert_eq!(spec.channels, 1);
+    let samples = reader
+        .samples::<i16>()
+        .map(|sample| sample.expect("PCM sample") as f32 / 32_768.0)
+        .collect::<Vec<_>>();
+    let request = AsrRequest {
+        audio: crate::LoadedAudio {
+            samples,
+            sample_rate: spec.sample_rate,
+            channels: spec.channels,
+            source: Some("blender-conference-2026-recap".to_string()),
+        },
+        chunks: vec![SpeechSpan::new(0.0, 30.0, 1.0).expect("first window")],
+        task: TranscriptionTask::Transcribe,
+        language: None,
+        model_id: "openai/whisper-small".to_string(),
+    };
+    let options = CandleWhisperOptions {
+        model_id: request.model_id.clone(),
+        device: crate::NativeDevicePreference::Cpu,
+        compute_type: CandleWhisperComputeType::Fp32,
+        model_bundle: Some(bundle),
+        model_cache_only: true,
+        ..CandleWhisperOptions::default()
+    };
+    let response = transcribe(&options, request).expect("transcribe without a language");
+    assert_eq!(response.language.as_deref(), Some("en"));
+    assert_eq!(response.transcript.language.as_deref(), Some("en"));
+    assert!(response
+        .diagnostics
+        .iter()
+        .any(|entry| entry == "languageDetection=whisperFirstWindow"));
+    let text = response
+        .transcript
+        .segments
+        .iter()
+        .map(|segment| segment.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let words = text
+        .split_whitespace()
+        .filter(|word| word.chars().any(char::is_alphabetic))
+        .count();
+    assert!(words >= 10, "expected English words, got {text:?}");
+}

@@ -376,6 +376,11 @@ pub(crate) fn emit_wav2vec2_ctc_segments_with_load_observer(
             segment_start,
             segment_end,
         )?;
+        // Audio shorter than the conv receptive field yields no CTC frame (a
+        // zero-length tensor fails on CUDA); keep the segment unaligned.
+        if samples.len() < model.min_input_samples() {
+            continue;
+        }
         let emissions = model.emit_log_probs(&samples)?;
         let frame_seconds = (segment_end - segment_start) / emissions.len() as f64;
         if !frame_seconds.is_finite() || frame_seconds <= 0.0 {
@@ -1047,9 +1052,6 @@ fn slice_segment_samples(
     let end_frame = (segment_end * sample_rate as f64)
         .round()
         .clamp(start_frame as f64, frame_count as f64) as usize;
-    if end_frame <= start_frame {
-        return Err(invalid_request("alignment segment audio slice is empty"));
-    }
     let mut mono = Vec::with_capacity(end_frame - start_frame);
     for frame in start_frame..end_frame {
         let offset = frame * channels;
@@ -1858,6 +1860,29 @@ mod tests {
         assert!(result.chars[0].start_seconds.is_none());
         assert_eq!(result.chars[1].character, "h");
         assert!(result.chars[1].start_seconds.is_some());
+    }
+
+    #[test]
+    fn segment_too_short_for_the_conv_stack_stays_unaligned() {
+        let temp = tempfile::tempdir().unwrap();
+        write_tiny_bundle(temp.path());
+        let mut request = alignment_request("hello");
+        let stub = TranscriptSegmentContract::new(8, "thank you")
+            .with_time_range(Some(0.5), Some(0.50002))
+            .unwrap();
+        request.transcript.segments.push(stub);
+
+        let result = align_wav2vec2_ctc(
+            temp.path(),
+            &request,
+            &ResolvedNativeDevice::Cpu,
+            AlignmentInterpolationMethod::Nearest,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(result.words.len(), 1);
+        assert_eq!(result.words[0].segment_index, 7);
     }
 
     #[test]

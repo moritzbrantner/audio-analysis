@@ -440,6 +440,7 @@ pub fn run_transcription_pipeline_with_observer(
             vad_provider.detect_speech(&audio.speaker_audio()?, &request.vad.detection)?;
         response.segments = asr_chunks_from_speech(
             response.segments,
+            &audio,
             full_source_seconds,
             request.vad.detection.max_chunk_seconds,
         )?;
@@ -594,9 +595,11 @@ pub fn run_transcription_pipeline_with_observer(
 }
 
 /// Turns detector speech spans into ASR chunks: clamps them to the audio and,
-/// with a chunk size, merges adjacent spans up to it (WhisperX `merge_chunks`).
+/// with a chunk size, merges adjacent spans up to it (WhisperX `merge_chunks`)
+/// and repairs the sub-second stubs a split at the chunk-size limit leaves.
 pub(crate) fn asr_chunks_from_speech(
     mut spans: Vec<SpeechSpan>,
+    audio: &LoadedAudio,
     duration_seconds: f64,
     chunk_seconds: Option<f64>,
 ) -> Result<Vec<SpeechSpan>> {
@@ -610,9 +613,114 @@ pub(crate) fn asr_chunks_from_speech(
         })
         .collect();
     match chunk_seconds {
-        Some(chunk_seconds) => merge_whisperx_vad_chunks(clamped, chunk_seconds),
+        Some(chunk_seconds) => {
+            let merged = merge_whisperx_vad_chunks(clamped, chunk_seconds)?;
+            Ok(repair_split_stub_chunks(merged, audio, chunk_seconds))
+        }
         None => Ok(clamped),
     }
+}
+
+/// Shortest ASR chunk a split at the chunk-size limit may leave behind (capped
+/// at a quarter of the chunk size). Whisper turns shorter remainders into
+/// "Thank you." hallucinations, and wav2vec2 cannot align them.
+pub const MIN_SPLIT_CHUNK_SECONDS: f64 = 1.0;
+/// Chunks this close together are one VAD region cut at the chunk-size limit.
+const SPLIT_CONTIGUITY_SECONDS: f64 = 1.0e-3;
+/// How far from the forced boundary the low-energy search may move it.
+const SPLIT_SEARCH_SECONDS: f64 = 2.0;
+/// RMS window used to find a quiet point for a moved boundary.
+const SPLIT_ENERGY_WINDOW_SECONDS: f64 = 0.02;
+
+/// A VAD region split at the chunk-size limit can leave a remainder of a few
+/// frames as its own chunk; `merge_chunks` cannot absorb it because the joined
+/// chunk would exceed `chunk_size`. Moves the boundary it shares with its
+/// contiguous neighbour to the quietest point that leaves both sides at least
+/// the minimum and within `chunk_size`. Short speech apart from its neighbours
+/// is real speech and is kept.
+pub(crate) fn repair_split_stub_chunks(
+    mut chunks: Vec<SpeechSpan>,
+    audio: &LoadedAudio,
+    chunk_size: f64,
+) -> Vec<SpeechSpan> {
+    let min_seconds = MIN_SPLIT_CHUNK_SECONDS.min(chunk_size / 4.0);
+    for index in 0..chunks.len() {
+        if chunks[index].duration_seconds() >= min_seconds {
+            continue;
+        }
+        let joins_previous = index > 0
+            && chunks[index].start_seconds - chunks[index - 1].end_seconds
+                <= SPLIT_CONTIGUITY_SECONDS;
+        let joins_next = index + 1 < chunks.len()
+            && chunks[index + 1].start_seconds - chunks[index].end_seconds
+                <= SPLIT_CONTIGUITY_SECONDS;
+        let (left, right) = match (joins_previous, joins_next) {
+            (true, _) => (index - 1, index),
+            (false, true) => (index, index + 1),
+            (false, false) => continue,
+        };
+        let start = chunks[left].start_seconds;
+        let end = chunks[right].end_seconds;
+        let lowest_valid = (start + min_seconds).max(end - chunk_size);
+        let highest_valid = (end - min_seconds).min(start + chunk_size);
+        let stub_is_right = right == index;
+        let (lowest, highest) = if stub_is_right {
+            (
+                (highest_valid - SPLIT_SEARCH_SECONDS).max(lowest_valid),
+                highest_valid,
+            )
+        } else {
+            (
+                lowest_valid,
+                (lowest_valid + SPLIT_SEARCH_SECONDS).min(highest_valid),
+            )
+        };
+        if lowest <= highest {
+            let boundary = quietest_point(audio, lowest, highest, stub_is_right);
+            chunks[left].end_seconds = boundary;
+            chunks[right].start_seconds = boundary;
+        }
+    }
+    chunks
+}
+
+/// Centre of the lowest-energy window in `[lowest, highest]`. Ties go to the end
+/// nearest the original boundary: `highest` when `prefer_late`, else `lowest`.
+fn quietest_point(audio: &LoadedAudio, lowest: f64, highest: f64, prefer_late: bool) -> f64 {
+    let fallback = if prefer_late { highest } else { lowest };
+    let rate = f64::from(audio.sample_rate);
+    let channels = usize::from(audio.channels.max(1));
+    let frames = audio.samples.len() / channels;
+    if rate <= 0.0 || frames == 0 {
+        return fallback;
+    }
+    let half = ((SPLIT_ENERGY_WINDOW_SECONDS * rate) as usize / 2).max(1);
+    let first = (lowest * rate).ceil() as usize;
+    let last = ((highest * rate).floor() as usize).min(frames - 1);
+    if first > last {
+        return fallback;
+    }
+    let energy = |centre: usize| {
+        let from = centre.saturating_sub(half);
+        let to = (centre + half).min(frames);
+        audio.samples[from * channels..to * channels]
+            .iter()
+            .map(|sample| f64::from(*sample).powi(2))
+            .sum::<f64>()
+            / (to - from).max(1) as f64
+    };
+    let mut best = if prefer_late { last } else { first };
+    let mut best_energy = energy(best);
+    let mut centre = first;
+    while centre <= last {
+        let value = energy(centre);
+        if value < best_energy || (prefer_late && value == best_energy) {
+            best = centre;
+            best_energy = value;
+        }
+        centre += half;
+    }
+    (best as f64 / rate).clamp(lowest, highest)
 }
 
 /// WhisperX `merge_chunks`: greedily joins consecutive speech spans while the

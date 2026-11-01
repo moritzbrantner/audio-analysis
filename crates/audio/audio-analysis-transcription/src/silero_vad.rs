@@ -1559,6 +1559,62 @@ mod tests {
         assert_eq!(segments[1].end_seconds, 4.0);
     }
 
+    /// Issue native-whisperx#417: a region a little longer than `chunk_size`
+    /// whose lowest score is its last frame is cut at the limit, leaving a
+    /// 0.2 s remainder that Whisper hallucinates on and wav2vec2 cannot align.
+    #[test]
+    fn chunk_size_split_never_leaves_a_stub_asr_chunk() {
+        let frame_seconds = 0.1;
+        let speech_frames = 302; // 0.0 ..= 30.2 s of speech, then silence.
+        let frames = (0..speech_frames + 5)
+            .map(|index| {
+                let start = index as f64 * frame_seconds;
+                let score = if index < speech_frames {
+                    0.99 - 0.3 * index as f32 / speech_frames as f32
+                } else {
+                    0.0
+                };
+                pyannote_frame(start, start + frame_seconds, score)
+            })
+            .collect::<Vec<_>>();
+        let speech = pyannote_frames_to_segments(&frames, 0.5, 0.363, 30.0).expect("binarize");
+        assert!(
+            speech.iter().any(|span| span.duration_seconds() < 0.5),
+            "fixture must reproduce the stub: {speech:?}"
+        );
+
+        // Steady tone with one short pause at 28.50-28.60 s.
+        let sample_rate = 16_000;
+        let samples = (0..31 * sample_rate)
+            .map(|index| {
+                let seconds = f64::from(index) / f64::from(sample_rate);
+                if (28.5..28.6).contains(&seconds) {
+                    0.0
+                } else {
+                    (seconds * 220.0 * std::f64::consts::TAU).sin() as f32 * 0.5
+                }
+            })
+            .collect();
+        let audio = LoadedAudio {
+            samples,
+            sample_rate,
+            channels: 1,
+            source: None,
+        };
+        let chunks =
+            crate::asr_chunks_from_speech(speech, &audio, 31.0, Some(30.0)).expect("chunks");
+
+        assert_eq!(chunks.len(), 2, "{chunks:?}");
+        for chunk in &chunks {
+            let duration = chunk.duration_seconds();
+            assert!((1.0..=30.0).contains(&duration), "{chunks:?}");
+        }
+        assert_eq!(chunks[0].start_seconds, 0.0);
+        assert_eq!(chunks[0].end_seconds, chunks[1].start_seconds);
+        assert!((28.5..=28.6).contains(&chunks[0].end_seconds), "{chunks:?}");
+        assert!((chunks[1].end_seconds - 30.2).abs() < 1e-6, "{chunks:?}");
+    }
+
     #[cfg(feature = "pyannote-vad")]
     #[test]
     #[ignore = "requires caller-owned pyannote model and WAV fixtures"]

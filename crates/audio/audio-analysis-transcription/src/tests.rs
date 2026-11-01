@@ -434,6 +434,7 @@ fn asr_chunks_are_clamped_to_the_audio_duration() {
             SpeechSpan::new(9.0, 10.02, 1.0).unwrap(),
             SpeechSpan::new(10.05, 10.2, 1.0).unwrap(),
         ],
+        &silent_audio(10.0),
         10.0,
         None,
     )
@@ -444,6 +445,54 @@ fn asr_chunks_are_clamped_to_the_audio_duration() {
         .map(|span| (span.start_seconds, span.end_seconds))
         .collect::<Vec<_>>();
     assert_eq!(spans, vec![(0.0, 1.0), (9.0, 10.0)]);
+}
+
+fn silent_audio(seconds: f64) -> LoadedAudio {
+    LoadedAudio {
+        samples: vec![0.0; (seconds * 16_000.0) as usize],
+        sample_rate: 16_000,
+        channels: 1,
+        source: None,
+    }
+}
+
+#[test]
+fn leading_split_stub_takes_time_from_the_following_chunk() {
+    let chunks = asr_chunks_from_speech(
+        vec![
+            SpeechSpan::new(0.0, 29.0, 0.9).unwrap(),
+            SpeechSpan::new(30.0, 30.2, 0.9).unwrap(),
+            SpeechSpan::new(30.2, 60.5, 0.9).unwrap(),
+        ],
+        &silent_audio(61.0),
+        61.0,
+        Some(30.0),
+    )
+    .unwrap();
+
+    let spans = chunks
+        .iter()
+        .map(|span| (span.start_seconds, span.end_seconds))
+        .collect::<Vec<_>>();
+    // Silent audio has no quieter point, so the boundary moves the minimum.
+    assert_eq!(spans, vec![(0.0, 29.0), (30.0, 31.0), (31.0, 60.5)]);
+}
+
+#[test]
+fn short_speech_apart_from_its_neighbours_is_kept() {
+    let chunks = asr_chunks_from_speech(
+        vec![
+            SpeechSpan::new(0.0, 29.5, 0.9).unwrap(),
+            SpeechSpan::new(29.8, 30.2, 0.9).unwrap(),
+        ],
+        &silent_audio(31.0),
+        31.0,
+        Some(30.0),
+    )
+    .unwrap();
+
+    assert_eq!(chunks.len(), 2);
+    assert_eq!(chunks[1].start_seconds, 29.8);
 }
 
 #[test]

@@ -8,7 +8,7 @@ mod tests;
 mod timestamps;
 mod token_decode;
 
-use crate::native_device::{resolve_native_device, ResolvedNativeDevice};
+use crate::native_device::{select_native_device, ResolvedNativeDevice};
 use crate::{
     invalid_request, setup_error, validate_asr_request, AsrRequest, AsrResponse,
     CandleWhisperComputeType, CandleWhisperOptions, CandleWhisperRuntimeControls,
@@ -38,6 +38,9 @@ struct WhisperRunSetup {
     bundle: WhisperBundlePaths,
     model_source: &'static str,
     resolved_device: ResolvedNativeDevice,
+    /// `device=`, `deviceRequested=`, `deviceName=` and
+    /// `deviceFallbackReason=` facts for the report.
+    device_diagnostics: Vec<String>,
     requested_compute_type: CandleWhisperComputeType,
     resolved_compute_type: CandleWhisperComputeType,
     model_weight_dtype: DType,
@@ -236,7 +239,9 @@ impl WhisperRunSetup {
                 "native Candle Whisper compute type int8 is CPU-only; select device=cpu",
             ));
         }
-        let resolved_device = resolve_native_device(options.device, controls.cuda_device_index)?;
+        let device = select_native_device(options.device, controls.cuda_device_index)?;
+        let device_diagnostics = device.diagnostics(None);
+        let resolved_device = device.resolved;
         let resolved_compute_type = options
             .compute_type
             .resolve_for_device(resolved_device.cuda_active())?;
@@ -262,6 +267,7 @@ impl WhisperRunSetup {
             bundle: model.bundle,
             model_source: model.source,
             resolved_device,
+            device_diagnostics,
             requested_compute_type: options.compute_type,
             resolved_compute_type,
             model_weight_dtype,
@@ -311,10 +317,6 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: &Path, label: &str) -> Result<T
 
 fn candle_device(resolved: &ResolvedNativeDevice) -> Result<Device> {
     resolved.candle_device()
-}
-
-fn device_label(resolved: &ResolvedNativeDevice) -> String {
-    resolved.diagnostic_name()
 }
 
 fn device_is_cuda(resolved: &ResolvedNativeDevice) -> bool {

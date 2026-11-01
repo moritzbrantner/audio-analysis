@@ -45,12 +45,13 @@ pub(crate) fn align_with_observer(
     validate_loaded_audio(&request.audio)?;
     validate_transcript_ranges(&request)?;
     let resolved = resolve_alignment_model(options, &request.model_id)?;
-    let resolved_device = crate::native_device::resolve_native_device(options.device, 0)?;
+    let device = crate::native_device::select_native_device(options.device, 0)?;
+    let resolved_device = &device.resolved;
     let model_id = resolved.model_id.clone();
     let aligned = crate::native_wav2vec2::align_wav2vec2_ctc_with_load_observer(
         &resolved.bundle,
         &request,
-        &resolved_device,
+        resolved_device,
         options.interpolate_method,
         options.return_char_alignments,
         |event| match event {
@@ -77,14 +78,16 @@ pub(crate) fn align_with_observer(
         "alignmentModelExecution=candle-wav2vec2".to_string(),
         format!("alignmentModelResolved={}", resolved.bundle.display()),
         format!("alignmentModelSource={}", resolved.source),
-        format!("alignmentDevice={}", resolved_device.diagnostic_name()),
+    ];
+    diagnostics.extend(device.diagnostics(Some("alignment")));
+    diagnostics.extend([
         format!("alignmentCuda={}", resolved_device.cuda_active()),
         format!(
             "alignmentInterpolateMethod={}",
             options.interpolate_method.as_whisperx_arg()
         ),
         format!("returnCharAlignments={}", options.return_char_alignments),
-    ];
+    ]);
     if !aligned.fallback_segment_indices.is_empty() {
         diagnostics.push("alignmentFallback=segmentTiming".to_string());
         diagnostics.push("alignmentFallbackReason=ctcFrameDeficit".to_string());

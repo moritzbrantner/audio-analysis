@@ -213,6 +213,17 @@ impl Wav2Vec2ForCtc {
         })
     }
 
+    /// Fewest samples the convolutional feature extractor turns into at least
+    /// one frame (its receptive field: 400 samples for the standard stack).
+    pub(crate) fn min_input_samples(&self) -> usize {
+        self.config
+            .conv_kernel
+            .iter()
+            .zip(&self.config.conv_stride)
+            .rev()
+            .fold(1, |field, (kernel, stride)| (field - 1) * stride + kernel)
+    }
+
     pub(crate) fn emit_log_probs(&self, samples: &[f32]) -> Result<Vec<Vec<f32>>> {
         if samples.is_empty() {
             return Err(model_output_mismatch(

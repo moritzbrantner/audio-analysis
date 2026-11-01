@@ -5,7 +5,11 @@ use audio_analysis_pitch::key::{
     analyze_key_track_with_boundaries, HarmonicKeyConfig, KeyTimelineConfig, MusicalKeyEstimate,
     MusicalScale,
 };
-use audio_analysis_rhythm::track::{analyze_rhythm_track, TrackRhythmConfig};
+use audio_analysis_rhythm::{
+    surface::run_surface_operation,
+    track::{analyze_rhythm_track, TrackRhythmConfig},
+};
+use runtime_core::{OperationId, SurfaceRequest};
 use serde_json::json;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -29,6 +33,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         KeyTimelineConfig::default(),
         &key_boundaries,
     )?;
+
+    let sections = structural_sections(&samples, clip.sample_rate)?;
 
     let key_value = key_analysis.dominant.as_ref().map(key_estimate_json);
     let key_timeline = key_analysis
@@ -87,10 +93,36 @@ fn main() -> Result<(), Box<dyn Error>> {
             "keyTimeline": key_timeline,
             "keySegments": key_segments,
             "keyBoundaryAligned": key_analysis.boundary_aligned,
-            "keyTimelineComplete": key_analysis.timeline_complete
+            "keyTimelineComplete": key_analysis.timeline_complete,
+            "sections": sections
         }))?
     );
     Ok(())
+}
+
+/// Sections come from the Rust-owned `audio.rhythm.analyze` surface contract,
+/// the same path the browser workflow uses.
+fn structural_sections(samples: &[f32], sample_rate: u32) -> Result<serde_json::Value, String> {
+    let response = run_surface_operation(SurfaceRequest {
+        operation: OperationId::new("audio.rhythm.analyze"),
+        input: json!({ "samples": samples, "sampleRate": sample_rate }),
+    })?;
+    let result = response.value.get("result").unwrap_or(&response.value);
+    let sections = result
+        .get("sections")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("audio.rhythm.analyze returned no sections")?;
+    Ok(sections
+        .iter()
+        .map(|section| {
+            json!({
+                "startSeconds": section["startSeconds"],
+                "endSeconds": section["endSeconds"],
+                "identity": section["identity"],
+                "startBoundaryConfidence": section["startBoundaryConfidence"]
+            })
+        })
+        .collect())
 }
 
 fn downmix_to_mono(samples: &[f32], channels: u16) -> Vec<f32> {

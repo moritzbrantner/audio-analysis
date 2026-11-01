@@ -298,7 +298,6 @@ impl CandleWhisperSession {
             segments,
         )
         .map_err(|error| model_output_mismatch(error.to_string()))?;
-        let device_label = device_label(&self.setup.resolved_device);
         let mut diagnostics = whisper_setup_diagnostics(&self.setup);
         if let WhisperModel::Q8(model) = &self.model {
             diagnostics.extend(q8_execution_diagnostics(
@@ -306,9 +305,9 @@ impl CandleWhisperSession {
                 model.kernel_route().as_str(),
             ));
         }
+        diagnostics.push("provider=candle-whisper".to_string());
+        diagnostics.extend(self.setup.device_diagnostics.iter().cloned());
         diagnostics.extend([
-            "provider=candle-whisper".to_string(),
-            format!("device={device_label}"),
             format!(
                 "decoderThreads={}",
                 decoder_threads_diagnostic(controls, &self.setup.resolved_device)

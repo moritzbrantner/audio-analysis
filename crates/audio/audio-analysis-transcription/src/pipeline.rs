@@ -452,6 +452,7 @@ pub fn run_transcription_pipeline_with_observer(
                 .diagnostics
                 .push("VAD found no speech; using full source as one ASR chunk".to_string());
         }
+        push_cpu_stage_device(&mut response.diagnostics, "vadDevice");
         response
     } else {
         VadResponse {
@@ -565,7 +566,9 @@ pub fn run_transcription_pipeline_with_observer(
             &response,
             &request.diarization,
         ));
-        diagnostics.extend(response.diagnostics.clone());
+        let mut provider_diagnostics = response.diagnostics.clone();
+        push_cpu_stage_device(&mut provider_diagnostics, "diarizationDevice");
+        diagnostics.extend(provider_diagnostics);
         transcript = audio_analysis_speakers::assign_speakers_to_transcript_with_policy(
             &transcript,
             &response,
@@ -592,6 +595,16 @@ pub fn run_transcription_pipeline_with_observer(
         artifacts: Vec::new(),
         diagnostics,
     })
+}
+
+/// Records `key=cpu` unless the provider reported its own device. Every VAD
+/// (energy, Silero, pyannote) and diarization provider here runs on the CPU:
+/// the ONNX sessions use the CPU execution provider only.
+fn push_cpu_stage_device(diagnostics: &mut Vec<String>, key: &str) {
+    let prefix = format!("{key}=");
+    if !diagnostics.iter().any(|item| item.starts_with(&prefix)) {
+        diagnostics.push(format!("{prefix}cpu"));
+    }
 }
 
 /// Turns detector speech spans into ASR chunks: clamps them to the audio and,

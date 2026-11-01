@@ -2874,6 +2874,42 @@ fn native_pipeline_reports_diarization_diagnostics() {
         .any(|item| item == "diarizationSpeakerCountBelowRequestedMin=1/2"));
 }
 
+#[test]
+fn native_pipeline_reports_cpu_devices_for_vad_and_diarization() {
+    let mut request = sample_request();
+    request.vad.enabled = true;
+    request.diarization.enabled = true;
+    let mut vad = EnergyVoiceActivityDetector;
+    let mut diarizer = MockDiarizationProvider;
+
+    let response = run_transcription_pipeline(
+        request.clone(),
+        &mut vad,
+        &mut MockAsrProvider,
+        None,
+        Some(&mut diarizer),
+    )
+    .unwrap();
+    let count = |key: &str| {
+        response
+            .diagnostics
+            .iter()
+            .filter(|item| item.as_str() == key)
+            .count()
+    };
+    assert_eq!(count("vadDevice=cpu"), 1);
+    assert_eq!(count("diarizationDevice=cpu"), 1);
+
+    request.vad.enabled = false;
+    request.diarization.enabled = false;
+    let response =
+        run_transcription_pipeline(request, &mut vad, &mut MockAsrProvider, None, None).unwrap();
+    assert!(!response
+        .diagnostics
+        .iter()
+        .any(|item| item.starts_with("vadDevice=") || item.starts_with("diarizationDevice=")));
+}
+
 #[cfg(feature = "diarization")]
 #[test]
 fn native_pipeline_reports_onnx_diarization_diagnostics() {

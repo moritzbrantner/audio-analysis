@@ -369,12 +369,19 @@ fn infer_beat_trajectory(
         &tempo_path.bpm_by_frame,
         anchor_bpm,
     );
-    let beat_frames = track_beat_frames_with_tempo_path(
+    let raw_beat_frames = track_beat_frames_with_tempo_path(
         &supported_novelty,
         frame_rate,
         &tempo_path.bpm_by_frame,
         anchor_bpm,
         config.beat_tightness,
+    );
+    let beat_frames = stabilize_returning_phase_excursions(
+        &raw_beat_frames,
+        tracking_novelty,
+        frame_rate,
+        &tempo_path.bpm_by_frame,
+        anchor_bpm,
     );
     let tempo_map = build_tempo_map_with_path(
         &beat_frames,
@@ -1184,6 +1191,86 @@ fn steady_local_tempo(tempo_path: &[f32], anchor_bpm: f32) -> bool {
     nearby as f32 / tempo_path.len() as f32 >= 0.95
 }
 
+/// Correct a short departure from an otherwise independently supported beat
+/// phase when the steady-tempo path returns to that same phase afterward.
+/// The grid is fitted robustly from the tracker's own beat positions, rather
+/// than from an oracle or an assumed starting phase. Never insert an onset:
+/// the replacement must have measurable novelty near the established grid.
+fn stabilize_returning_phase_excursions(
+    frames: &[usize],
+    novelty: &[f32],
+    frame_rate: f32,
+    tempo_path: &[f32],
+    anchor_bpm: f32,
+) -> Vec<usize> {
+    if frames.len() < 48 || novelty.is_empty() || !steady_local_tempo(tempo_path, anchor_bpm) {
+        return frames.to_vec();
+    }
+    let interval = (frames[frames.len() - 1] - frames[0]) as f64 / (frames.len() - 1) as f64;
+    let anchor_interval = frame_rate as f64 * 60.0 / anchor_bpm as f64;
+    if !interval.is_finite()
+        || interval < 1.0
+        || (interval - anchor_interval).abs() / anchor_interval > 0.035
+    {
+        return frames.to_vec();
+    }
+
+    let mut origins = frames
+        .iter()
+        .enumerate()
+        .map(|(index, frame)| *frame as f64 - index as f64 * interval)
+        .collect::<Vec<_>>();
+    origins.sort_by(f64::total_cmp);
+    let origin = origins[origins.len() / 2];
+    let radius = (interval * 0.18).max(1.0);
+    let grid_frame = |index: usize| origin + index as f64 * interval;
+    let aligned = frames
+        .iter()
+        .enumerate()
+        .map(|(index, frame)| (*frame as f64 - grid_frame(index)).abs() <= radius)
+        .collect::<Vec<_>>();
+    if aligned.iter().filter(|same_phase| **same_phase).count() * 10 < frames.len() * 9 {
+        return frames.to_vec();
+    }
+
+    let mut corrected = frames.to_vec();
+    let mut index = 1;
+    while index + 1 < frames.len() {
+        if aligned[index] {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index + 1 < frames.len() && !aligned[index] {
+            index += 1;
+        }
+        // A permanent new phase, a long breakdown, or an unbracketed edge is
+        // not a justified correction from the evidence available here.
+        if !aligned[start - 1] || !aligned[index] || index - start > 16 {
+            continue;
+        }
+        for beat in start..index {
+            let target = grid_frame(beat);
+            let first = (target - radius).ceil().max(0.0) as usize;
+            let end = ((target + radius).floor() as usize + 1).min(novelty.len());
+            if first >= end {
+                continue;
+            }
+            let (best_offset, strength) = novelty[first..end]
+                .iter()
+                .enumerate()
+                .max_by(|(_, left), (_, right)| left.total_cmp(right))
+                .expect("non-empty candidate window");
+            if *strength >= 0.02
+                && *strength >= 0.20 * novelty.get(frames[beat]).copied().unwrap_or(0.0)
+            {
+                corrected[beat] = first + best_offset;
+            }
+        }
+    }
+    corrected
+}
+
 // An isolated strong anticipation must not earn the same beat reward as an
 // onset supported by neighboring pulses at the selected local tempo. This
 // scores onset evidence; the tempo trajectory still owns the expected period.
@@ -1658,6 +1745,49 @@ mod tests {
             let beats = track_beat_frames(&supported, 100.0, 120.0, 1.25);
             assert_eq!(beats, expected, "extra frame={extra_frame}");
         }
+    }
+
+    #[test]
+    fn sustained_anticipation_does_not_rephase_a_steady_kick_grid() {
+        // Independent 120-BPM quarter notes over 160 beats, with a 12-beat
+        // run of louder anticipations 110 ms before the authored quarter note.
+        // Both phases have adjacent-pulse support during that run; only the
+        // quarter-note phase is supported by the entire recording.
+        let expected = (0..160).map(|index| index * 50).collect::<Vec<_>>();
+        let mut novelty = vec![0.0_f32; 160 * 50];
+        for frame in &expected {
+            novelty[*frame] = 0.45;
+        }
+        for beat in 80..92 {
+            novelty[expected[beat] - 11] = 1.0;
+        }
+        let tempo_path = vec![120.0_f32; novelty.len()];
+        let supported = adjacent_pulse_support(&novelty, 100.0, &tempo_path, 120.0);
+        let raw = track_beat_frames_with_tempo_path(&supported, 100.0, &tempo_path, 120.0, 1.25);
+        let actual =
+            stabilize_returning_phase_excursions(&raw, &novelty, 100.0, &tempo_path, 120.0);
+        assert_eq!(
+            actual, expected,
+            "steady grid displaced by a sustained accent"
+        );
+    }
+
+    #[test]
+    fn returning_phase_excursion_without_grid_onsets_is_preserved() {
+        let mut frames = (0..160).map(|index| index * 50).collect::<Vec<_>>();
+        for frame in &mut frames[80..92] {
+            *frame -= 11;
+        }
+        let mut novelty = vec![0.0_f32; 160 * 50];
+        for frame in &frames {
+            novelty[*frame] = 0.45;
+        }
+        let tempo_path = vec![120.0_f32; novelty.len()];
+        assert_eq!(
+            stabilize_returning_phase_excursions(&frames, &novelty, 100.0, &tempo_path, 120.0),
+            frames,
+            "do not invent a kick on a grid with no supporting onset"
+        );
     }
 
     #[test]

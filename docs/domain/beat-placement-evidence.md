@@ -159,3 +159,80 @@ Essentia agree with each other on only about 0.613 beat F1 over the full
 Solarity track. Further phase changes require independent tapped kick/quarter-
 note and bar-phase annotations rather than tuning one oracle's timestamps into
 the Rust analyzer.
+
+## Further November 2 investigation: short returning-phase excursions
+
+The 18-track oracle remains necessary for regression detection, but competing
+reference phases on Solarity are not reliable independent beat truth. An
+additional diagnostic uses [Google Magenta's Groove MIDI Dataset](https://magenta.withgoogle.com/datasets/groove),
+licensed CC BY 4.0. The published MIDI contains human-played drum timings and
+the recording's metronome tempo. These checks used the official MIDI-only
+`groove-v1.0.0-midionly.zip` (SHA-256
+`651cbc524ffb891be1a3e46d89dc82a1cecb09a57c748c7b45b844c4841dcc1e`).
+Each MIDI note-on was deterministically synthesized into a short decaying
+sinusoidal drum transient at 22,050 Hz. These are **newly synthesized test
+signals, not the dataset's recorded audio**. Expected beats follow the MIDI
+quarter-note metronome grid; the F1 tolerance is the same ±70 ms as the oracle.
+
+The original tracker was almost entirely aligned on four human performances,
+but shifted twelve consecutive beats by approximately 80–130 ms in a steady
+137-BPM disco recording, between 189.962 and 194.769 seconds. At the end of the
+phrase it returned to the established phase, while the selected BPM was still
+about 136. An independently authored 160-beat, 120-BPM novelty regression
+reproduces that same failure with twelve stronger 110-ms anticipations after
+eighty correctly aligned quarter notes. The raw dynamic program follows the
+wrong phase for the phrase even though the metronome grid has an onset on
+every beat.
+
+The new post-tracking guard runs only for a steady local tempo and at least 48
+beats. It robustly fits an interval and phase to the tracker output, requires
+at least 90% of beats to agree with that phase, and considers only returning
+departures of at most 16 beats bracketed by aligned beats. It can move a
+displaced beat only to an **observed onset** within 18% of a period of the
+established grid, subject to absolute and relative onset-strength floors. It
+does not insert beats or alter global tempo selection, candidate scores,
+novelty extraction, or the dynamic-programming path. An additional regression
+ensures a missing grid onset is never synthesized by this correction.
+
+| Human MIDI performance | Baseline beat F1 | New beat F1 | Important window |
+| --- | ---: | ---: | --- |
+| `drummer1/session3/7_dance-disco_120_beat_4-4` | 0.996 | 0.996 | unchanged |
+| `drummer1/session1/101_dance-disco_120_beat_4-4` | 0.987 | 0.987 | unchanged |
+| `drummer3/session2/25_hiphop_92_beat_4-4` | 0.975 | 0.975 | unchanged |
+| `drummer8/session2/26_dance-disco_137_beat_4-4` | 0.975 | **0.997** | 180–200 s: **0.739 → 0.978** |
+
+All 18 checksum-pinned DJ fixtures were freshly analyzed with the same Rust
+release-profile example before and after. The table reports both fixed oracle
+comparisons, including failures, rather than hiding unchanged metrics. “—”
+denotes an analyzer that returned no scoreable beats.
+
+| DJ fixture | librosa F1 before → after | Essentia F1 before → after | Gaps before → after |
+| --- | ---: | ---: | ---: |
+| choice-drum-bass | 0.983 → 0.983 | 0.659 → 0.659 | 4 → 4 |
+| brahms-hungarian-dance-5 | 0.648 → 0.648 | 0.707 → 0.707 | 2 → 2 |
+| sweet-waltz | 0.983 → 0.983 | 1.000 → 1.000 | 2 → 2 |
+| pistachio-ragtime | 0.997 → 0.997 | 0.991 → 0.991 | 3 → 3 |
+| sugar-plum-fairy | 0.942 → 0.942 | 0.919 → 0.919 | 1 → 1 |
+| vibe-ace | 0.859 → 0.859 | 0.819 → 0.819 | 1 → 1 |
+| accelerating-snare | 0.395 → 0.395 | 0.612 → 0.612 | 8 → 8 |
+| friendly-evil-gangsta-synth-hip-hop | 0.931 → 0.931 | 0.984 → 0.984 | 0 → 0 |
+| pop-rock-wikiservicio | 0.969 → 0.969 | 0.962 → 0.962 | 1 → 1 |
+| beethoven-pathetique-adagio-modulation | 0.339 → 0.339 | 0.684 → 0.684 | 8 → 8 |
+| mj-pia-solarity-acid-techno | 0.443 → 0.443 | 0.613 → 0.613 | 4 → 4 |
+| crooked-cop-reggae | 0.909 → 0.909 | 0.862 → 0.862 | 1 → 1 |
+| dream-vilanculos-mini-light-trance | 0.796 → 0.796 | 0.991 → 0.991 | 1 → 1 |
+| wikipedia-guitar-solo-f-sharp-minor | 0.976 → 0.976 | 0.994 → 0.994 | 2 → 2 |
+| karissa-hobbs-lets-go-fishin | 0.295 → 0.295 | 0.593 → 0.593 | 5 → 5 |
+| sorohanro-trumpet-loop | — → — | — → — | 8 → 8 |
+| drese-wind-ensemble | 0.716 → 0.716 | 0.451 → 0.451 | 7 → 7 |
+| drese-expressive-trumpet | 0.949 → 0.949 | 0.643 → 0.643 | 5 → 5 |
+
+The corpus means remain 0.7723 against librosa and 0.7931 against Essentia.
+There are still **63 known oracle gaps, including 14 `beats:*` gaps**, and no
+new failures. Tempo family counts (12/18 and 12/18), key matches (13/18 and
+10/18), and section-boundary mean F-scores (0.3930 and 0.6547) are unchanged.
+The one observed section boundary adjustment is 23 ms on Pistachio Ragtime,
+without affecting its section F-score. Downbeat-phase regressions and genuine
+tempo-change tests pass in Rust, but no independently annotated Solarity bar
+phase has been established. Solarity still measures **0.4430 / 0.6134** against
+the conflicting references; issue #223 must remain open for that investigation.

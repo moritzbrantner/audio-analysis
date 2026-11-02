@@ -17,7 +17,9 @@ use crate::{
 const MAX_SAMPLES: usize = 192_000;
 const MAX_TRACK_SECONDS: usize = 15 * 60;
 const MIN_SECTION_SECONDS: f64 = 8.0;
-const SECTION_CHANGE_THRESHOLD: f32 = 0.20;
+// Two-bar distances between track-normalized descriptors are typically hundredths, not tenths;
+// the former 0.20 cutoff discarded every real-music change point (DJ oracle #221).
+const SECTION_CHANGE_THRESHOLD: f32 = 0.015;
 const SECTION_IDENTITY_THRESHOLD: f32 = 0.18;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -703,6 +705,59 @@ fn nonnegative_f64(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn moderate_spectral_change_creates_a_downbeat_aligned_section() {
+        fn analysis(with_change: bool) -> TrackRhythmAnalysis {
+            let beats = (0..64)
+                .map(|index| TrackedBeat {
+                    timestamp_seconds: index as f64 * 0.5,
+                    strength: 0.5,
+                    beat_in_bar: index % 4 + 1,
+                    downbeat: index % 4 == 0,
+                    local_bpm: Some(120.0),
+                })
+                .collect::<Vec<_>>();
+            let downbeats = beats
+                .iter()
+                .filter(|beat| beat.downbeat)
+                .map(|beat| beat.timestamp_seconds)
+                .collect();
+            let mut chroma = [0.0; 12];
+            chroma[0] = 1.0;
+            let structural_descriptors = (0..128)
+                .map(|index| StructuralDescriptor {
+                    timestamp_seconds: index as f64 * 0.25,
+                    onset_novelty: 0.1,
+                    low_energy: if with_change && index >= 64 {
+                        0.65
+                    } else {
+                        0.2
+                    },
+                    mid_energy: 0.3,
+                    high_energy: 0.1,
+                    chroma,
+                })
+                .collect();
+            TrackRhythmAnalysis {
+                bpm: Some(120.0),
+                confidence: 1.0,
+                tempo_candidates: Vec::new(),
+                beats,
+                downbeats,
+                downbeat_confidence: 1.0,
+                hop_seconds: 0.25,
+                tempo_map: Vec::new(),
+                structural_descriptors,
+            }
+        }
+
+        let sections = structural_sections(&analysis(true), 32.0);
+        assert_eq!(sections.len(), 2, "{sections:?}");
+        assert!((sections[1].start_seconds - 16.0).abs() <= 2.0);
+        assert!(sections[1].start_boundary_confidence > 0.0);
+        assert_eq!(structural_sections(&analysis(false), 32.0).len(), 1);
+    }
 
     #[test]
     fn section_identity_labels_are_stable() {

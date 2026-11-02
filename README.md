@@ -54,6 +54,11 @@ python3 scripts/dj-oracle.py gate --write-gaps    # after a fix: shrink the list
 ```
 
 Oracle agreement is not ground truth; the report shows where librosa and Essentia disagree with each other.
+The generated `target/dj-goldens/oracle/report.json` also records non-gating
+20-second beat windows with per-oracle F1 and nearest-beat error, Rust beat
+counts and strengths, and the local BPM range. These diagnostics separate
+phase, pulse-count, onset-evidence, and tempo-trajectory leads; they are not
+independent annotations of the musical beat.
 
 ### Direct Mixxx comparison benchmark
 

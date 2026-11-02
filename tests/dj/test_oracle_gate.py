@@ -14,6 +14,29 @@ SPEC.loader.exec_module(oracle)
 
 
 class OracleGateTest(unittest.TestCase):
+    def test_beat_window_diagnostics_separate_stable_tempo_from_wrong_phase(self):
+        actual = {
+            "durationSeconds": 4.0,
+            "beats": [0.5, 1.0, 1.5, 2.0, 2.5],
+            "beatStrengths": [0.8] * 5,
+            "tempoMap": [(beat, 120.0) for beat in [0.5, 1.0, 1.5, 2.0, 2.5]],
+        }
+        reference = {
+            "librosa": {"beats": [0.5, 1.0, 1.5, 2.0, 2.5]},
+            "essentia": {"beats": [0.75, 1.25, 1.75, 2.25, 2.75]},
+        }
+        windows = oracle.beat_window_diagnostics(actual, reference, width=2.0)
+        self.assertEqual(len(windows), 2)
+        self.assertEqual(windows[0]["rustBeatCount"], 3)
+        self.assertEqual(windows[0]["localBpmRange"], [120.0, 120.0])
+        self.assertEqual(windows[0]["medianRustBeatStrength"], 0.8)
+        self.assertEqual(windows[0]["references"]["librosa"]["beatF1"], 1.0)
+        self.assertEqual(windows[0]["references"]["librosa"]["medianNearestBeatErrorMs"], 0.0)
+        self.assertEqual(windows[0]["references"]["essentia"]["beatF1"], 0.0)
+        self.assertEqual(windows[0]["references"]["essentia"]["medianNearestBeatErrorMs"], 250.0)
+        with self.assertRaisesRegex(ValueError, "same length"):
+            oracle.beat_window_diagnostics({**actual, "beatStrengths": []}, reference)
+
     def test_tempo_relation_keeps_half_and_double_explicit(self):
         self.assertEqual(oracle.tempo_relation(124.0, 124.5), "same")
         self.assertEqual(oracle.tempo_relation(62.0, 124.0), "half")

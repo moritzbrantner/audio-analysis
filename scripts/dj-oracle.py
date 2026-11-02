@@ -222,6 +222,12 @@ def rust_view(rust: dict[str, Any]) -> dict[str, Any]:
     return {
         "bpm": rhythm.get("bpm"),
         "beats": [float(value) for value in rhythm.get("beats", [])],
+        "beatStrengths": [float(value) for value in rhythm.get("beatStrengths", [])],
+        "tempoMap": [
+            (float(point["timestampSeconds"]), float(point["bpm"]))
+            for point in rhythm.get("tempoMap", [])
+        ],
+        "durationSeconds": duration,
         "key": normalize_key((rust.get("key") or {}).get("label")),
         "sectionBoundaries": [
             float(section["startSeconds"]) for section in sections
@@ -239,6 +245,49 @@ def score_pair(actual: dict[str, Any], reference: dict[str, Any]) -> dict[str, A
         "keyMatch": actual["key"] is not None and actual["key"] == reference["key"],
         "sectionF": round(boundary_f(actual["sectionBoundaries"], reference["sectionBoundaries"]), 4),
     }
+
+
+def beat_window_diagnostics(actual: dict[str, Any], reference: dict[str, Any], width: float = 20.0) -> list[dict[str, Any]]:
+    """Expose phase/count and trajectory evidence without adding oracle gates.
+
+    Each reference is scored separately. Local F1 and nearest-beat distances
+    describe disagreement, not beat truth or a substitute for authored taps.
+    """
+    duration = actual["durationSeconds"]
+    if duration <= 0.0 or width <= 0.0:
+        return []
+    beats = actual["beats"]
+    strengths = actual["beatStrengths"]
+    if len(strengths) != len(beats):
+        raise ValueError("Rust beat timestamps and strengths must have the same length")
+    windows = []
+    start = 0.0
+    while start < duration:
+        end = min(start + width, duration)
+        indices = [index for index, beat in enumerate(beats) if start <= beat < end]
+        observed = [beats[index] for index in indices]
+        local_bpms = [bpm for time, bpm in actual["tempoMap"] if start <= time < end]
+        oracles = {}
+        for name in ORACLES:
+            expected = [beat for beat in reference[name]["beats"] if start <= beat < end]
+            nearest = [min((abs(beat - value) for value in expected), default=None) for beat in observed]
+            errors = [distance for distance in nearest if distance is not None]
+            f1 = goldens.beat_f1(observed, expected, BEAT_TOLERANCE_SECONDS)
+            oracles[name] = {
+                "beatCount": len(expected),
+                "beatF1": None if f1 is None else round(f1, 4),
+                "medianNearestBeatErrorMs": round(statistics.median(errors) * 1000.0, 1) if errors else None,
+            }
+        windows.append({
+            "startSeconds": round(start, 3),
+            "endSeconds": round(end, 3),
+            "rustBeatCount": len(observed),
+            "medianRustBeatStrength": round(statistics.median(strengths[index] for index in indices), 4) if indices else None,
+            "localBpmRange": [round(min(local_bpms), 2), round(max(local_bpms), 2)] if local_bpms else None,
+            "references": oracles,
+        })
+        start = end
+    return windows
 
 
 def failing_checks(oracle: str, score: dict[str, Any]) -> list[str]:
@@ -402,6 +451,7 @@ def gate(args: argparse.Namespace) -> int:
                 "key": reference["librosa"]["key"] == reference["essentia"]["key"],
                 "sectionF": round(boundary_f(reference["librosa"]["sectionBoundaries"], reference["essentia"]["sectionBoundaries"]), 4),
             },
+            "beatWindows": beat_window_diagnostics(actual, reference),
             "gaps": gaps,
         })
 

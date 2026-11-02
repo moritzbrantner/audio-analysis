@@ -111,3 +111,51 @@ baseline binary. The source graph and input checksums were held constant.
 | sorohanro-trumpet-loop | 0.250000 | 0.250000 | 0.631579 | 0.736842 |
 | drese-wind-ensemble | 0.579710 | 0.716418 | 0.407080 | 0.450450 |
 | drese-expressive-trumpet | 0.575758 | 0.531250 | 0.500000 | 0.371429 |
+
+## November 2, 2026: steady-trajectory phase continuity
+
+Issue [#223](https://github.com/moritzbrantner/audio-analysis/issues/223) remained open after
+merged [#228](https://github.com/moritzbrantner/audio-analysis/pull/228) corrected a late 4:3
+tempo alias on Solarity. The new baseline was 388 beats, with beat F1
+0.3709 against librosa and 0.5290 against Essentia; 65 oracle gaps remained.
+
+An independently authored 64-beat, 124-BPM PCM track reproduces a separate
+phase error. Quiet 70-Hz quarter-note kicks continue through four sections
+with prominent, changing 1,400-Hz offbeat layers. The original tracker picks
+the correct tempo and beat count, but beat 35 is displaced by 117 ms. This
+distinguishes placement from octave selection and absence of kick evidence.
+
+The repair doubles the period-deviation penalty **only when a local tempo path
+exists and at least 95% of its frames remain within 4% of the anchor tempo**.
+Tempo-candidate rescoring and genuinely variable local trajectories keep the
+original penalty. The authored multisection PCM test fails before the change,
+passes afterward, and retains the existing real-tempo-change regressions.
+
+The checksum-pinned 18-track DJ oracle comparison found:
+
+| Measure | Merged #228 | Steady-path correction |
+| --- | ---: | ---: |
+| Solarity beat F1 vs librosa | 0.3709 | 0.4430 |
+| Solarity beat F1 vs Essentia | 0.5290 | 0.6134 |
+| Mean corpus beat F1 vs librosa | 0.7675 | 0.7723 |
+| Mean corpus beat F1 vs Essentia | 0.7870 | 0.7931 |
+| Known oracle gaps | 65 | 63 |
+| New oracle failures | — | 0 |
+
+The two retired gaps are `karissa-hobbs-lets-go-fishin/sections:essentia`
+and `mj-pia-solarity-acid-techno/sections:librosa`. No previously passing
+tempo, beat, key, or section check failed; 14 `beats:*` gaps remain. The
+downbeat unit tests pass, but no independently annotated downbeat corpus is
+available to establish real-song downbeat accuracy.
+
+The existing `dj_analyze` example and `dj-oracle` report now retain beat
+strength and 20-second timing windows alongside each local BPM range. These
+allow a correct-tempo, wrong-phase segment to be distinguished from pulse-count,
+low-onset-strength, or local-trajectory concerns without changing the gating
+oracle. In Solarity's 120–160-second interval, a separate 124-BPM low-frequency
+transient-grid diagnostic agrees with the Rust beats but disagrees with both
+reference lists; this is **not** a human-authored ground truth. Librosa and
+Essentia agree with each other on only about 0.613 beat F1 over the full
+Solarity track. Further phase changes require independent tapped kick/quarter-
+note and bar-phase annotations rather than tuning one oracle's timestamps into
+the Rust analyzer.

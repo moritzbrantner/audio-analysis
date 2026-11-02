@@ -1093,6 +1093,14 @@ fn track_beat_frames_with_tempo_path(
         .max(1.0);
     let widest_period = frame_rate * 60.0 / slowest_bpm;
     let global_max_gap = (widest_period * 1.72).ceil().max(1.0) as usize;
+    // Stronger phase continuity is useful for a supported, steady pulse but
+    // over-constrains expressive beat placement. Tempo-candidate rescoring has
+    // no local path and retains its original transition cost.
+    let phase_tightness = if steady_local_tempo(tempo_path, fallback_bpm) {
+        2.0 * tightness
+    } else {
+        tightness
+    };
     let mut cumulative = vec![0.0_f32; novelty.len()];
     let mut back = vec![None; novelty.len()];
 
@@ -1122,7 +1130,7 @@ fn track_beat_frames_with_tempo_path(
                 .unwrap_or(local_bpm);
             let expected_period = frame_rate * 60.0 / ((local_bpm + previous_bpm) * 0.5);
             let ratio = gap as f32 / expected_period;
-            let transition = -tightness * ratio.ln().powi(2);
+            let transition = -phase_tightness * ratio.ln().powi(2);
             let score = cumulative[previous] + transition;
             if best_previous.is_none() || score > best_score {
                 best_score = score;
@@ -1163,6 +1171,17 @@ fn track_beat_frames_with_tempo_path(
     } else {
         path
     }
+}
+
+fn steady_local_tempo(tempo_path: &[f32], anchor_bpm: f32) -> bool {
+    if tempo_path.is_empty() || !anchor_bpm.is_finite() || anchor_bpm <= 0.0 {
+        return false;
+    }
+    let nearby = tempo_path
+        .iter()
+        .filter(|bpm| bpm.is_finite() && (**bpm - anchor_bpm).abs() / anchor_bpm <= 0.04)
+        .count();
+    nearby as f32 / tempo_path.len() as f32 >= 0.95
 }
 
 // An isolated strong anticipation must not earn the same beat reward as an
@@ -1723,6 +1742,13 @@ mod tests {
     }
 
     #[test]
+    fn tighter_phase_tracking_requires_a_steady_local_tempo_path() {
+        assert!(!steady_local_tempo(&[], 124.0));
+        assert!(steady_local_tempo(&[123.6, 124.0, 125.0, 123.8], 124.0));
+        assert!(!steady_local_tempo(&[100.0, 110.0, 130.0, 150.0], 120.0));
+    }
+
+    #[test]
     fn tempo_map_preserves_acceleration() {
         let mut timestamps = vec![0.0];
         let mut current = 0.0;
@@ -1975,6 +2001,65 @@ mod tests {
             .count();
         assert_eq!(matched, 24, "missing an authored kick beat");
         assert!(analysis.beats.len() <= 25, "offbeats became extra beats");
+    }
+
+    #[test]
+    fn long_four_on_floor_grid_survives_changing_offbeat_layers() {
+        // Authored quarter-note kick positions remain stable as the prominent
+        // upper-band rhythm changes between sections. No oracle timestamps
+        // or real-audio fixture are used to establish the expected grid.
+        let sample_rate = 8_000;
+        let bpm = 124.0_f64;
+        let period = 60.0 / bpm;
+        let beat_count = 64;
+        let duration = 0.5 + beat_count as f64 * period;
+        let mut samples = vec![0.0; (duration * sample_rate as f64).ceil() as usize];
+        let mut pulse = |start_seconds: f64, frequency: f64, amplitude: f64, width: usize| {
+            let start = (start_seconds * sample_rate as f64).round() as usize;
+            for offset in 0..width {
+                if let Some(sample) = samples.get_mut(start + offset) {
+                    let seconds = offset as f64 / sample_rate as f64;
+                    *sample += (amplitude
+                        * (std::f64::consts::TAU * frequency * seconds).sin()
+                        * (-6.0 * offset as f64 / width as f64).exp())
+                        as f32;
+                }
+            }
+        };
+        for beat in 0..beat_count {
+            let time = 0.5 + beat as f64 * period;
+            pulse(time, 70.0, 0.10, 640);
+            match beat / 16 {
+                0 | 3 => pulse(time + 0.5 * period, 1_400.0, 0.95, 80),
+                1 => {
+                    pulse(time, 1_400.0, 0.70, 80);
+                    pulse(time + 0.75 * period, 1_400.0, 0.90, 80);
+                }
+                _ => pulse(time + 0.25 * period, 1_400.0, 0.90, 80),
+            }
+        }
+        let analysis = analyze_rhythm_track(
+            &samples,
+            sample_rate,
+            TrackRhythmConfig {
+                fft_size: 512,
+                hop_size: 128,
+                max_bpm: 200.0,
+                ..TrackRhythmConfig::default()
+            },
+        )
+        .expect("authored multisection beat grid");
+        let actual_bpm = analysis.bpm.expect("quarter-note tempo");
+        assert!((actual_bpm as f64 - bpm).abs() < 4.0, "bpm={actual_bpm}");
+        assert_eq!(analysis.beats.len(), beat_count, "beat count mismatch");
+        for (index, beat) in analysis.beats.iter().enumerate() {
+            let expected = 0.5 + index as f64 * period;
+            assert!(
+                (beat.timestamp_seconds - expected).abs() <= 0.07,
+                "beat {index}: actual={}, expected={expected}",
+                beat.timestamp_seconds
+            );
+        }
     }
 
     #[test]

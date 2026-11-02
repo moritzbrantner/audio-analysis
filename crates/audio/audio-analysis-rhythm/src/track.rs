@@ -79,7 +79,7 @@ impl TrackRhythmConfig {
 pub struct TempoCandidate {
     /// Tempo in beats per minute.
     pub bpm: f32,
-    /// Final score combining mixed/low-band octave-family periodicity and beat-path support.
+    /// Score combining octave-family periodicity, beat-path support, and a mild tactus prior.
     pub score: f32,
     /// Normalized onset-envelope autocorrelation support.
     pub autocorrelation_score: f32,
@@ -236,7 +236,7 @@ pub fn analyze_rhythm_track(
         config.max_bpm,
         raw_count,
     );
-    let candidates = rescore_tempo_candidates(
+    let (candidates, candidate_margin) = rescore_tempo_candidates(
         candidates,
         &features.novelty,
         &low_candidates,
@@ -306,12 +306,6 @@ pub fn analyze_rhythm_track(
         .map(|beat| beat.timestamp_seconds)
         .collect::<Vec<_>>();
 
-    let runner_up = candidates.get(1).map_or(0.0, |candidate| candidate.score);
-    let candidate_margin = if selected.score > f32::EPSILON {
-        ((selected.score - runner_up).max(0.0) / selected.score).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
     let path_confidence = mean_at_frames(
         &trajectory.tempo_path.confidence_by_frame,
         &trajectory.beat_frames,
@@ -670,16 +664,36 @@ fn rescore_tempo_candidates(
     frame_rate: f32,
     tightness: f32,
     candidate_count: usize,
-) -> Vec<TempoCandidate> {
+) -> (Vec<TempoCandidate>, f32) {
     for candidate in &mut candidates {
         let path = track_beat_frames(novelty, frame_rate, candidate.bpm, tightness);
         candidate.beat_support = beat_path_support(&path, novelty, frame_rate, candidate.bpm);
     }
     combine_tempo_candidate_scores(&mut candidates);
     apply_low_band_periodicity(&mut candidates, low_candidates);
+    // The tactus preference is a ranking prior, not new evidence. Keep the
+    // pre-prior scores for confidence and the short-excerpt abstention rule.
+    let evidence = candidates.clone();
+    apply_tactus_octave_prior(&mut candidates);
     candidates.sort_by(|left, right| right.score.total_cmp(&left.score));
+    let evidence_margin = candidates.first().map_or(0.0, |chosen| {
+        let chosen_score = evidence
+            .iter()
+            .find(|candidate| candidate.bpm == chosen.bpm)
+            .map_or(0.0, |candidate| candidate.score);
+        let runner_up = evidence
+            .iter()
+            .filter(|candidate| candidate.bpm != chosen.bpm)
+            .map(|candidate| candidate.score)
+            .fold(0.0_f32, f32::max);
+        if chosen_score > f32::EPSILON {
+            ((chosen_score - runner_up).max(0.0) / chosen_score).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    });
     candidates.truncate(candidate_count);
-    candidates
+    (candidates, evidence_margin)
 }
 
 fn low_band_weight(candidates: &[TempoCandidate]) -> f32 {
@@ -704,6 +718,26 @@ fn apply_low_band_periodicity(
             .map(|other| other.autocorrelation_score)
             .fold(0.0_f32, f32::max);
         candidate.score = (1.0 - low_weight) * candidate.score + low_weight * low_support;
+    }
+}
+
+fn apply_tactus_octave_prior(candidates: &mut [TempoCandidate]) {
+    // A perceived beat near 120 BPM is a weak tie-breaker, not a hard tempo
+    // range. Only competing half/double-time hypotheses receive the prior;
+    // strong direct evidence can still select a slower or faster pulse.
+    const TACTUS_BPM: f32 = 120.0;
+    const OCTAVE_PRIOR_WEIGHT: f32 = 0.04;
+    let hypotheses = candidates.to_vec();
+    for candidate in candidates {
+        let has_octave_alternative = hypotheses.iter().any(|other| {
+            let ratio = candidate.bpm / other.bpm;
+            ratio.is_finite() && ratio > 0.0 && (ratio.log2().abs() - 1.0).abs() <= 0.06
+        });
+        if has_octave_alternative {
+            let distance = (candidate.bpm / TACTUS_BPM).log2();
+            candidate.score =
+                (candidate.score - OCTAVE_PRIOR_WEIGHT * distance * distance).max(0.0);
+        }
     }
 }
 
@@ -1362,7 +1396,7 @@ mod tests {
     fn beat_path_rescoring_keeps_real_path_support_visible() {
         let novelty = pulse_envelope(50, 24);
         let raw = estimate_tempo_candidates(&novelty, 100.0, 55.0, 220.0, 12);
-        let candidates = rescore_tempo_candidates(raw, &novelty, &[], 100.0, 1.25, 5);
+        let (candidates, _) = rescore_tempo_candidates(raw, &novelty, &[], 100.0, 1.25, 5);
         assert!(!candidates.is_empty());
         assert!(candidates
             .iter()
@@ -1427,6 +1461,35 @@ mod tests {
             authored_support > double_support,
             "authored={authored_support}, double={double_support}"
         );
+    }
+
+    #[test]
+    fn a_small_tactus_prior_breaks_octave_ties_but_preserves_clear_evidence() {
+        fn candidate(bpm: f32, score: f32) -> TempoCandidate {
+            TempoCandidate {
+                bpm,
+                score,
+                autocorrelation_score: score,
+                beat_support: score,
+            }
+        }
+
+        let mut half_time_tie = [candidate(64.0, 0.54), candidate(128.0, 0.528)];
+        apply_tactus_octave_prior(&mut half_time_tie);
+        assert!(half_time_tie[1].score > half_time_tie[0].score);
+
+        let mut clear_half_time = [candidate(68.0, 0.65), candidate(136.0, 0.615)];
+        apply_tactus_octave_prior(&mut clear_half_time);
+        assert!(clear_half_time[0].score > clear_half_time[1].score);
+
+        let mut higher_is_not_always_better = [candidate(90.0, 0.64), candidate(180.0, 0.638)];
+        apply_tactus_octave_prior(&mut higher_is_not_always_better);
+        assert!(higher_is_not_always_better[0].score > higher_is_not_always_better[1].score);
+
+        let mut unrelated = [candidate(95.0, 0.55), candidate(125.0, 0.54)];
+        let original = unrelated;
+        apply_tactus_octave_prior(&mut unrelated);
+        assert_eq!(unrelated, original);
     }
 
     #[test]

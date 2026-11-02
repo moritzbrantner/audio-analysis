@@ -941,8 +941,8 @@ fn estimate_local_tempo_path(
         let mut block_back = vec![0_usize; candidates.len()];
         if block_index == 0 {
             for (index, candidate) in candidates.iter().enumerate() {
-                let anchor_distance = (candidate.bpm / anchor_bpm).log2().abs();
-                block_scores[index] = candidate.score - 0.40 * anchor_distance;
+                block_scores[index] =
+                    candidate.score - local_anchor_penalty(candidate.bpm, anchor_bpm);
             }
         } else {
             for (current_index, current) in candidates.iter().enumerate() {
@@ -958,8 +958,8 @@ fn estimate_local_tempo_path(
                         best_previous = previous_index;
                     }
                 }
-                let anchor_distance = (current.bpm / anchor_bpm).log2().abs();
-                block_scores[current_index] = best_score - 0.40 * anchor_distance;
+                block_scores[current_index] =
+                    best_score - local_anchor_penalty(current.bpm, anchor_bpm);
                 block_back[current_index] = best_previous;
             }
         }
@@ -1011,6 +1011,21 @@ fn estimate_local_tempo_path(
         bpm_by_frame: interpolate_blocks(novelty.len(), &centers, &block_bpms, anchor_bpm),
         confidence_by_frame: interpolate_blocks(novelty.len(), &centers, &block_confidence, 0.0),
     }
+}
+
+fn local_anchor_penalty(bpm: f32, anchor_bpm: f32) -> f32 {
+    let distance = (bpm / anchor_bpm).log2().abs();
+    // Three-against-four rhythms create a persistent 4:3 tempo competitor,
+    // even if the quarter-note kick continues. Require slightly stronger
+    // local evidence to leave the established beat for that subdivision;
+    // unrelated changes keep their preexisting continuity penalty.
+    let ratio = bpm.max(anchor_bpm) / bpm.min(anchor_bpm);
+    let weight = if (ratio - 4.0 / 3.0).abs() < 0.025 {
+        0.60
+    } else {
+        0.40
+    };
+    weight * distance
 }
 
 fn interpolate_blocks(
@@ -1577,6 +1592,35 @@ mod tests {
         let early = path.bpm_by_frame[600];
         let late = path.bpm_by_frame[1_800];
         assert!(late > early + 20.0, "early={early}, late={late}");
+    }
+
+    #[test]
+    fn three_against_four_subdivision_needs_more_support_than_an_unrelated_tempo() {
+        let cross_rhythm = local_anchor_penalty(160.0, 120.0);
+        let unrelated = local_anchor_penalty(150.0, 120.0);
+        assert!(cross_rhythm > 0.2, "cross-rhythm penalty={cross_rhythm}");
+        assert!(unrelated < 0.15, "unrelated penalty={unrelated}");
+    }
+
+    #[test]
+    fn local_tempo_path_still_follows_a_real_four_to_three_ratio_change() {
+        let mut novelty = vec![0.0_f32; 2_400];
+        for frame in (0..1_200).step_by(50) {
+            novelty[frame] = 1.0;
+        }
+        for beat in 0..32 {
+            let frame = 1_200 + (beat as f32 * 37.5).round() as usize;
+            if let Some(strength) = novelty.get_mut(frame) {
+                *strength = 1.0;
+            }
+        }
+        let path = estimate_local_tempo_path(&novelty, &[], 100.0, 60.0, 200.0, 120.0, 1.25);
+        assert!(
+            path.bpm_by_frame[1_900] > path.bpm_by_frame[500] + 20.0,
+            "early={}, late={}",
+            path.bpm_by_frame[500],
+            path.bpm_by_frame[1_900]
+        );
     }
 
     #[test]

@@ -1922,6 +1922,62 @@ mod tests {
     }
 
     #[test]
+    fn repeated_offbeat_cymbals_do_not_move_an_authored_kick_grid() {
+        // Authored quarter-note kicks continue while a brighter high-frequency
+        // offbeat layer enters for sixteen beats and then disappears.
+        let sample_rate = 8_000;
+        let period = 60.0 / 124.0;
+        let duration = 0.5 + 25.0 * period;
+        let mut samples = vec![0.0; (duration * sample_rate as f64).ceil() as usize];
+        for beat in 0..24 {
+            let onset = 0.5 + beat as f64 * period;
+            let start = (onset * sample_rate as f64).round() as usize;
+            for offset in 0..640 {
+                let time = offset as f64 / sample_rate as f64;
+                samples[start + offset] += (0.20
+                    * (std::f64::consts::TAU * 70.0 * time).sin()
+                    * (-6.0 * offset as f64 / 640.0).exp())
+                    as f32;
+            }
+            if (4..20).contains(&beat) {
+                let offbeat = onset + period * 0.5;
+                let start = (offbeat * sample_rate as f64).round() as usize;
+                for offset in 0..120 {
+                    let time = offset as f64 / sample_rate as f64;
+                    samples[start + offset] += (0.85
+                        * (std::f64::consts::TAU * 1_400.0 * time).sin()
+                        * (-6.0 * offset as f64 / 120.0).exp())
+                        as f32;
+                }
+            }
+        }
+        let analysis = analyze_rhythm_track(
+            &samples,
+            sample_rate,
+            TrackRhythmConfig {
+                fft_size: 512,
+                hop_size: 128,
+                max_bpm: 200.0,
+                ..TrackRhythmConfig::default()
+            },
+        )
+        .expect("authored kick and offbeat analysis");
+        let bpm = analysis.bpm.expect("stable quarter-note tempo");
+        assert!((bpm - 124.0).abs() < 4.0, "reported BPM={bpm}");
+        let matched = (0..24)
+            .filter(|beat| {
+                let expected = 0.5 + *beat as f64 * period;
+                analysis
+                    .beats
+                    .iter()
+                    .any(|tracked| (tracked.timestamp_seconds - expected).abs() <= 0.07)
+            })
+            .count();
+        assert_eq!(matched, 24, "missing an authored kick beat");
+        assert!(analysis.beats.len() <= 25, "offbeats became extra beats");
+    }
+
+    #[test]
     fn public_tempo_candidates_stay_inside_configured_bounds() {
         let config = TrackRhythmConfig {
             fft_size: 512,

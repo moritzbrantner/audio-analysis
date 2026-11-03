@@ -437,8 +437,10 @@ impl CandleWhisperSession {
                 token_ids,
                 stats: active.stats,
                 no_speech_probability: active.no_speech_probability,
+                compression_ratio: 0.0,
                 attempted_temperatures: vec![0.0],
                 no_speech_rejected: false,
+                compression_rejected: false,
             });
         }
         completed
@@ -727,8 +729,10 @@ pub(super) fn apply_active_row_decisions(
                 token_ids,
                 stats: active.stats,
                 no_speech_probability: active.no_speech_probability,
+                compression_ratio: 0.0,
                 attempted_temperatures: vec![0.0],
                 no_speech_rejected: false,
+                compression_rejected: false,
             });
         } else {
             active.row.accept(next);

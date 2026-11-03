@@ -116,6 +116,7 @@ pub(super) struct WhisperDecodeDiagnostics {
     pub(super) compression_ratio: f64,
     pub(super) attempted_temperatures: Vec<f64>,
     pub(super) no_speech_rejected: bool,
+    pub(super) compression_rejected: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -175,8 +176,10 @@ pub(super) struct WhisperTokenDecodeResult {
     pub(super) stats: WhisperGenerationStats,
     pub(super) average_log_probability: f64,
     pub(super) no_speech_probability: Option<f64>,
+    pub(super) compression_ratio: f64,
     pub(super) attempted_temperatures: Vec<f64>,
     pub(super) no_speech_rejected: bool,
+    pub(super) compression_rejected: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -272,7 +275,15 @@ pub(super) fn finish_temperature_fallback(
     let attempted_temperatures = attempts.iter().map(|attempt| attempt.temperature).collect();
     let mut selected = select_fallback_attempt(config, attempts);
     let no_speech_rejected = selected.decision == WhisperFallbackAttemptDecision::RejectNoSpeech;
-    if no_speech_rejected {
+    // Exhausted temperature fallback otherwise returns the best *failed* attempt.
+    // That preserves fabricated repetition loops, even though every candidate
+    // failed the caller's explicit compression limit. This is a rejection of
+    // untrustworthy decoded text, not a claim that the audio was silent.
+    let compression_rejected = selected.decision == WhisperFallbackAttemptDecision::Retry
+        && config
+            .max_compression_ratio
+            .is_some_and(|limit| selected.compression_ratio > limit);
+    if no_speech_rejected || compression_rejected {
         selected.token_ids.clear();
     }
     stats.record_completed_row();
@@ -281,8 +292,10 @@ pub(super) fn finish_temperature_fallback(
         stats,
         average_log_probability: selected.average_log_probability,
         no_speech_probability: selected.no_speech_probability,
+        compression_ratio: selected.compression_ratio,
         attempted_temperatures,
         no_speech_rejected,
+        compression_rejected,
     }
 }
 

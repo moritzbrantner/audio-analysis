@@ -1106,6 +1106,66 @@ fn exhausted_fallback_keeps_the_most_likely_attempt_under_the_compression_thresh
 }
 
 #[test]
+fn all_compression_failures_withhold_fabricated_loop_but_preserve_uncertainty() {
+    let config = CandleWhisperDecodeRequestConfig::default();
+    let retry = WhisperFallbackAttemptDecision::Retry;
+    let result = finish_temperature_fallback(
+        &config,
+        vec![
+            fallback_attempt(0.0, vec![1], -0.4, 22.0, retry),
+            fallback_attempt(0.2, vec![2], -0.2, 8.0, retry),
+        ],
+        WhisperGenerationStats::default(),
+    );
+    assert!(result.token_ids.is_empty());
+    assert!(result.compression_rejected);
+    assert!(!result.no_speech_rejected);
+    assert_eq!(result.compression_ratio, 8.0);
+    assert_eq!(result.attempted_temperatures, vec![0.0, 0.2]);
+}
+
+#[test]
+fn single_temperature_compression_failure_is_not_an_unchecked_transcript() {
+    let config = CandleWhisperDecodeRequestConfig {
+        search: CandleWhisperDecodeConfig {
+            temperature_schedule: vec![0.0],
+            ..CandleWhisperDecodeConfig::default()
+        },
+        ..CandleWhisperDecodeRequestConfig::default()
+    };
+    let result = finish_temperature_fallback(
+        &config,
+        vec![fallback_attempt(
+            0.0,
+            vec![42],
+            -0.1,
+            10.0,
+            WhisperFallbackAttemptDecision::Retry,
+        )],
+        WhisperGenerationStats::default(),
+    );
+    assert!(result.token_ids.is_empty());
+    assert!(result.compression_rejected);
+}
+
+#[test]
+fn low_confidence_or_repetitive_speech_survives_when_a_candidate_passes_compression() {
+    let config = CandleWhisperDecodeRequestConfig::default();
+    let retry = WhisperFallbackAttemptDecision::Retry;
+    let result = finish_temperature_fallback(
+        &config,
+        vec![
+            fallback_attempt(0.0, vec![1], -0.1, 9.0, retry),
+            fallback_attempt(0.2, vec![2], -1.5, 1.2, retry),
+        ],
+        WhisperGenerationStats::default(),
+    );
+    assert_eq!(result.token_ids, vec![2]);
+    assert!(!result.compression_rejected);
+    assert!(!result.no_speech_rejected);
+}
+
+#[test]
 fn high_no_speech_probability_accepts_high_confidence_text() {
     let config = CandleWhisperDecodeRequestConfig {
         max_no_speech_probability: Some(0.6),

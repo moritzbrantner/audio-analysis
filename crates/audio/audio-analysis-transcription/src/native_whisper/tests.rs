@@ -1126,13 +1126,8 @@ fn all_compression_failures_withhold_fabricated_loop_but_preserve_uncertainty() 
 
 #[test]
 fn single_temperature_compression_failure_is_not_an_unchecked_transcript() {
-    let config = CandleWhisperDecodeRequestConfig {
-        search: CandleWhisperDecodeConfig {
-            temperature_schedule: vec![0.0],
-            ..CandleWhisperDecodeConfig::default()
-        },
-        ..CandleWhisperDecodeRequestConfig::default()
-    };
+    let mut config = CandleWhisperDecodeRequestConfig::default();
+    config.search.temperature_schedule = vec![0.0];
     let result = finish_temperature_fallback(
         &config,
         vec![fallback_attempt(

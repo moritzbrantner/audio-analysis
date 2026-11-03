@@ -1120,7 +1120,7 @@ fn all_compression_failures_withhold_fabricated_loop_but_preserve_uncertainty() 
     assert!(result.token_ids.is_empty());
     assert!(result.compression_rejected);
     assert!(!result.no_speech_rejected);
-    assert_eq!(result.compression_ratio, 8.0);
+    assert_eq!(result.compression_ratio, Some(8.0));
     assert_eq!(result.attempted_temperatures, vec![0.0, 0.2]);
 }
 

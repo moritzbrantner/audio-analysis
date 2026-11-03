@@ -954,9 +954,12 @@ impl CandleWhisperSession {
             decoded_token_ids: token_ids.clone(),
             average_log_probability,
             no_speech_probability,
-            // Keep the measured ratio even when a rejected attempt has had
-            // its tokens cleared. Empty output must not erase its evidence.
-            compression_ratio,
+            // Keep the pre-rejection ratio for fallback attempts, but still
+            // measure ordinary batched decoding directly from its text.
+            compression_ratio: match compression_ratio {
+                Some(measured) => measured,
+                None => text_compression_ratio(&decoded_text)?,
+            },
             attempted_temperatures,
             no_speech_rejected,
             compression_rejected,

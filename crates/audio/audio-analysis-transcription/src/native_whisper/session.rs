@@ -161,6 +161,7 @@ impl CandleWhisperSession {
         let mut compression_ratios = Vec::new();
         let mut attempted_temperatures = Vec::new();
         let mut no_speech_rejected = false;
+        let mut compression_rejected_windows = 0_usize;
         let mut prompt_state = WhisperRequestPromptState::new(decode);
         self.encoder_duration_seconds = 0.0;
         self.decoder_duration_seconds = 0.0;
@@ -254,6 +255,7 @@ impl CandleWhisperSession {
                 attempted_temperatures
                     .extend(timed.diagnostics.attempted_temperatures.iter().copied());
                 no_speech_rejected |= timed.diagnostics.no_speech_rejected;
+                compression_rejected_windows += usize::from(timed.diagnostics.compression_rejected);
                 if let Some(reason) = timed.fallback_reason {
                     if !timing_fallbacks.contains(&reason) {
                         timing_fallbacks.push(reason);
@@ -395,6 +397,7 @@ impl CandleWhisperSession {
                     .join(",")
             ),
             format!("noSpeechRejected={no_speech_rejected}"),
+            format!("compressionRejectedWindows={compression_rejected_windows}"),
         ]);
         if let Some(language) = &self.language {
             diagnostics.push(format!("language={language}"));
@@ -931,8 +934,10 @@ impl CandleWhisperSession {
             stats: generation_stats,
             average_log_probability,
             no_speech_probability,
+            compression_ratio,
             attempted_temperatures,
             no_speech_rejected,
+            compression_rejected,
         } = decoded;
         let decoded_text = decode_text_tokens(&self.tokenizer, &token_ids)?;
         let mut diagnostics = WhisperDecodeDiagnostics {
@@ -949,9 +954,15 @@ impl CandleWhisperSession {
             decoded_token_ids: token_ids.clone(),
             average_log_probability,
             no_speech_probability,
-            compression_ratio: text_compression_ratio(&decoded_text)?,
+            // Keep the pre-rejection ratio for fallback attempts, but still
+            // measure ordinary batched decoding directly from its text.
+            compression_ratio: match compression_ratio {
+                Some(measured) => measured,
+                None => text_compression_ratio(&decoded_text)?,
+            },
             attempted_temperatures,
             no_speech_rejected,
+            compression_rejected,
             ..WhisperDecodeDiagnostics::default()
         };
         generation_stats.extend(&mut diagnostics);

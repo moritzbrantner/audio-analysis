@@ -438,6 +438,23 @@ pub fn run_transcription_pipeline_with_observer(
     let vad_response = if request.vad.enabled {
         let mut response =
             vad_provider.detect_speech(&audio.speaker_audio()?, &request.vad.detection)?;
+        // Evidence is about what the selected provider observed, not a
+        // speech/music classifier. Energy peaks are not evidence of speech.
+        let activity_evidence = if response.segments.is_empty() {
+            "notDetected"
+        } else {
+            match vad_provider.provider_id() {
+                "silero-vad" | "pyannote-vad" => "modelSpeechCandidate",
+                "energy-vad" => "energyActivityOnly",
+                _ => "unclassifiedProvider",
+            }
+        };
+        response
+            .diagnostics
+            .push(format!("vadActivityEvidence={activity_evidence}"));
+        response
+            .diagnostics
+            .push(format!("vadProvider={}", vad_provider.provider_id()));
         response.segments = asr_chunks_from_speech(
             response.segments,
             &audio,
@@ -457,7 +474,10 @@ pub fn run_transcription_pipeline_with_observer(
     } else {
         VadResponse {
             segments: vec![SpeechSpan::new(0.0, full_source_seconds, 1.0)?],
-            diagnostics: vec!["VAD disabled; using full source as one ASR chunk".to_string()],
+            diagnostics: vec![
+                "VAD disabled; using full source as one ASR chunk".to_string(),
+                "vadActivityEvidence=unmeasured".to_string(),
+            ],
         }
     };
     observer.observe(TranscriptionPipelineEvent::VadEnd {

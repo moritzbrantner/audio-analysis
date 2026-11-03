@@ -427,6 +427,40 @@ fn pipeline_merges_vad_speech_up_to_chunk_size_like_whisperx() {
 }
 
 #[test]
+fn no_vad_spans_are_recorded_as_unobserved_speech_not_proven_silence() {
+    let mut vad = FixedVadProvider { segments: vec![] };
+    let response =
+        run_transcription_pipeline(sample_request(), &mut vad, &mut MockAsrProvider, None, None)
+            .unwrap();
+    assert!(response
+        .diagnostics
+        .iter()
+        .any(|item| item == "vadActivityEvidence=notDetected"));
+    assert_eq!(
+        response.vad_segments.len(),
+        1,
+        "ASR fallback remains explicit"
+    );
+    assert_eq!(response.vad_segments[0].score, 0.0);
+    assert!(
+        !response.transcript.segments.is_empty(),
+        "lack of VAD evidence alone must not silently delete quiet speech"
+    );
+}
+
+#[test]
+fn energy_activity_is_not_labeled_as_speech() {
+    let mut vad = EnergyVoiceActivityDetector;
+    let response =
+        run_transcription_pipeline(sample_request(), &mut vad, &mut MockAsrProvider, None, None)
+            .unwrap();
+    assert!(response
+        .diagnostics
+        .iter()
+        .any(|item| item == "vadActivityEvidence=energyActivityOnly"));
+}
+
+#[test]
 fn asr_chunks_are_clamped_to_the_audio_duration() {
     let chunks = asr_chunks_from_speech(
         vec![

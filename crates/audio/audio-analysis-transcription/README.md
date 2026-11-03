@@ -229,10 +229,15 @@ or high zlib compression ratio (for example a repetition loop) advances to the
 next temperature, and the first passing attempt is returned. When every
 temperature fails, the attempt with the highest average log probability among
 those under the compression-ratio threshold is kept (or among all attempts
-when none is), as faster-whisper does. Only windows that fail the
-temperature-0 attempt are re-decoded. Response diagnostics expose
+when none is). A selected attempt that still violates the compression limit
+after all available temperatures is **withheld**, with
+`compressionRejectedWindows` recording the rejection separately from
+`noSpeechRejected`. This is an intentional reliability extension beyond
+faster-whisper: rejected words are uncertain evidence, **not** proof of
+silence or music. Only windows that fail the temperature-0 attempt are
+re-decoded. Response diagnostics expose
 `averageLogProbability`, `noSpeechProbability`, `compressionRatio`, the ordered
-`temperatureFallbackAttempts`, and whether no-speech rejection occurred.
+`temperatureFallbackAttempts`, and both rejection observations.
 
 The external WhisperX command provider remains compatibility and parity tooling.
 It keeps Python-based execution explicit for callers that still need WhisperX

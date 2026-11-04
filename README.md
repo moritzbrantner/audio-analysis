@@ -12,6 +12,14 @@ The public Pages deployment is browser-local: the browser decodes the selected f
 
 Local deployments retain a separate backend seam for heavier model-backed capabilities. Browser-local analysis remains the default; a backend is discovered on localhost at `http://127.0.0.1:3000` or can be selected with `?backend=<base-url>`. The public Pages deployment never enables backend upload automatically.
 
+Build the exact Pages artifact locally with:
+
+```text
+bash scripts/build-pages.sh
+```
+
+The script builds the core, Fourier, pitch, and rhythm WASM adapters and assembles the static artifact under `_site/`.
+
 ## Approved pyannote community-1 bundle for local tools
 
 The speaker-diarization model is gated by Hugging Face, so a fresh checkout
@@ -23,9 +31,10 @@ With Bun installed, run from the `audio-analysis` repository root:
 ```bash
 read -rsp 'Hugging Face token: ' HF_TOKEN; echo
 export HF_TOKEN
-bundle_dir="$(bun scripts/prepare-pyannote-community-bundle.ts)" || exit 1
-export GOLDEN_PYANNOTE_BUNDLE="$bundle_dir"
-export PYANNOTE_COMMUNITY_BUNDLE="$bundle_dir"
+if bundle_dir="$(bun scripts/prepare-pyannote-community-bundle.ts)"; then
+  export GOLDEN_PYANNOTE_BUNDLE="$bundle_dir"
+  export PYANNOTE_COMMUNITY_BUNDLE="$bundle_dir"
+fi
 unset HF_TOKEN
 ```
 
@@ -43,6 +52,12 @@ changing timestamps. A corrupted or incomplete destination causes a clear
 error and is never silently overwritten. For a different location, pass
 `--output /absolute/path/to/bundle` on both runs.
 
+For later shell sessions, the token-free cache-hit command is:
+
+```bash
+bundle_dir="$(bun scripts/prepare-pyannote-community-bundle.ts)" && export GOLDEN_PYANNOTE_BUNDLE="$bundle_dir"
+```
+
 `GOLDEN_PYANNOTE_BUNDLE` is consumed by the Belief Lab Stage 4 local pipeline;
 `PYANNOTE_COMMUNITY_BUNDLE` is the audio-analysis native consumer setting.
 These exports apply to the current shell session. To rerun Stage 4 after
@@ -53,14 +68,6 @@ The entirely offline idempotence/regression gate is:
 ```bash
 bun test scripts/prepare-pyannote-community-bundle.test.ts
 ```
-
-Build the exact Pages artifact locally with:
-
-```text
-bash scripts/build-pages.sh
-```
-
-The script builds the core, Fourier, pitch, and rhythm WASM adapters and assembles the static artifact under `_site/`.
 
 ## DJ acceptance evidence
 

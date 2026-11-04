@@ -12,6 +12,48 @@ The public Pages deployment is browser-local: the browser decodes the selected f
 
 Local deployments retain a separate backend seam for heavier model-backed capabilities. Browser-local analysis remains the default; a backend is discovered on localhost at `http://127.0.0.1:3000` or can be selected with `?backend=<base-url>`. The public Pages deployment never enables backend upload automatically.
 
+## Approved pyannote community-1 bundle for local tools
+
+The speaker-diarization model is gated by Hugging Face, so a fresh checkout
+cannot download it without your consent. First, sign in and accept the model
+terms at [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1),
+then create a [Hugging Face read token](https://huggingface.co/settings/tokens).
+With Bun installed, run from the `audio-analysis` repository root:
+
+```bash
+read -rsp 'Hugging Face token: ' HF_TOKEN; echo
+export HF_TOKEN
+bundle_dir="$(bun scripts/prepare-pyannote-community-bundle.ts)" || exit 1
+export GOLDEN_PYANNOTE_BUNDLE="$bundle_dir"
+export PYANNOTE_COMMUNITY_BUNDLE="$bundle_dir"
+unset HF_TOKEN
+```
+
+The command installs dependencies from `bun.lock` on first-time provisioning,
+downloads and reconstructs the approved ONNX snapshot with the existing
+`audio-analysis-speakers-wasm` loader, verifies all eight files against their
+pinned SHA-256 checksums, and saves them under
+`$XDG_CACHE_HOME/audio-analysis/pyannote-community-1/` (or `~/.cache` if unset).
+It prints only the absolute bundle path on stdout for scripting. The token is
+never stored by this command, and model weights stay outside Git.
+
+**Repeat the same command any time.** A valid bundle is verified and reused
+without requiring `HF_TOKEN`, downloading anything, running `bun install`, or
+changing timestamps. A corrupted or incomplete destination causes a clear
+error and is never silently overwritten. For a different location, pass
+`--output /absolute/path/to/bundle` on both runs.
+
+`GOLDEN_PYANNOTE_BUNDLE` is consumed by the Belief Lab Stage 4 local pipeline;
+`PYANNOTE_COMMUNITY_BUNDLE` is the audio-analysis native consumer setting.
+These exports apply to the current shell session. To rerun Stage 4 after
+provisioning, return to Belief Lab and use its existing Stage 4 command.
+
+The entirely offline idempotence/regression gate is:
+
+```bash
+bun test scripts/prepare-pyannote-community-bundle.test.ts
+```
+
 Build the exact Pages artifact locally with:
 
 ```text

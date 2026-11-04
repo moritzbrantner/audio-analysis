@@ -118,6 +118,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "arrayvec"
+version = "0.7.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2285,9 +2291,9 @@ dependencies = [
 
 [[package]]
 name = "moenarch-audio-contracts"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "578562b77a0815b1653a3413d52aea623707b640d27aad38019667028056f65e"
+checksum = "c3c686476f42bb9a19810b69bff92ceb8b0d1e54fca67ec3f38359e45e01c813"
 dependencies = [
  "moenarch-media-core",
 ]
@@ -2416,9 +2422,9 @@ dependencies = [
 
 [[package]]
 name = "moenarch-data-inversion-core"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "443cb81d0821e403e2be5aabb920e6d82acaf3aa5787c8ca1c51e113c7bb85d7"
+checksum = "e229866800a9efb92e965d2493e27514bc1b02dfa1ea83776245bb924d4fa1f6"
 dependencies = [
  "moenarch-media-core",
  "moenarch-runtime-core",
@@ -2441,9 +2447,9 @@ dependencies = [
 
 [[package]]
 name = "moenarch-math-signal-core"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28dcff2db05cedb51dc2e9a7467776fc21dc7e800aa0370358a06ab27713f671"
+checksum = "3f9b714d2d56bbabe90257677401de40ad1af546885a207dcb11a973162fd052"
 dependencies = [
  "moenarch-media-core",
  "moenarch-numbers-core",
@@ -2454,9 +2460,13 @@ dependencies = [
 
 [[package]]
 name = "moenarch-media-core"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f350ffff17cc08783d9fef753e1533c35c2372f9acce357870d58ed794c0585"
+checksum = "671d82131dd4a342353fdecf82056c883e1e4db2a5960584698eca12f0d3ecb1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "moenarch-model-runtime"
@@ -2474,14 +2484,16 @@ dependencies = [
 
 [[package]]
 name = "moenarch-numbers-core"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c633ffed2e3a7f3d5bf77c0abc55c32685135c882eb431adca3076448da198a3"
+checksum = "946ba7f1839bf01bbdb148bd8d9d0625b0913f731e22b7797fbaf5a97e21d02d"
 dependencies = [
  "moenarch-media-core",
  "moenarch-runtime-core",
+ "rust_decimal",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2507,9 +2519,9 @@ dependencies = [
 
 [[package]]
 name = "moenarch-tensor-data"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e427dc74aa15980c5de41730256b2a2a4d48c012ea00353fed70294a4bd8cf3e"
+checksum = "5451b1075701eb3772d1ea3c12aec6c8637a7b232cfab97ef02a0befd6f850c2"
 dependencies = [
  "moenarch-media-core",
  "moenarch-runtime-core",
@@ -2951,11 +2963,22 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rand"
+version = "0.8.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e058c7de0b26af77780c769414d6257830bb240f3c38477dbc2c16e5f54d6d4c"
+dependencies = [
+ "libc",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.4",
+]
+
+[[package]]
+name = "rand"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41"
 dependencies = [
- "rand_chacha",
+ "rand_chacha 0.9.0",
  "rand_core 0.9.5",
 ]
 
@@ -2971,12 +2994,31 @@ dependencies = [
 
 [[package]]
 name = "rand_chacha"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
+dependencies = [
+ "ppv-lite86",
+ "rand_core 0.6.4",
+]
+
+[[package]]
+name = "rand_chacha"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
 dependencies = [
  "ppv-lite86",
  "rand_core 0.9.5",
+]
+
+[[package]]
+name = "rand_core"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
+dependencies = [
+ "getrandom 0.2.17",
 ]
 
 [[package]]
@@ -3116,6 +3158,23 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rust_decimal"
+version = "1.43.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7653272e75dcac41dc199fbea6f5797633994fafd339943c06c9af16bf29cd3a"
+dependencies = [
+ "arrayvec",
+ "borsh",
+ "bytes",
+ "num-traits",
+ "rand 0.8.8",
+ "rand 0.9.5",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -3922,6 +3981,7 @@ dependencies = [
  "cfg-if",
  "once_cell",
  "rustversion",
+ "serde",
  "wasm-bindgen-macro",
  "wasm-bindgen-shared",
 ]

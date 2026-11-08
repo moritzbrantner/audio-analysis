@@ -61,20 +61,16 @@ impl ResolvedNativeDevice {
                 }
             }
             Self::Metal(index) => {
-                #[cfg(feature = "metal")]
-                {
-                    candle_core::Device::new_metal(*index).map_err(|error| {
-                        setup_error(format!(
-                            "resolved Metal device metal:{index} became unavailable: {error}"
-                        ))
-                    })
-                }
-                #[cfg(not(feature = "metal"))]
-                {
-                    Err(setup_error(format!(
+                if !metal_compiled() {
+                    return Err(setup_error(format!(
                         "resolved Metal device metal:{index} cannot be created because the binary lacks the `metal` feature"
-                    )))
+                    )));
                 }
+                candle_core::Device::new_metal(*index).map_err(|error| {
+                    setup_error(format!(
+                        "resolved Metal device metal:{index} became unavailable: {error}"
+                    ))
+                })
             }
         }
     }
@@ -141,7 +137,7 @@ pub(crate) fn select_native_device(
     select_native_device_with(
         preference,
         cuda_device_index,
-        cfg!(feature = "metal"),
+        metal_compiled(),
         cuda_device_name,
         metal_device_name,
     )
@@ -244,16 +240,28 @@ fn cuda_device_name(index: usize) -> Result<Option<String>> {
         .and_then(|cuda| cuda.cuda_stream().context().name().ok()))
 }
 
-#[cfg(not(feature = "metal"))]
-fn metal_device_name(index: usize) -> Result<Option<String>> {
-    Err(setup_error(format!(
-        "Metal device metal:{index} cannot be used because the binary lacks the `metal` feature"
-    )))
+/// Whether Candle was built with Metal. This follows Candle's own `metal`
+/// feature rather than this crate's, so a consumer that enables
+/// `candle-core/metal` directly in the same build also gets Metal here; this
+/// crate's `metal` feature only forwards to the Candle features.
+#[cfg(feature = "candle")]
+fn metal_compiled() -> bool {
+    candle_core::utils::metal_is_available()
+}
+
+#[cfg(not(feature = "candle"))]
+fn metal_compiled() -> bool {
+    false
 }
 
 /// Probes the Metal device. A successful probe reports no device name.
-#[cfg(feature = "metal")]
 fn metal_device_name(index: usize) -> Result<Option<String>> {
+    if !metal_compiled() {
+        return Err(setup_error(format!(
+            "Metal device metal:{index} cannot be used because the binary lacks the `metal` feature"
+        )));
+    }
+    #[cfg(feature = "candle")]
     candle_core::Device::new_metal(index).map_err(|error| setup_error(error.to_string()))?;
     Ok(None)
 }
@@ -427,9 +435,11 @@ mod tests {
         assert!(reason.contains("test Metal unavailable"));
     }
 
-    #[cfg(not(feature = "metal"))]
     #[test]
     fn metal_request_without_metal_feature_names_the_feature() {
+        if metal_compiled() {
+            return;
+        }
         let error = select_native_device(NativeDevicePreference::Metal, 0).unwrap_err();
 
         assert!(error.to_string().contains("`metal` feature"));

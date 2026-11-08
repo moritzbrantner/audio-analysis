@@ -435,32 +435,28 @@ pub fn run_transcription_pipeline_with_observer(
     });
     ensure_pipeline_active(observer)?;
     let full_source_seconds = audio.duration_seconds().max(1.0 / audio.sample_rate as f64);
-    let vad_response = if request.vad.enabled {
+    let (vad_response, speech_evidence) = if request.vad.enabled {
         let mut response =
             vad_provider.detect_speech(&audio.speaker_audio()?, &request.vad.detection)?;
-        // Evidence is about what the selected provider observed, not a
-        // speech/music classifier. Energy peaks are not evidence of speech.
-        let activity_evidence = if response.segments.is_empty() {
-            "notDetected"
-        } else {
-            match vad_provider.provider_id() {
-                "silero-vad" | "pyannote-vad" => "modelSpeechCandidate",
-                "energy-vad" => "energyActivityOnly",
-                _ => "unclassifiedProvider",
-            }
-        };
-        response
-            .diagnostics
-            .push(format!("vadActivityEvidence={activity_evidence}"));
-        response
-            .diagnostics
-            .push(format!("vadProvider={}", vad_provider.provider_id()));
         response.segments = asr_chunks_from_speech(
             response.segments,
             &audio,
             full_source_seconds,
             request.vad.detection.max_chunk_seconds,
         )?;
+        // Evidence is about what the selected provider observed, not a
+        // speech/music classifier. Energy peaks are not evidence of speech.
+        let speech_evidence = if response.segments.is_empty() {
+            AsrSpeechEvidence::NotDetected
+        } else {
+            vad_speech_evidence(vad_provider.provider_id())
+        };
+        response
+            .diagnostics
+            .push(format!("vadActivityEvidence={}", speech_evidence.as_str()));
+        response
+            .diagnostics
+            .push(format!("vadProvider={}", vad_provider.provider_id()));
         if response.segments.is_empty() {
             response
                 .segments
@@ -470,15 +466,21 @@ pub fn run_transcription_pipeline_with_observer(
                 .push("VAD found no speech; using full source as one ASR chunk".to_string());
         }
         push_cpu_stage_device(&mut response.diagnostics, "vadDevice");
-        response
+        (response, speech_evidence)
     } else {
-        VadResponse {
-            segments: vec![SpeechSpan::new(0.0, full_source_seconds, 1.0)?],
-            diagnostics: vec![
-                "VAD disabled; using full source as one ASR chunk".to_string(),
-                "vadActivityEvidence=unmeasured".to_string(),
-            ],
-        }
+        (
+            VadResponse {
+                segments: vec![SpeechSpan::new(0.0, full_source_seconds, 1.0)?],
+                diagnostics: vec![
+                    "VAD disabled; using full source as one ASR chunk".to_string(),
+                    format!(
+                        "vadActivityEvidence={}",
+                        AsrSpeechEvidence::Unmeasured.as_str()
+                    ),
+                ],
+            },
+            AsrSpeechEvidence::Unmeasured,
+        )
     };
     observer.observe(TranscriptionPipelineEvent::VadEnd {
         segments: vad_response.segments.len(),
@@ -499,6 +501,7 @@ pub fn run_transcription_pipeline_with_observer(
             task,
             language: language.clone(),
             model_id: model_id.clone(),
+            speech_evidence,
         },
         observer,
     )?;
@@ -620,6 +623,15 @@ pub fn run_transcription_pipeline_with_observer(
 /// Records `key=cpu` unless the provider reported its own device. Every VAD
 /// (energy, Silero, pyannote) and diarization provider here runs on the CPU:
 /// the ONNX sessions use the CPU execution provider only.
+/// Speech support of a VAD provider that returned spans.
+pub(crate) fn vad_speech_evidence(provider_id: &str) -> AsrSpeechEvidence {
+    match provider_id {
+        "silero-vad" | "pyannote-vad" => AsrSpeechEvidence::ModelSpeechCandidate,
+        "energy-vad" => AsrSpeechEvidence::EnergyActivityOnly,
+        _ => AsrSpeechEvidence::UnclassifiedProvider,
+    }
+}
+
 fn push_cpu_stage_device(diagnostics: &mut Vec<String>, key: &str) {
     let prefix = format!("{key}=");
     if !diagnostics.iter().any(|item| item.starts_with(&prefix)) {

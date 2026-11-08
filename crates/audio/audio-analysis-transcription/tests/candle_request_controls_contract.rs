@@ -55,6 +55,7 @@ fn candle_request_controls_reject_non_finite_or_negative_context() {
         task: TranscriptionTask::Transcribe,
         language: Some("en".to_string()),
         model_id: "openai/whisper-tiny.en".to_string(),
+        speech_evidence: Default::default(),
     };
     let invalid_windows = [
         CandleWhisperWindowControls {
@@ -106,6 +107,7 @@ fn canonical_observer_entrypoints_validate_request_controls_before_runtime() {
         task: TranscriptionTask::Transcribe,
         language: Some("en".to_string()),
         model_id: "openai/whisper-tiny.en".to_string(),
+        speech_evidence: Default::default(),
     };
     let config = CandleWhisperTranscriptionRequestConfig {
         runtime: audio_analysis_transcription::CandleWhisperRuntimeControls {
@@ -146,6 +148,7 @@ fn request_configured_provider_adapters_forward_controls_before_runtime() {
         task: TranscriptionTask::Transcribe,
         language: Some("en".to_string()),
         model_id: "openai/whisper-tiny.en".to_string(),
+        speech_evidence: Default::default(),
     };
     let options = CandleWhisperOptions::default();
     let invalid_config = CandleWhisperTranscriptionRequestConfig {

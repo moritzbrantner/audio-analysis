@@ -238,6 +238,22 @@ silence or music. Only windows that fail the temperature-0 attempt are
 re-decoded. Response diagnostics expose
 `averageLogProbability`, `noSpeechProbability`, `compressionRatio`, the ordered
 `temperatureFallbackAttempts`, and both rejection observations.
+`windowDecodeEvidence` lists each window's span, no-speech probability,
+average log probability, compression ratio, attempted temperatures and outcome
+(`decoded`, `noSpeechRejected`, `compressionRejected`).
+
+The pipeline passes the VAD observation to ASR as
+`AsrRequest::speech_evidence` (`modelSpeechCandidate` from Silero or pyannote,
+`energyActivityOnly`, `notDetected` for the full-source fallback, or
+`unmeasured`). With the default `noSpeechGate=logProbabilityOverride`, a
+window above `max_no_speech_probability` is withheld only when its average log
+probability is also low, as in faster-whisper. A caller may opt into
+`CandleWhisperNoSpeechGate::RequireModelVadSpeech`: the log-probability
+override then applies only to `modelSpeechCandidate` requests, so a confident
+decode of music- or silence-only audio that no speech model proposed does not
+survive a high no-speech probability. The full-source fallback still decodes
+every unsupported request, so quiet speech with a low no-speech probability is
+kept.
 
 The external WhisperX command provider remains compatibility and parity tooling.
 It keeps Python-based execution explicit for callers that still need WhisperX

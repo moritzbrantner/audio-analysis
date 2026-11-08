@@ -266,6 +266,45 @@ pub struct CandleWhisperDecodeRequestConfig {
     /// ratio is higher.
     #[serde(default = "default_candle_whisper_max_compression_ratio")]
     pub max_compression_ratio: Option<f64>,
+    /// How a window above `max_no_speech_probability` is judged.
+    #[serde(default)]
+    pub no_speech_gate: CandleWhisperNoSpeechGate,
+}
+
+/// Rule for windows whose no-speech probability exceeds
+/// [`CandleWhisperDecodeRequestConfig::max_no_speech_probability`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CandleWhisperNoSpeechGate {
+    /// faster-whisper/WhisperX: withhold the window only when its average log
+    /// probability is also below `min_average_log_probability`.
+    #[default]
+    LogProbabilityOverride,
+    /// Keep the log-probability override only when a speech model VAD proposed
+    /// the request's chunks ([`AsrSpeechEvidence::ModelSpeechCandidate`]).
+    /// With energy activity, no detected spans (full-source fallback) or no
+    /// VAD, a confident decode is not evidence of speech, so a high no-speech
+    /// window is withheld. This rejects text, it does not label the audio.
+    RequireModelVadSpeech,
+}
+
+impl CandleWhisperNoSpeechGate {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LogProbabilityOverride => "logProbabilityOverride",
+            Self::RequireModelVadSpeech => "requireModelVadSpeech",
+        }
+    }
+
+    /// The rule that applies to a request with `evidence`.
+    pub fn resolve(self, evidence: AsrSpeechEvidence) -> Self {
+        match self {
+            Self::RequireModelVadSpeech if evidence.supports_speech() => {
+                Self::LogProbabilityOverride
+            }
+            gate => gate,
+        }
+    }
 }
 
 impl Default for CandleWhisperDecodeRequestConfig {
@@ -280,6 +319,7 @@ impl Default for CandleWhisperDecodeRequestConfig {
             min_average_log_probability: default_candle_whisper_min_average_log_probability(),
             max_no_speech_probability: default_candle_whisper_max_no_speech_probability(),
             max_compression_ratio: default_candle_whisper_max_compression_ratio(),
+            no_speech_gate: CandleWhisperNoSpeechGate::default(),
         }
     }
 }

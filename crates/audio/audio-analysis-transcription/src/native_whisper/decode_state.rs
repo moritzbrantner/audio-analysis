@@ -1,6 +1,6 @@
 //! Decode configuration, per-row state, fallback decisions and diagnostics.
 
-use crate::{model_output_mismatch, CandleWhisperDecodeRequestConfig};
+use crate::{model_output_mismatch, CandleWhisperDecodeRequestConfig, CandleWhisperNoSpeechGate};
 use candle_core::{DType, IndexOp, Tensor};
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
@@ -208,7 +208,15 @@ pub(super) fn fallback_attempt_decision(
     let low_log_probability = config
         .min_average_log_probability
         .is_some_and(|minimum| average_log_probability < minimum);
-    if high_no_speech && (config.min_average_log_probability.is_none() || low_log_probability) {
+    // `no_speech_gate` arrives resolved against the request's VAD evidence;
+    // a remaining `RequireModelVadSpeech` means no speech model supports it.
+    let log_probability_override =
+        config.no_speech_gate == CandleWhisperNoSpeechGate::LogProbabilityOverride;
+    if high_no_speech
+        && (!log_probability_override
+            || config.min_average_log_probability.is_none()
+            || low_log_probability)
+    {
         return WhisperFallbackAttemptDecision::RejectNoSpeech;
     }
     if low_log_probability

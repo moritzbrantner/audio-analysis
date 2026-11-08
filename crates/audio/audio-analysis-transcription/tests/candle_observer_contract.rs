@@ -58,6 +58,7 @@ fn request() -> AsrRequest {
         task: TranscriptionTask::Transcribe,
         language: Some("en".to_string()),
         model_id: "openai/whisper-tiny.en".to_string(),
+        speech_evidence: Default::default(),
     }
 }
 

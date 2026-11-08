@@ -91,6 +91,45 @@ impl From<audio_analysis_io::AudioIoError> for SelectedMediaTranscriptionError {
     }
 }
 
+/// What the selected VAD provider observed about the ASR chunks of one
+/// request. It describes provider support for speech, not a speech/music
+/// classification: energy activity is not evidence of speech, and no detected
+/// spans is not proof of silence (the pipeline still decodes the full source).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AsrSpeechEvidence {
+    /// VAD was disabled or the caller did not supply an observation.
+    #[default]
+    Unmeasured,
+    /// The VAD provider returned no spans; chunks are a full-source fallback.
+    NotDetected,
+    /// An energy VAD reported activity; loudness alone does not prove speech.
+    EnergyActivityOnly,
+    /// A speech model VAD (Silero, pyannote) reported speech candidates.
+    ModelSpeechCandidate,
+    /// A provider whose evidence kind is not known reported spans.
+    UnclassifiedProvider,
+}
+
+impl AsrSpeechEvidence {
+    /// Stable diagnostic value (`vadActivityEvidence=...`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unmeasured => "unmeasured",
+            Self::NotDetected => "notDetected",
+            Self::EnergyActivityOnly => "energyActivityOnly",
+            Self::ModelSpeechCandidate => "modelSpeechCandidate",
+            Self::UnclassifiedProvider => "unclassifiedProvider",
+        }
+    }
+
+    /// True only when a speech model, not loudness or a fallback, proposed
+    /// the chunks as speech.
+    pub fn supports_speech(self) -> bool {
+        self == Self::ModelSpeechCandidate
+    }
+}
+
 /// ASR provider request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -101,6 +140,10 @@ pub struct AsrRequest {
     pub task: TranscriptionTask,
     pub language: Option<String>,
     pub model_id: String,
+    /// VAD support for `chunks`; providers may use it to gate text that the
+    /// decoder itself marks as probable non-speech.
+    #[serde(default)]
+    pub speech_evidence: AsrSpeechEvidence,
 }
 
 /// ASR provider response.

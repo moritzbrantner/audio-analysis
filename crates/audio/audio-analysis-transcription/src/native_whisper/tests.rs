@@ -1,9 +1,9 @@
 use crate::native_device::ResolvedNativeDevice;
 use crate::{
-    AsrRequest, CandleWhisperComputeType, CandleWhisperDecodeRequestConfig,
-    CandleWhisperDecodeRuntime, CandleWhisperOptions, CandleWhisperRuntimeControls,
-    CandleWhisperTimingMode, CandleWhisperTranscriptionRequestConfig, CandleWhisperWindowControls,
-    SpeechSpan, TranscriptionTask,
+    AsrRequest, AsrSpeechEvidence, CandleWhisperComputeType, CandleWhisperDecodeRequestConfig,
+    CandleWhisperDecodeRuntime, CandleWhisperNoSpeechGate, CandleWhisperOptions,
+    CandleWhisperRuntimeControls, CandleWhisperTimingMode, CandleWhisperTranscriptionRequestConfig,
+    CandleWhisperWindowControls, SpeechSpan, TranscriptionTask,
 };
 use candle_core::quantized::{gguf_file, GgmlDType};
 use candle_core::{DType, Device, Tensor};
@@ -118,6 +118,7 @@ fn german_no_align_fp32_matches_pinned_transformers_greedy_trace() {
         task: TranscriptionTask::Transcribe,
         language: Some("de".to_string()),
         model_id: "openai/whisper-small".to_string(),
+        speech_evidence: Default::default(),
     };
     let options = CandleWhisperOptions {
         model_id: request.model_id.clone(),
@@ -383,6 +384,7 @@ fn german_long_window_stops_at_whisperx_greedy_generation_limit() {
         task: TranscriptionTask::Transcribe,
         language: Some("de".to_string()),
         model_id: "openai/whisper-small".to_string(),
+        speech_evidence: Default::default(),
     };
     let options = CandleWhisperOptions {
         model_id: request.model_id.clone(),
@@ -630,6 +632,7 @@ fn minimal_asr_request(model_id: &str) -> AsrRequest {
         task: TranscriptionTask::Transcribe,
         language: Some("en".to_string()),
         model_id: model_id.to_string(),
+        speech_evidence: Default::default(),
     }
 }
 
@@ -1175,6 +1178,58 @@ fn high_no_speech_probability_accepts_high_confidence_text() {
 }
 
 #[test]
+fn window_decode_evidence_records_each_window_outcome() {
+    let diagnostics = WhisperDecodeDiagnostics {
+        average_log_probability: -0.0644,
+        no_speech_probability: Some(0.5551),
+        compression_ratio: 22.371,
+        attempted_temperatures: vec![0.0, 0.2],
+        compression_rejected: true,
+        ..WhisperDecodeDiagnostics::default()
+    };
+    assert_eq!(
+        window_decode_evidence_entry(60.0, 84.756, &diagnostics),
+        "60.00-84.76:noSpeech=0.555:avgLogProb=-0.064:compression=22.37:temperatures=0,0.2:outcome=compressionRejected"
+    );
+    let unavailable = WhisperDecodeDiagnostics::default();
+    assert_eq!(
+        window_decode_evidence_entry(0.0, 1.0, &unavailable),
+        "0.00-1.00:noSpeech=unavailable:avgLogProb=0.000:compression=0.00:temperatures=:outcome=decoded"
+    );
+}
+
+#[test]
+fn unsupported_high_no_speech_window_is_withheld_despite_confident_text() {
+    // Native WhisperX #428: a music-only window decoded `Oh!` with no-speech
+    // 0.77 and average log probability -0.69, and silence decoded `you` with
+    // no-speech 0.94 and -0.39; energy VAD alone proposed both windows.
+    let config = CandleWhisperDecodeRequestConfig {
+        no_speech_gate: CandleWhisperNoSpeechGate::RequireModelVadSpeech,
+        ..CandleWhisperDecodeRequestConfig::default()
+    };
+    assert_eq!(
+        fallback_attempt_decision(&config, -0.69, Some(0.77), 0.27),
+        WhisperFallbackAttemptDecision::RejectNoSpeech
+    );
+    // Genuine speech has a low no-speech probability and is unaffected.
+    assert_eq!(
+        fallback_attempt_decision(&config, -0.11, Some(0.03), 1.28),
+        WhisperFallbackAttemptDecision::Accept
+    );
+    // A speech model VAD restores the faster-whisper log-probability override.
+    let supported = CandleWhisperDecodeRequestConfig {
+        no_speech_gate: config
+            .no_speech_gate
+            .resolve(AsrSpeechEvidence::ModelSpeechCandidate),
+        ..config.clone()
+    };
+    assert_eq!(
+        fallback_attempt_decision(&supported, -0.69, Some(0.77), 0.27),
+        WhisperFallbackAttemptDecision::Accept
+    );
+}
+
+#[test]
 fn compression_ratio_is_zero_for_empty_output_and_detects_repetition() {
     assert_eq!(text_compression_ratio("").unwrap(), 0.0);
     let repeated = "the quick brown fox jumps over the lazy dog ".repeat(20);
@@ -1483,6 +1538,7 @@ fn request_language_wins_before_prompt_construction() {
         task: TranscriptionTask::Transcribe,
         language: Some("en".to_string()),
         model_id: "openai/whisper-tiny".to_string(),
+        speech_evidence: Default::default(),
     };
     let options = CandleWhisperOptions {
         language: Some("de".to_string()),
@@ -2522,6 +2578,7 @@ fn language_detection_picks_english_for_music_under_speech() {
         task: TranscriptionTask::Transcribe,
         language: None,
         model_id: "openai/whisper-small".to_string(),
+        speech_evidence: Default::default(),
     };
     let options = CandleWhisperOptions {
         model_id: request.model_id.clone(),

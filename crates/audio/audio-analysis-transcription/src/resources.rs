@@ -14,6 +14,7 @@ use crate::{
 pub enum NativeResourceDevice {
     Cpu,
     Cuda { index: usize },
+    Metal { index: usize },
 }
 
 /// Local resource availability, not a guarantee that a model can execute.
@@ -55,7 +56,7 @@ pub fn inspect_candle_whisper_resources(
         )?;
         let compute_type = options
             .compute_type
-            .resolve_for_device(device.cuda_active())?;
+            .resolve_for_device(device.gpu_active())?;
         let mut cached = options.clone();
         cached.model_cache_only = true;
         let resolved = crate::native_whisper::resolve_whisper_resources(
@@ -164,6 +165,9 @@ fn inspect_paths(
             crate::native_device::ResolvedNativeDevice::Cpu => NativeResourceDevice::Cpu,
             crate::native_device::ResolvedNativeDevice::Cuda(index) => {
                 NativeResourceDevice::Cuda { index }
+            }
+            crate::native_device::ResolvedNativeDevice::Metal(index) => {
+                NativeResourceDevice::Metal { index }
             }
         },
     })

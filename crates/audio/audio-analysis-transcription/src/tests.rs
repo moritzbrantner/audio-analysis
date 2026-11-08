@@ -1181,7 +1181,7 @@ fn candle_whisper_cpu_fp16_is_rejected_clearly() {
         .to_string();
 
     assert!(error.contains("setup_error"));
-    assert!(error.contains("fp16 requires a CUDA device"));
+    assert!(error.contains("fp16 requires a CUDA or Metal device"));
 }
 
 #[test]

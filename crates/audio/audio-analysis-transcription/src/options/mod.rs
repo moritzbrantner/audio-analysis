@@ -26,4 +26,5 @@ pub enum NativeDevicePreference {
     Auto,
     Cpu,
     Cuda,
+    Metal,
 }

@@ -6,6 +6,7 @@ use crate::{invalid_request, setup_error, NativeDevicePreference};
 pub(crate) enum ResolvedNativeDevice {
     Cpu,
     Cuda(usize),
+    Metal(usize),
 }
 
 impl ResolvedNativeDevice {
@@ -13,14 +14,29 @@ impl ResolvedNativeDevice {
         match self {
             Self::Cpu => "cpu".to_string(),
             Self::Cuda(index) => format!("cuda:{index}"),
+            Self::Metal(index) => format!("metal:{index}"),
         }
     }
 
+    /// True only for CUDA; feeds the `cuda=` and `alignmentCuda=` diagnostics.
     #[allow(dead_code)]
     pub(crate) fn cuda_active(&self) -> bool {
+        matches!(self, Self::Cuda(_))
+    }
+
+    /// True for any GPU backend (CUDA or Metal).
+    #[allow(dead_code)]
+    pub(crate) fn gpu_active(&self) -> bool {
+        self.gpu_backend().is_some()
+    }
+
+    /// Backend name of a GPU device, `None` on the CPU.
+    #[allow(dead_code)]
+    pub(crate) fn gpu_backend(&self) -> Option<&'static str> {
         match self {
-            Self::Cpu => false,
-            Self::Cuda(_) => true,
+            Self::Cpu => None,
+            Self::Cuda(_) => Some("cuda"),
+            Self::Metal(_) => Some("metal"),
         }
     }
 
@@ -44,12 +60,28 @@ impl ResolvedNativeDevice {
                     )))
                 }
             }
+            Self::Metal(index) => {
+                #[cfg(feature = "metal")]
+                {
+                    candle_core::Device::new_metal(*index).map_err(|error| {
+                        setup_error(format!(
+                            "resolved Metal device metal:{index} became unavailable: {error}"
+                        ))
+                    })
+                }
+                #[cfg(not(feature = "metal"))]
+                {
+                    Err(setup_error(format!(
+                        "resolved Metal device metal:{index} cannot be created because the binary lacks the `metal` feature"
+                    )))
+                }
+            }
         }
     }
 }
 
 /// The device a stage runs on, plus what a report needs to know about it: the
-/// requested preference, the CUDA device name, and why `auto` fell back to the
+/// requested preference, the GPU device name, and why `auto` fell back to the
 /// CPU.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NativeDeviceSelection {
@@ -91,6 +123,7 @@ fn device_preference_name(preference: NativeDevicePreference) -> &'static str {
         NativeDevicePreference::Auto => "auto",
         NativeDevicePreference::Cpu => "cpu",
         NativeDevicePreference::Cuda => "cuda",
+        NativeDevicePreference::Metal => "metal",
     }
 }
 
@@ -105,13 +138,24 @@ pub(crate) fn select_native_device(
     preference: NativeDevicePreference,
     cuda_device_index: usize,
 ) -> Result<NativeDeviceSelection> {
-    select_native_device_with(preference, cuda_device_index, cuda_device_name)
+    select_native_device_with(
+        preference,
+        cuda_device_index,
+        cfg!(feature = "metal"),
+        cuda_device_name,
+        metal_device_name,
+    )
 }
 
+/// `auto` probes CUDA first and, only when the binary was built with the
+/// `metal` feature, Metal next. It falls back to the CPU only for GPU index
+/// `0`. Builds without `metal` keep the CUDA-only `auto` behavior unchanged.
 fn select_native_device_with(
     preference: NativeDevicePreference,
     cuda_device_index: usize,
+    metal_compiled: bool,
     mut cuda_device_name: impl FnMut(usize) -> Result<Option<String>>,
+    mut metal_device_name: impl FnMut(usize) -> Result<Option<String>>,
 ) -> Result<NativeDeviceSelection> {
     let selection = |resolved, name, fallback_reason| NativeDeviceSelection {
         requested: preference,
@@ -131,21 +175,54 @@ fn select_native_device_with(
                     "CUDA device cuda:{cuda_device_index} was requested but is unavailable: {error}"
                 ))
             }),
-        NativeDevicePreference::Auto => match cuda_device_name(cuda_device_index) {
-            Ok(name) => Ok(selection(
-                ResolvedNativeDevice::Cuda(cuda_device_index),
-                name,
-                None,
-            )),
-            Err(error) if cuda_device_index == 0 => Ok(selection(
-                ResolvedNativeDevice::Cpu,
-                None,
-                Some(error.to_string()),
-            )),
-            Err(error) => Err(setup_error(format!(
-                "CUDA device cuda:{cuda_device_index} selected by cuda_device_index is unavailable: {error}; use cuda_device_index=0 to preserve automatic CPU fallback or select an available CUDA device"
-            ))),
-        },
+        NativeDevicePreference::Metal => metal_device_name(cuda_device_index)
+            .map(|name| selection(ResolvedNativeDevice::Metal(cuda_device_index), name, None))
+            .map_err(|error| {
+                setup_error(format!(
+                    "Metal device metal:{cuda_device_index} was requested but is unavailable: {error}"
+                ))
+            }),
+        NativeDevicePreference::Auto => {
+            let cuda_error = match cuda_device_name(cuda_device_index) {
+                Ok(name) => {
+                    return Ok(selection(
+                        ResolvedNativeDevice::Cuda(cuda_device_index),
+                        name,
+                        None,
+                    ))
+                }
+                Err(error) => error.to_string(),
+            };
+            let unavailable = if metal_compiled {
+                match metal_device_name(cuda_device_index) {
+                    Ok(name) => {
+                        return Ok(selection(
+                            ResolvedNativeDevice::Metal(cuda_device_index),
+                            name,
+                            None,
+                        ))
+                    }
+                    Err(error) => format!("{cuda_error}; {error}"),
+                }
+            } else {
+                cuda_error
+            };
+            if cuda_device_index == 0 {
+                Ok(selection(
+                    ResolvedNativeDevice::Cpu,
+                    None,
+                    Some(unavailable),
+                ))
+            } else if metal_compiled {
+                Err(setup_error(format!(
+                    "GPU device {cuda_device_index} selected by cuda_device_index is unavailable: {unavailable}; use cuda_device_index=0 to preserve automatic CPU fallback or select an available GPU device"
+                )))
+            } else {
+                Err(setup_error(format!(
+                    "CUDA device cuda:{cuda_device_index} selected by cuda_device_index is unavailable: {unavailable}; use cuda_device_index=0 to preserve automatic CPU fallback or select an available CUDA device"
+                )))
+            }
+        }
     }
 }
 
@@ -167,18 +244,50 @@ fn cuda_device_name(index: usize) -> Result<Option<String>> {
         .and_then(|cuda| cuda.cuda_stream().context().name().ok()))
 }
 
+#[cfg(not(feature = "metal"))]
+fn metal_device_name(index: usize) -> Result<Option<String>> {
+    Err(setup_error(format!(
+        "Metal device metal:{index} cannot be used because the binary lacks the `metal` feature"
+    )))
+}
+
+/// Probes the Metal device. A successful probe reports no device name.
+#[cfg(feature = "metal")]
+fn metal_device_name(index: usize) -> Result<Option<String>> {
+    candle_core::Device::new_metal(index).map_err(|error| setup_error(error.to_string()))?;
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn no_cuda(_: usize) -> Result<Option<String>> {
+        Err(setup_error("test CUDA unavailable"))
+    }
+
+    fn no_metal(_: usize) -> Result<Option<String>> {
+        Err(setup_error("test Metal unavailable"))
+    }
+
+    fn metal_ok(_: usize) -> Result<Option<String>> {
+        Ok(None)
+    }
 
     #[test]
     fn cuda_resolution_uses_the_requested_device_index() {
         let mut observed_index = None;
 
-        let selection = select_native_device_with(NativeDevicePreference::Cuda, 2, |index| {
-            observed_index = Some(index);
-            Ok(Some("Test GPU".to_string()))
-        })
+        let selection = select_native_device_with(
+            NativeDevicePreference::Cuda,
+            2,
+            true,
+            |index| {
+                observed_index = Some(index);
+                Ok(Some("Test GPU".to_string()))
+            },
+            |_| panic!("explicit CUDA must not probe Metal"),
+        )
         .unwrap();
 
         assert_eq!(observed_index, Some(2));
@@ -203,10 +312,9 @@ mod tests {
 
     #[test]
     fn default_auto_device_keeps_cpu_fallback_for_cuda_index_zero() {
-        let selection = select_native_device_with(NativeDevicePreference::Auto, 0, |_| {
-            Err(setup_error("test CUDA unavailable"))
-        })
-        .unwrap();
+        let selection =
+            select_native_device_with(NativeDevicePreference::Auto, 0, false, no_cuda, no_metal)
+                .unwrap();
 
         assert_eq!(selection.resolved, ResolvedNativeDevice::Cpu);
         let diagnostics = selection.diagnostics(None);
@@ -218,15 +326,113 @@ mod tests {
 
     #[test]
     fn explicit_cpu_reports_no_name_or_fallback() {
-        let selection = select_native_device_with(NativeDevicePreference::Cpu, 0, |_| {
-            panic!("explicit CPU must not probe CUDA")
-        })
+        let selection = select_native_device_with(
+            NativeDevicePreference::Cpu,
+            0,
+            true,
+            |_| panic!("explicit CPU must not probe CUDA"),
+            |_| panic!("explicit CPU must not probe Metal"),
+        )
         .unwrap();
 
         assert_eq!(
             selection.diagnostics(None),
             ["device=cpu", "deviceRequested=cpu"]
         );
+    }
+
+    #[test]
+    fn explicit_metal_resolves_the_metal_device() {
+        let selection = select_native_device_with(
+            NativeDevicePreference::Metal,
+            0,
+            true,
+            |_| panic!("explicit Metal must not probe CUDA"),
+            metal_ok,
+        )
+        .unwrap();
+
+        assert_eq!(selection.resolved, ResolvedNativeDevice::Metal(0));
+        assert!(selection.resolved.gpu_active());
+        assert!(!selection.resolved.cuda_active());
+        assert_eq!(
+            selection.diagnostics(None),
+            ["device=metal:0", "deviceRequested=metal"]
+        );
+    }
+
+    #[test]
+    fn explicit_metal_fails_instead_of_falling_back() {
+        let error = select_native_device_with(
+            NativeDevicePreference::Metal,
+            0,
+            true,
+            |_| panic!("explicit Metal must not probe CUDA"),
+            no_metal,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("metal:0 was requested"));
+        assert!(error.to_string().contains("test Metal unavailable"));
+    }
+
+    #[test]
+    fn auto_picks_metal_when_built_with_metal_and_cuda_is_unavailable() {
+        let selection =
+            select_native_device_with(NativeDevicePreference::Auto, 0, true, no_cuda, metal_ok)
+                .unwrap();
+
+        assert_eq!(selection.resolved, ResolvedNativeDevice::Metal(0));
+        assert_eq!(selection.fallback_reason, None);
+        assert_eq!(
+            selection.diagnostics(None),
+            ["device=metal:0", "deviceRequested=auto"]
+        );
+    }
+
+    #[test]
+    fn auto_prefers_cuda_over_metal() {
+        let selection = select_native_device_with(
+            NativeDevicePreference::Auto,
+            0,
+            true,
+            |_| Ok(Some("Test GPU".to_string())),
+            |_| panic!("auto must not probe Metal after CUDA succeeded"),
+        )
+        .unwrap();
+
+        assert_eq!(selection.resolved, ResolvedNativeDevice::Cuda(0));
+    }
+
+    #[test]
+    fn auto_without_metal_feature_never_probes_metal() {
+        let selection =
+            select_native_device_with(NativeDevicePreference::Auto, 0, false, no_cuda, |_| {
+                panic!("auto must not probe Metal in a build without it")
+            })
+            .unwrap();
+
+        assert_eq!(selection.resolved, ResolvedNativeDevice::Cpu);
+    }
+
+    #[test]
+    fn auto_falls_back_to_cpu_with_both_gpu_reasons() {
+        let selection =
+            select_native_device_with(NativeDevicePreference::Auto, 0, true, no_cuda, no_metal)
+                .unwrap();
+
+        assert_eq!(selection.resolved, ResolvedNativeDevice::Cpu);
+        let reason = selection.fallback_reason.unwrap();
+        assert!(reason.contains("test CUDA unavailable"));
+        assert!(reason.contains("test Metal unavailable"));
+    }
+
+    #[cfg(not(feature = "metal"))]
+    #[test]
+    fn metal_request_without_metal_feature_names_the_feature() {
+        let error = select_native_device(NativeDevicePreference::Metal, 0).unwrap_err();
+
+        assert!(error.to_string().contains("`metal` feature"));
     }
 
     /// Needs a CUDA GPU: `cargo test --features cuda -- --ignored cuda_probe`.
@@ -240,12 +446,21 @@ mod tests {
         assert!(selection.name.is_some_and(|name| !name.is_empty()));
     }
 
+    /// Needs Apple Silicon: `cargo test --features metal -- --ignored metal_probe`.
+    #[cfg(feature = "metal")]
+    #[test]
+    #[ignore]
+    fn metal_probe_resolves_metal() {
+        let selection = select_native_device(NativeDevicePreference::Metal, 0).unwrap();
+
+        assert_eq!(selection.resolved, ResolvedNativeDevice::Metal(0));
+    }
+
     #[test]
     fn auto_device_does_not_silently_ignore_an_unavailable_nonzero_index() {
-        let error = select_native_device_with(NativeDevicePreference::Auto, 3, |_| {
-            Err(setup_error("test CUDA unavailable"))
-        })
-        .unwrap_err();
+        let error =
+            select_native_device_with(NativeDevicePreference::Auto, 3, false, no_cuda, no_metal)
+                .unwrap_err();
 
         assert!(error.to_string().contains("cuda:3"));
         assert!(error.to_string().contains("cuda_device_index=0"));

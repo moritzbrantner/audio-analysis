@@ -10,9 +10,15 @@ speaker-model orchestration, and model resource setup; every provider returns a
 dependency.
 
 Native Candle Whisper ASR is available behind the `candle` feature. CUDA device
-selection is available behind `cuda`, and local model bundle validation is
-available behind `model-bundles`. Native path decoding defaults to direct
-samples or readable WAV files. With the explicit `audio-io` feature, non-WAV
+selection is available behind `cuda`, Apple Metal device selection behind
+`metal`, and local model bundle validation is available behind
+`model-bundles`. `device="auto"` probes CUDA first, then Metal when the binary
+was built with `metal`, and falls back to the CPU; `device="metal"` fails
+instead of falling back. Metal detection follows Candle's own `metal`
+feature, so a consumer that enables `candle-core/metal` in the same build also
+gets Metal. Metal execution is compile-checked only; it has no recorded
+inference evidence yet. Native path decoding defaults to direct samples or
+readable WAV files. With the explicit `audio-io` feature, non-WAV
 paths use FFmpeg-backed `audio-analysis-io` decode and then normalize/resample
 through the same native 16 kHz mono boundary. This opt-in media decode is not
 WhisperX parity and is not part of default tests.

@@ -114,7 +114,7 @@ fn with_decoder_threads<T: Send>(
             "Candle Whisper decoder_threads must be greater than zero",
         ));
     }
-    if resolved_device.cuda_active() {
+    if resolved_device.gpu_active() {
         return run();
     }
     let pool = rayon::ThreadPoolBuilder::new()
@@ -233,7 +233,10 @@ impl WhisperRunSetup {
     ) -> Result<Self> {
         validate_asr_request(request)?;
         if options.compute_type == CandleWhisperComputeType::Int8
-            && options.device == crate::NativeDevicePreference::Cuda
+            && matches!(
+                options.device,
+                crate::NativeDevicePreference::Cuda | crate::NativeDevicePreference::Metal
+            )
         {
             return Err(setup_error(
                 "native Candle Whisper compute type int8 is CPU-only; select device=cpu",
@@ -244,7 +247,7 @@ impl WhisperRunSetup {
         let resolved_device = device.resolved;
         let resolved_compute_type = options
             .compute_type
-            .resolve_for_device(resolved_device.cuda_active())?;
+            .resolve_for_device(resolved_device.gpu_active())?;
         let model = resolve_whisper_model_with_observer(
             options,
             &request.model_id,

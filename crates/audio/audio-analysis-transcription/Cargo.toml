@@ -42,6 +42,7 @@ audio-analysis-speakers = { package = "moenarch-audio-analysis-speakers", versio
 default = []
 candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:flate2", "dep:half", "dep:rayon", "dep:rustfft", "dep:tokenizers"]
 cuda = ["candle", "candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+metal = ["candle", "candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
 alignment = ["candle", "dep:tokenizers"]
 diarization = []
 onnx = ["diarization", "audio-analysis-speakers/onnx", "dep:runtime-onnx"]

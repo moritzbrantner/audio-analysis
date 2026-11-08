@@ -707,7 +707,7 @@ pub(crate) fn validate_candle_setup(
         native_device::resolve_native_device(options.device, controls.cuda_device_index)?;
     options
         .compute_type
-        .resolve_for_device(resolved_device.cuda_active())?;
+        .resolve_for_device(resolved_device.gpu_active())?;
     if !cfg!(feature = "candle") {
         return Err(unsupported_runtime(format!(
             "Candle Whisper requested but the binary lacks the `candle` feature; {}; build with `candle` for native execution and `model-bundles` for Hugging Face cache resolution",

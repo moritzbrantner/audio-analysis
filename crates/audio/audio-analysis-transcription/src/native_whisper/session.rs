@@ -1015,9 +1015,9 @@ pub(super) fn decoder_threads_diagnostic(
     controls: &CandleWhisperRuntimeControls,
     resolved_device: &ResolvedNativeDevice,
 ) -> String {
-    match (controls.decoder_threads, resolved_device.cuda_active()) {
-        (Some(_), true) => "ignored(cuda)".to_string(),
-        (Some(threads), false) => threads.to_string(),
+    match (controls.decoder_threads, resolved_device.gpu_backend()) {
+        (Some(_), Some(backend)) => format!("ignored({backend})"),
+        (Some(threads), None) => threads.to_string(),
         (None, _) => "default".to_string(),
     }
 }

@@ -503,18 +503,18 @@ impl CandleWhisperComputeType {
         }
     }
 
-    pub(crate) fn resolve_for_device(self, cuda_active: bool) -> Result<Self> {
-        match (self, cuda_active) {
+    pub(crate) fn resolve_for_device(self, gpu_active: bool) -> Result<Self> {
+        match (self, gpu_active) {
             (Self::Automatic, true) => Ok(Self::Fp16),
             (Self::Automatic, false) => Ok(Self::Fp32),
             (Self::Fp16, true) => Ok(Self::Fp16),
             (Self::Fp16, false) => Err(setup_error(
-                "native Candle Whisper compute type fp16 requires a CUDA device; use automatic or fp32 for CPU execution",
+                "native Candle Whisper compute type fp16 requires a CUDA or Metal device; use automatic or fp32 for CPU execution",
             )),
             (Self::Fp32, _) => Ok(Self::Fp32),
             (Self::Int8, false) => Ok(Self::Int8),
             (Self::Int8, true) => Err(setup_error(
-                "native Candle Whisper compute type int8 is CPU-only; select device=cpu or use automatic, fp16, or fp32 for CUDA execution",
+                "native Candle Whisper compute type int8 is CPU-only; select device=cpu or use automatic, fp16, or fp32 for GPU execution",
             )),
         }
     }

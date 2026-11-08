@@ -135,6 +135,12 @@ impl CandleWhisperSession {
     ) -> Result<AsrResponse> {
         let controls = &config.runtime;
         let mut decode = self.resolve_request_decode_config(&config.decode)?;
+        if decode
+            .no_speech_gate
+            .limits_fallback_to_first_attempt(request.speech_evidence)
+        {
+            decode.search.temperature_schedule.truncate(1);
+        }
         decode.no_speech_gate = decode.no_speech_gate.resolve(request.speech_evidence);
         let decode = &decode;
         let window_controls = &config.window;

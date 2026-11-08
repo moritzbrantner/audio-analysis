@@ -516,6 +516,25 @@ fn only_speech_model_vad_providers_support_speech() {
 }
 
 #[test]
+fn only_a_vad_with_no_spans_limits_the_safety_net_to_the_first_attempt() {
+    let strict = CandleWhisperNoSpeechGate::RequireModelVadSpeech;
+    assert!(strict.limits_fallback_to_first_attempt(AsrSpeechEvidence::NotDetected));
+    for evidence in [
+        AsrSpeechEvidence::Unmeasured,
+        AsrSpeechEvidence::EnergyActivityOnly,
+        AsrSpeechEvidence::ModelSpeechCandidate,
+        AsrSpeechEvidence::UnclassifiedProvider,
+    ] {
+        assert!(
+            !strict.limits_fallback_to_first_attempt(evidence),
+            "{evidence:?}"
+        );
+    }
+    assert!(!CandleWhisperNoSpeechGate::LogProbabilityOverride
+        .limits_fallback_to_first_attempt(AsrSpeechEvidence::NotDetected));
+}
+
+#[test]
 fn asr_chunks_are_clamped_to_the_audio_duration() {
     let chunks = asr_chunks_from_speech(
         vec![

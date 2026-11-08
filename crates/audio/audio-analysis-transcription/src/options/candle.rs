@@ -285,6 +285,12 @@ pub enum CandleWhisperNoSpeechGate {
     /// With energy activity, no detected spans (full-source fallback) or no
     /// VAD, a confident decode is not evidence of speech, so a high no-speech
     /// window is withheld. This rejects text, it does not label the audio.
+    ///
+    /// When the VAD found no spans at all, the full source is still decoded as
+    /// a safety net for quiet speech, but only with the first attempt of the
+    /// temperature schedule: resampling at higher temperatures until some text
+    /// passes the thresholds is not evidence of speech. A repetition loop is
+    /// then withheld by the compression gate.
     RequireModelVadSpeech,
 }
 
@@ -304,6 +310,12 @@ impl CandleWhisperNoSpeechGate {
             }
             gate => gate,
         }
+    }
+
+    /// True when a request with `evidence` decodes only the first attempt of
+    /// the temperature schedule (see [`Self::RequireModelVadSpeech`]).
+    pub fn limits_fallback_to_first_attempt(self, evidence: AsrSpeechEvidence) -> bool {
+        self == Self::RequireModelVadSpeech && evidence == AsrSpeechEvidence::NotDetected
     }
 }
 

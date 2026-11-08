@@ -17,6 +17,7 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
+      - run: bun test scripts/prepare-pyannote-community-bundle.test.ts
       - run: bun run check:structure
       - run: bun run check:dj-corpus
       - run: cargo metadata --locked --format-version 1 --no-deps

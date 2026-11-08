@@ -3769,6 +3769,7 @@ fn reusable_candle_provider_reports_unsupported_without_candle_feature() {
                 task: TranscriptionTask::Transcribe,
                 language: Some("en".to_string()),
                 model_id: "tiny.en".to_string(),
+                speech_evidence: Default::default(),
             })
             .unwrap_err()
             .to_string();

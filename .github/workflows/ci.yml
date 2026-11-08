@@ -110,7 +110,22 @@ jobs:
   runtime-validation:
     needs: docs-scope
     if: github.event_name == 'pull_request' && needs.docs-scope.outputs.docs-only != 'true'
-    uses: ./.github/workflows/runtime-evidence.yml
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    uses: moritzbrantner/reusable-workflows/.github/workflows/runtime-evidence.yml@0b7b7ec433e6cad058667251e31a0eca918366eb
+    with:
+      workloads: profiles/runtime-profiler/rhythm.json
+      workload_files: |
+        crates/audio/audio-analysis-rhythm/examples/profile_rhythm.rs
+        scripts/profile-rhythm.sh
+        profiles/runtime-profiler/rhythm.json
+      prime_command: bash scripts/profile-rhythm.sh >/dev/null
+      profiler_revision: 8280c95feb2a1075efa0480a9622e40c723e0b3a
+      moonlight_revision: 7fad88180edc96335aabaa818fccfa7dd10ba32e
+      artifact_name: rhythm-runtime-moonlight
+      artifact_retention_days: 7
+      job_name: Rhythm runtime evidence and behavior
 
   dj-oracle:
     needs: docs-scope

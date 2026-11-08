@@ -20,6 +20,55 @@ bash scripts/build-pages.sh
 
 The script builds the core, Fourier, pitch, and rhythm WASM adapters and assembles the static artifact under `_site/`.
 
+## Approved pyannote community-1 bundle for local tools
+
+The speaker-diarization model is gated by Hugging Face, so a fresh checkout
+cannot download it without your consent. First, sign in and accept the model
+terms at [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1),
+then create a [Hugging Face read token](https://huggingface.co/settings/tokens).
+With Bun installed, run from the `audio-analysis` repository root:
+
+```bash
+read -rsp 'Hugging Face token: ' HF_TOKEN; echo
+export HF_TOKEN
+if bundle_dir="$(bun scripts/prepare-pyannote-community-bundle.ts)"; then
+  export GOLDEN_PYANNOTE_BUNDLE="$bundle_dir"
+  export PYANNOTE_COMMUNITY_BUNDLE="$bundle_dir"
+fi
+unset HF_TOKEN
+```
+
+The command installs dependencies from `bun.lock` on first-time provisioning,
+downloads and reconstructs the approved ONNX snapshot with the existing
+`audio-analysis-speakers-wasm` loader, verifies all eight files against their
+pinned SHA-256 checksums, and saves them under
+`$XDG_CACHE_HOME/audio-analysis/pyannote-community-1/` (or `~/.cache` if unset).
+It prints only the absolute bundle path on stdout for scripting. The token is
+never stored by this command, and model weights stay outside Git.
+
+**Repeat the same command any time.** A valid bundle is verified and reused
+without requiring `HF_TOKEN`, downloading anything, running `bun install`, or
+changing timestamps. A corrupted or incomplete destination causes a clear
+error and is never silently overwritten. For a different location, pass
+`--output /absolute/path/to/bundle` on both runs.
+
+For later shell sessions, the token-free cache-hit command is:
+
+```bash
+bundle_dir="$(bun scripts/prepare-pyannote-community-bundle.ts)" && export GOLDEN_PYANNOTE_BUNDLE="$bundle_dir"
+```
+
+`GOLDEN_PYANNOTE_BUNDLE` is consumed by the Belief Lab Stage 4 local pipeline;
+`PYANNOTE_COMMUNITY_BUNDLE` is the audio-analysis native consumer setting.
+These exports apply to the current shell session. To rerun Stage 4 after
+provisioning, return to Belief Lab and use its existing Stage 4 command.
+
+The entirely offline idempotence/regression gate is:
+
+```bash
+bun test scripts/prepare-pyannote-community-bundle.test.ts
+```
+
 ## DJ acceptance evidence
 
 The DJ acceptance corpus is declared in `tests/fixtures/dj/real-music-corpus.v1.json`. The repository-level pinned `librosa/data` source remains the default for existing fixtures; external fixtures may override the audio `sourceUrl`, but must also declare a human-auditable, revision-pinned `provenanceUrl` plus the source-published byte length and SHA-1. Every downloaded file is accepted only when its SHA-256 and, for external fixtures, those independent source metadata pins all match the manifest.

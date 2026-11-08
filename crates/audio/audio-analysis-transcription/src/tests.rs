@@ -79,6 +79,8 @@ impl AudioTranscriptionProvider for MockAsrProvider {
     }
 
     fn transcribe(&mut self, request: AsrRequest) -> Result<AsrResponse> {
+        let received_evidence =
+            format!("mockAsrSpeechEvidence={}", request.speech_evidence.as_str());
         let segments = request
             .chunks
             .iter()
@@ -101,7 +103,7 @@ impl AudioTranscriptionProvider for MockAsrProvider {
                 segments,
             )
             .map_err(|error| DetectError::InvalidArgument(error.to_string()))?,
-            diagnostics: vec!["mock ASR completed".to_string()],
+            diagnostics: vec!["mock ASR completed".to_string(), received_evidence],
         })
     }
 }
@@ -427,6 +429,112 @@ fn pipeline_merges_vad_speech_up_to_chunk_size_like_whisperx() {
 }
 
 #[test]
+fn no_vad_spans_are_recorded_as_unobserved_speech_not_proven_silence() {
+    let mut vad = FixedVadProvider { segments: vec![] };
+    let response =
+        run_transcription_pipeline(sample_request(), &mut vad, &mut MockAsrProvider, None, None)
+            .unwrap();
+    assert!(response
+        .diagnostics
+        .iter()
+        .any(|item| item == "vadActivityEvidence=notDetected"));
+    assert_eq!(
+        response.vad_segments.len(),
+        1,
+        "ASR fallback remains explicit"
+    );
+    assert_eq!(response.vad_segments[0].score, 0.0);
+    assert!(
+        !response.transcript.segments.is_empty(),
+        "lack of VAD evidence alone must not silently delete quiet speech"
+    );
+    assert!(
+        response
+            .diagnostics
+            .iter()
+            .any(|item| item == "mockAsrSpeechEvidence=notDetected"),
+        "the full-source fallback must reach ASR as unsupported by VAD"
+    );
+}
+
+#[test]
+fn energy_activity_is_not_labeled_as_speech() {
+    let mut vad = EnergyVoiceActivityDetector;
+    let response =
+        run_transcription_pipeline(sample_request(), &mut vad, &mut MockAsrProvider, None, None)
+            .unwrap();
+    assert!(response
+        .diagnostics
+        .iter()
+        .any(|item| item == "vadActivityEvidence=energyActivityOnly"));
+    assert!(response
+        .diagnostics
+        .iter()
+        .any(|item| item == "mockAsrSpeechEvidence=energyActivityOnly"));
+}
+
+#[test]
+fn only_speech_model_vad_providers_support_speech() {
+    assert_eq!(
+        vad_speech_evidence("silero-vad"),
+        AsrSpeechEvidence::ModelSpeechCandidate
+    );
+    assert_eq!(
+        vad_speech_evidence("pyannote-vad"),
+        AsrSpeechEvidence::ModelSpeechCandidate
+    );
+    assert_eq!(
+        vad_speech_evidence("energy-vad"),
+        AsrSpeechEvidence::EnergyActivityOnly
+    );
+    assert_eq!(
+        vad_speech_evidence("fixed-vad"),
+        AsrSpeechEvidence::UnclassifiedProvider
+    );
+    for evidence in [
+        AsrSpeechEvidence::Unmeasured,
+        AsrSpeechEvidence::NotDetected,
+        AsrSpeechEvidence::EnergyActivityOnly,
+        AsrSpeechEvidence::UnclassifiedProvider,
+    ] {
+        assert!(!evidence.supports_speech(), "{evidence:?}");
+        assert_eq!(
+            CandleWhisperNoSpeechGate::RequireModelVadSpeech.resolve(evidence),
+            CandleWhisperNoSpeechGate::RequireModelVadSpeech
+        );
+    }
+    assert_eq!(
+        CandleWhisperNoSpeechGate::RequireModelVadSpeech
+            .resolve(AsrSpeechEvidence::ModelSpeechCandidate),
+        CandleWhisperNoSpeechGate::LogProbabilityOverride
+    );
+    assert_eq!(
+        CandleWhisperNoSpeechGate::default().resolve(AsrSpeechEvidence::NotDetected),
+        CandleWhisperNoSpeechGate::LogProbabilityOverride,
+        "the WhisperX-compatible default never tightens on its own"
+    );
+}
+
+#[test]
+fn only_a_vad_with_no_spans_limits_the_safety_net_to_the_first_attempt() {
+    let strict = CandleWhisperNoSpeechGate::RequireModelVadSpeech;
+    assert!(strict.limits_fallback_to_first_attempt(AsrSpeechEvidence::NotDetected));
+    for evidence in [
+        AsrSpeechEvidence::Unmeasured,
+        AsrSpeechEvidence::EnergyActivityOnly,
+        AsrSpeechEvidence::ModelSpeechCandidate,
+        AsrSpeechEvidence::UnclassifiedProvider,
+    ] {
+        assert!(
+            !strict.limits_fallback_to_first_attempt(evidence),
+            "{evidence:?}"
+        );
+    }
+    assert!(!CandleWhisperNoSpeechGate::LogProbabilityOverride
+        .limits_fallback_to_first_attempt(AsrSpeechEvidence::NotDetected));
+}
+
+#[test]
 fn asr_chunks_are_clamped_to_the_audio_duration() {
     let chunks = asr_chunks_from_speech(
         vec![
@@ -745,6 +853,7 @@ fn real_tiny_whisper_bundle_runs_greedy_sampling_and_beam_paths_when_requested()
         task: TranscriptionTask::Transcribe,
         language: Some("en".to_string()),
         model_id: "openai/whisper-tiny.en".to_string(),
+        speech_evidence: Default::default(),
     };
     let paths = [
         (
@@ -815,6 +924,7 @@ fn real_q8_whisper_bundle_transcribes_short_fixture_with_valid_contract() {
             task: TranscriptionTask::Transcribe,
             language: Some("en".to_string()),
             model_id: "openai/whisper-tiny.en".to_string(),
+            speech_evidence: Default::default(),
         })
         .expect("Q8 Whisper smoke transcription should run");
 
@@ -851,6 +961,7 @@ fn candle_whisper_controlled_observer_entrypoints_are_public_and_validate_before
         task: TranscriptionTask::Transcribe,
         language: Some("en".to_string()),
         model_id: "openai/whisper-tiny.en".to_string(),
+        speech_evidence: Default::default(),
     };
     let controls = CandleWhisperRuntimeControls {
         decoder_threads: Some(0),
@@ -2234,6 +2345,7 @@ fn cuda_request_without_feature_returns_setup_error() {
         task: TranscriptionTask::Transcribe,
         language: None,
         model_id: "openai/whisper-large-v3".to_string(),
+        speech_evidence: Default::default(),
     });
     let error = result.unwrap_err().to_string();
     assert!(error.contains("setup_error") || cfg!(feature = "cuda"));
@@ -2258,6 +2370,7 @@ fn missing_model_bundle_returns_setup_error() {
         task: TranscriptionTask::Transcribe,
         language: None,
         model_id: "openai/whisper-large-v3".to_string(),
+        speech_evidence: Default::default(),
     });
     let error = result.unwrap_err().to_string();
     assert!(error.contains("setup_error") || error.contains("unsupported_runtime"));
@@ -2278,6 +2391,7 @@ fn empty_audio_returns_invalid_request() {
         task: TranscriptionTask::Transcribe,
         language: None,
         model_id: "openai/whisper-large-v3".to_string(),
+        speech_evidence: Default::default(),
     });
     let error = result.unwrap_err().to_string();
     assert!(error.contains("invalid_request"));
@@ -2298,6 +2412,7 @@ fn non_finite_audio_returns_invalid_request() {
         task: TranscriptionTask::Transcribe,
         language: None,
         model_id: "openai/whisper-large-v3".to_string(),
+        speech_evidence: Default::default(),
     });
     let error = result.unwrap_err().to_string();
     assert!(error.contains("invalid_request"));
@@ -3654,6 +3769,7 @@ fn reusable_candle_provider_reports_unsupported_without_candle_feature() {
                 task: TranscriptionTask::Transcribe,
                 language: Some("en".to_string()),
                 model_id: "tiny.en".to_string(),
+                speech_evidence: Default::default(),
             })
             .unwrap_err()
             .to_string();

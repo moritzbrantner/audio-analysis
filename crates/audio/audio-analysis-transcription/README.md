@@ -229,10 +229,34 @@ or high zlib compression ratio (for example a repetition loop) advances to the
 next temperature, and the first passing attempt is returned. When every
 temperature fails, the attempt with the highest average log probability among
 those under the compression-ratio threshold is kept (or among all attempts
-when none is), as faster-whisper does. Only windows that fail the
-temperature-0 attempt are re-decoded. Response diagnostics expose
+when none is). A selected attempt that still violates the compression limit
+after all available temperatures is **withheld**, with
+`compressionRejectedWindows` recording the rejection separately from
+`noSpeechRejected`. This is an intentional reliability extension beyond
+faster-whisper: rejected words are uncertain evidence, **not** proof of
+silence or music. Only windows that fail the temperature-0 attempt are
+re-decoded. Response diagnostics expose
 `averageLogProbability`, `noSpeechProbability`, `compressionRatio`, the ordered
-`temperatureFallbackAttempts`, and whether no-speech rejection occurred.
+`temperatureFallbackAttempts`, and both rejection observations.
+`windowDecodeEvidence` lists each window's span, no-speech probability,
+average log probability, compression ratio, attempted temperatures and outcome
+(`decoded`, `noSpeechRejected`, `compressionRejected`).
+
+The pipeline passes the VAD observation to ASR as
+`AsrRequest::speech_evidence` (`modelSpeechCandidate` from Silero or pyannote,
+`energyActivityOnly`, `notDetected` for the full-source fallback, or
+`unmeasured`). With the default `noSpeechGate=logProbabilityOverride`, a
+window above `max_no_speech_probability` is withheld only when its average log
+probability is also low, as in faster-whisper. A caller may opt into
+`CandleWhisperNoSpeechGate::RequireModelVadSpeech`: the log-probability
+override then applies only to `modelSpeechCandidate` requests, so a confident
+decode of music- or silence-only audio that no speech model proposed does not
+survive a high no-speech probability. The full-source fallback still decodes
+every unsupported request, so quiet speech with a low no-speech probability is
+kept. When the VAD found no spans (`notDetected`), that safety net uses only
+the first attempt of the temperature schedule: sampling at higher temperatures
+until some text passes is not speech evidence, and it bounds the decode cost of
+music-only input. A repetition loop is then withheld by the compression gate.
 
 The external WhisperX command provider remains compatibility and parity tooling.
 It keeps Python-based execution explicit for callers that still need WhisperX

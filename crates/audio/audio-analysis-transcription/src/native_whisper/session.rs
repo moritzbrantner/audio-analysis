@@ -134,7 +134,14 @@ impl CandleWhisperSession {
         request: AsrRequest,
     ) -> Result<AsrResponse> {
         let controls = &config.runtime;
-        let decode = self.resolve_request_decode_config(&config.decode)?;
+        let mut decode = self.resolve_request_decode_config(&config.decode)?;
+        if decode
+            .no_speech_gate
+            .limits_fallback_to_first_attempt(request.speech_evidence)
+        {
+            decode.search.temperature_schedule.truncate(1);
+        }
+        decode.no_speech_gate = decode.no_speech_gate.resolve(request.speech_evidence);
         let decode = &decode;
         let window_controls = &config.window;
         debug_assert!(!decode.search.temperature_schedule.is_empty());
@@ -161,6 +168,8 @@ impl CandleWhisperSession {
         let mut compression_ratios = Vec::new();
         let mut attempted_temperatures = Vec::new();
         let mut no_speech_rejected = false;
+        let mut compression_rejected_windows = 0_usize;
+        let mut window_decode_evidence = Vec::new();
         let mut prompt_state = WhisperRequestPromptState::new(decode);
         self.encoder_duration_seconds = 0.0;
         self.decoder_duration_seconds = 0.0;
@@ -254,6 +263,7 @@ impl CandleWhisperSession {
                 attempted_temperatures
                     .extend(timed.diagnostics.attempted_temperatures.iter().copied());
                 no_speech_rejected |= timed.diagnostics.no_speech_rejected;
+                compression_rejected_windows += usize::from(timed.diagnostics.compression_rejected);
                 if let Some(reason) = timed.fallback_reason {
                     if !timing_fallbacks.contains(&reason) {
                         timing_fallbacks.push(reason);
@@ -261,6 +271,11 @@ impl CandleWhisperSession {
                     rejected_timestamp_segments |= reason == "unstableTimestampSegments";
                 }
                 let (clip_start, clip_end) = window.transcript_bounds();
+                window_decode_evidence.push(window_decode_evidence_entry(
+                    clip_start,
+                    clip_end,
+                    &timed.diagnostics,
+                ));
                 if timed.timing == WhisperWindowTiming::ChunkWindow {
                     if timed.decoded.text.trim().is_empty() || clip_end <= clip_start {
                         continue;
@@ -395,6 +410,9 @@ impl CandleWhisperSession {
                     .join(",")
             ),
             format!("noSpeechRejected={no_speech_rejected}"),
+            format!("compressionRejectedWindows={compression_rejected_windows}"),
+            format!("noSpeechGate={}", decode.no_speech_gate.as_str()),
+            format!("windowDecodeEvidence={}", window_decode_evidence.join("|")),
         ]);
         if let Some(language) = &self.language {
             diagnostics.push(format!("language={language}"));
@@ -931,8 +949,10 @@ impl CandleWhisperSession {
             stats: generation_stats,
             average_log_probability,
             no_speech_probability,
+            compression_ratio,
             attempted_temperatures,
             no_speech_rejected,
+            compression_rejected,
         } = decoded;
         let decoded_text = decode_text_tokens(&self.tokenizer, &token_ids)?;
         let mut diagnostics = WhisperDecodeDiagnostics {
@@ -949,9 +969,15 @@ impl CandleWhisperSession {
             decoded_token_ids: token_ids.clone(),
             average_log_probability,
             no_speech_probability,
-            compression_ratio: text_compression_ratio(&decoded_text)?,
+            // Keep the pre-rejection ratio for fallback attempts, but still
+            // measure ordinary batched decoding directly from its text.
+            compression_ratio: match compression_ratio {
+                Some(measured) => measured,
+                None => text_compression_ratio(&decoded_text)?,
+            },
             attempted_temperatures,
             no_speech_rejected,
+            compression_rejected,
             ..WhisperDecodeDiagnostics::default()
         };
         generation_stats.extend(&mut diagnostics);
@@ -1084,6 +1110,37 @@ pub(super) fn pick_language(logits: &[f32], candidates: &[(String, u32)]) -> Opt
         .map(|(_, logit)| (logit - max).exp())
         .sum::<f64>();
     Some((code.clone(), 1.0 / total))
+}
+
+/// One bounded record of the decoder's own evidence for one window, so a
+/// consumer can audit which window produced (or withheld) text and why. These
+/// are Whisper decoder observations, not a speech/music classification.
+pub(super) fn window_decode_evidence_entry(
+    start_seconds: f64,
+    end_seconds: f64,
+    diagnostics: &WhisperDecodeDiagnostics,
+) -> String {
+    let outcome = if diagnostics.no_speech_rejected {
+        "noSpeechRejected"
+    } else if diagnostics.compression_rejected {
+        "compressionRejected"
+    } else {
+        "decoded"
+    };
+    format!(
+        "{start_seconds:.2}-{end_seconds:.2}:noSpeech={}:avgLogProb={:.3}:compression={:.2}:temperatures={}:outcome={outcome}",
+        diagnostics
+            .no_speech_probability
+            .map_or_else(|| "unavailable".to_string(), |value| format!("{value:.3}")),
+        diagnostics.average_log_probability,
+        diagnostics.compression_ratio,
+        diagnostics
+            .attempted_temperatures
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(","),
+    )
 }
 
 pub(super) fn format_cache_reuse(self_attention: bool, cross_attention: bool) -> &'static str {

@@ -1,6 +1,6 @@
 //! Decode configuration, per-row state, fallback decisions and diagnostics.
 
-use crate::{model_output_mismatch, CandleWhisperDecodeRequestConfig};
+use crate::{model_output_mismatch, CandleWhisperDecodeRequestConfig, CandleWhisperNoSpeechGate};
 use candle_core::{DType, IndexOp, Tensor};
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
@@ -116,6 +116,7 @@ pub(super) struct WhisperDecodeDiagnostics {
     pub(super) compression_ratio: f64,
     pub(super) attempted_temperatures: Vec<f64>,
     pub(super) no_speech_rejected: bool,
+    pub(super) compression_rejected: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -175,8 +176,10 @@ pub(super) struct WhisperTokenDecodeResult {
     pub(super) stats: WhisperGenerationStats,
     pub(super) average_log_probability: f64,
     pub(super) no_speech_probability: Option<f64>,
+    pub(super) compression_ratio: Option<f64>,
     pub(super) attempted_temperatures: Vec<f64>,
     pub(super) no_speech_rejected: bool,
+    pub(super) compression_rejected: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -205,7 +208,15 @@ pub(super) fn fallback_attempt_decision(
     let low_log_probability = config
         .min_average_log_probability
         .is_some_and(|minimum| average_log_probability < minimum);
-    if high_no_speech && (config.min_average_log_probability.is_none() || low_log_probability) {
+    // `no_speech_gate` arrives resolved against the request's VAD evidence;
+    // a remaining `RequireModelVadSpeech` means no speech model supports it.
+    let log_probability_override =
+        config.no_speech_gate == CandleWhisperNoSpeechGate::LogProbabilityOverride;
+    if high_no_speech
+        && (!log_probability_override
+            || config.min_average_log_probability.is_none()
+            || low_log_probability)
+    {
         return WhisperFallbackAttemptDecision::RejectNoSpeech;
     }
     if low_log_probability
@@ -272,7 +283,15 @@ pub(super) fn finish_temperature_fallback(
     let attempted_temperatures = attempts.iter().map(|attempt| attempt.temperature).collect();
     let mut selected = select_fallback_attempt(config, attempts);
     let no_speech_rejected = selected.decision == WhisperFallbackAttemptDecision::RejectNoSpeech;
-    if no_speech_rejected {
+    // Exhausted temperature fallback otherwise returns the best *failed* attempt.
+    // That preserves fabricated repetition loops, even though every candidate
+    // failed the caller's explicit compression limit. This is a rejection of
+    // untrustworthy decoded text, not a claim that the audio was silent.
+    let compression_rejected = selected.decision == WhisperFallbackAttemptDecision::Retry
+        && config
+            .max_compression_ratio
+            .is_some_and(|limit| selected.compression_ratio > limit);
+    if no_speech_rejected || compression_rejected {
         selected.token_ids.clear();
     }
     stats.record_completed_row();
@@ -281,8 +300,10 @@ pub(super) fn finish_temperature_fallback(
         stats,
         average_log_probability: selected.average_log_probability,
         no_speech_probability: selected.no_speech_probability,
+        compression_ratio: Some(selected.compression_ratio),
         attempted_temperatures,
         no_speech_rejected,
+        compression_rejected,
     }
 }
 

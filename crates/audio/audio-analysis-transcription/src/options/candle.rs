@@ -266,6 +266,57 @@ pub struct CandleWhisperDecodeRequestConfig {
     /// ratio is higher.
     #[serde(default = "default_candle_whisper_max_compression_ratio")]
     pub max_compression_ratio: Option<f64>,
+    /// How a window above `max_no_speech_probability` is judged.
+    #[serde(default)]
+    pub no_speech_gate: CandleWhisperNoSpeechGate,
+}
+
+/// Rule for windows whose no-speech probability exceeds
+/// [`CandleWhisperDecodeRequestConfig::max_no_speech_probability`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CandleWhisperNoSpeechGate {
+    /// faster-whisper/WhisperX: withhold the window only when its average log
+    /// probability is also below `min_average_log_probability`.
+    #[default]
+    LogProbabilityOverride,
+    /// Keep the log-probability override only when a speech model VAD proposed
+    /// the request's chunks ([`AsrSpeechEvidence::ModelSpeechCandidate`]).
+    /// With energy activity, no detected spans (full-source fallback) or no
+    /// VAD, a confident decode is not evidence of speech, so a high no-speech
+    /// window is withheld. This rejects text, it does not label the audio.
+    ///
+    /// When the VAD found no spans at all, the full source is still decoded as
+    /// a safety net for quiet speech, but only with the first attempt of the
+    /// temperature schedule: resampling at higher temperatures until some text
+    /// passes the thresholds is not evidence of speech. A repetition loop is
+    /// then withheld by the compression gate.
+    RequireModelVadSpeech,
+}
+
+impl CandleWhisperNoSpeechGate {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LogProbabilityOverride => "logProbabilityOverride",
+            Self::RequireModelVadSpeech => "requireModelVadSpeech",
+        }
+    }
+
+    /// The rule that applies to a request with `evidence`.
+    pub fn resolve(self, evidence: AsrSpeechEvidence) -> Self {
+        match self {
+            Self::RequireModelVadSpeech if evidence.supports_speech() => {
+                Self::LogProbabilityOverride
+            }
+            gate => gate,
+        }
+    }
+
+    /// True when a request with `evidence` decodes only the first attempt of
+    /// the temperature schedule (see [`Self::RequireModelVadSpeech`]).
+    pub fn limits_fallback_to_first_attempt(self, evidence: AsrSpeechEvidence) -> bool {
+        self == Self::RequireModelVadSpeech && evidence == AsrSpeechEvidence::NotDetected
+    }
 }
 
 impl Default for CandleWhisperDecodeRequestConfig {
@@ -280,6 +331,7 @@ impl Default for CandleWhisperDecodeRequestConfig {
             min_average_log_probability: default_candle_whisper_min_average_log_probability(),
             max_no_speech_probability: default_candle_whisper_max_no_speech_probability(),
             max_compression_ratio: default_candle_whisper_max_compression_ratio(),
+            no_speech_gate: CandleWhisperNoSpeechGate::default(),
         }
     }
 }

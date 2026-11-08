@@ -253,7 +253,10 @@ override then applies only to `modelSpeechCandidate` requests, so a confident
 decode of music- or silence-only audio that no speech model proposed does not
 survive a high no-speech probability. The full-source fallback still decodes
 every unsupported request, so quiet speech with a low no-speech probability is
-kept.
+kept. When the VAD found no spans (`notDetected`), that safety net uses only
+the first attempt of the temperature schedule: sampling at higher temperatures
+until some text passes is not speech evidence, and it bounds the decode cost of
+music-only input. A repetition loop is then withheld by the compression gate.
 
 The external WhisperX command provider remains compatibility and parity tooling.
 It keeps Python-based execution explicit for callers that still need WhisperX

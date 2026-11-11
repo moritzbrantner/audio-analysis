@@ -35,17 +35,17 @@ categories = ["multimedia", "science", "algorithms"]
 
 [workspace.dependencies]
 # Destination-owned crates retain path-plus-version coordinates for packaging.
-audio-analysis-core = { package = "moenarch-audio-analysis-core", version = "0.1.0", path = "crates/audio/audio-analysis-core" }
+audio-analysis-core = { package = "moenarch-audio-analysis-core", version = "0.2.0", path = "crates/audio/audio-analysis-core" }
 audio-analysis-fourier = { package = "moenarch-audio-analysis-fourier", version = "0.1.0", path = "crates/audio/audio-analysis-fourier" }
-audio-analysis-io = { package = "moenarch-audio-analysis-io", version = "0.1.1", path = "crates/audio/audio-analysis-io" }
+audio-analysis-io = { package = "moenarch-audio-analysis-io", version = "0.2.0", path = "crates/audio/audio-analysis-io" }
 audio-analysis-pitch = { package = "moenarch-audio-analysis-pitch", version = "0.1.0", path = "crates/audio/audio-analysis-pitch" }
 audio-analysis-processing = { package = "moenarch-audio-analysis-processing", version = "0.1.0", path = "crates/audio/audio-analysis-processing" }
-audio-analysis-recognition = { package = "moenarch-audio-analysis-recognition", version = "0.1.0", path = "crates/audio/audio-analysis-recognition" }
+audio-analysis-recognition = { package = "moenarch-audio-analysis-recognition", version = "0.2.0", path = "crates/audio/audio-analysis-recognition" }
 audio-analysis-rhythm = { package = "moenarch-audio-analysis-rhythm", version = "0.1.0", path = "crates/audio/audio-analysis-rhythm" }
 audio-analysis-separation = { package = "moenarch-audio-analysis-separation", version = "0.1.0", path = "crates/audio/audio-analysis-separation" }
-audio-analysis-speakers = { package = "moenarch-audio-analysis-speakers", version = "0.1.4", path = "crates/audio/audio-analysis-speakers" }
+audio-analysis-speakers = { package = "moenarch-audio-analysis-speakers", version = "0.2.0", path = "crates/audio/audio-analysis-speakers" }
 audio-analysis-synthesis = { package = "moenarch-audio-analysis-synthesis", version = "0.1.0", path = "crates/audio/audio-analysis-synthesis" }
-audio-analysis-transcription = { package = "moenarch-audio-analysis-transcription", version = "0.1.15", path = "crates/audio/audio-analysis-transcription" }
+audio-analysis-transcription = { package = "moenarch-audio-analysis-transcription", version = "0.2.0", path = "crates/audio/audio-analysis-transcription" }
 audio-generation-midi = { package = "moenarch-audio-generation-midi", version = "0.1.0", path = "crates/audio/audio-generation-midi" }
 audio-generation-tts = { package = "moenarch-audio-generation-tts", version = "0.1.0", path = "crates/audio/audio-generation-tts" }
 audio-karaoke-formats = { package = "moenarch-audio-karaoke-formats", version = "0.1.0", path = "crates/audio/audio-karaoke-formats" }
@@ -54,14 +54,14 @@ audio-karaoke-pipeline = { package = "moenarch-audio-karaoke-pipeline", version 
 # External capability contracts are registry-only and exact. Normal source work
 # may override these coordinates through .coding-tooling.source-deps.json.
 audio-contracts = { package = "moenarch-audio-contracts", version = "=0.2.0" }
-data-inversion-core = { package = "moenarch-data-inversion-core", version = "=0.2.0" }
-jobs-core = { package = "moenarch-jobs-core", version = "=0.1.2" }
-math-signal-core = { package = "moenarch-math-signal-core", version = "=0.2.0" }
+data-inversion-core = { package = "moenarch-data-inversion-core", version = "=0.2.1" }
+jobs-core = { package = "moenarch-jobs-core", version = "=0.1.3" }
+math-signal-core = { package = "moenarch-math-signal-core", version = "=0.2.1" }
 media-core = { package = "moenarch-media-core", version = "=0.2.0" }
-model-runtime = { package = "moenarch-model-runtime", version = "=0.1.1" }
-runtime-core = { package = "moenarch-runtime-core", version = "=0.2.1" }
-runtime-onnx = { package = "moenarch-runtime-onnx", version = "=0.1.1" }
-tensor-data = { package = "moenarch-tensor-data", version = "=0.2.0" }
+model-runtime = { package = "moenarch-model-runtime", version = "=0.2.0" }
+runtime-core = { package = "moenarch-runtime-core", version = "=0.2.2" }
+runtime-onnx = { package = "moenarch-runtime-onnx", version = "=0.1.2" }
+tensor-data = { package = "moenarch-tensor-data", version = "=0.2.1" }
 candle-core = "0.10.2"
 candle-nn = "0.10.2"
 candle-transformers = "0.10.2"
@@ -85,7 +85,3 @@ tokenizers = { version = "0.23.0", default-features = false, features = ["unstab
 # compatible published Candle release includes ZIP 9 (Native WhisperX #366).
 [patch.crates-io]
 candle-core = { git = "https://github.com/moritzbrantner/candle", rev = "b57f9eb7ccc6bf5cebf0c3822ed69573b06877a9", version = "0.10.2" }
-# Published 0.1.1 builds on ort 2.0.0-rc.12, which deadlocks instead of returning an
-# error when ONNX Runtime is missing or older than 1.24 (vox#159). The foundation
-# source returns typed RuntimeUnavailable / RuntimeTooOld errors.
-moenarch-runtime-onnx = { git = "https://github.com/moritzbrantner/moenarch-foundation", rev = "cf8d6f1052ad1d5c567e797a56d3bb8910828920" }

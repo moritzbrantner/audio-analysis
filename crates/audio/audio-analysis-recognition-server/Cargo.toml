@@ -23,4 +23,4 @@ path = "src/main.rs"
 runtime-core.workspace = true
 clap.workspace = true
 serde_json.workspace = true
-audio-analysis-recognition = { package = "moenarch-audio-analysis-recognition", version = "0.1.0", path = "../audio-analysis-recognition" }
+audio-analysis-recognition = { package = "moenarch-audio-analysis-recognition", version = "0.2.0", path = "../audio-analysis-recognition" }

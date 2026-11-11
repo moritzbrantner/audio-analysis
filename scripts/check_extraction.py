@@ -22,14 +22,14 @@ DESTINATION_NATIVE_CARGO = {
 }
 EXPECTED_EXTERNAL = {
     "audio-contracts": ("moenarch-audio-contracts", "=0.2.0"),
-    "data-inversion-core": ("moenarch-data-inversion-core", "=0.2.0"),
-    "jobs-core": ("moenarch-jobs-core", "=0.1.2"),
-    "math-signal-core": ("moenarch-math-signal-core", "=0.2.0"),
+    "data-inversion-core": ("moenarch-data-inversion-core", "=0.2.1"),
+    "jobs-core": ("moenarch-jobs-core", "=0.1.3"),
+    "math-signal-core": ("moenarch-math-signal-core", "=0.2.1"),
     "media-core": ("moenarch-media-core", "=0.2.0"),
-    "model-runtime": ("moenarch-model-runtime", "=0.1.1"),
-    "runtime-core": ("moenarch-runtime-core", "=0.2.1"),
-    "runtime-onnx": ("moenarch-runtime-onnx", "=0.1.1"),
-    "tensor-data": ("moenarch-tensor-data", "=0.2.0"),
+    "model-runtime": ("moenarch-model-runtime", "=0.2.0"),
+    "runtime-core": ("moenarch-runtime-core", "=0.2.2"),
+    "runtime-onnx": ("moenarch-runtime-onnx", "=0.1.2"),
+    "tensor-data": ("moenarch-tensor-data", "=0.2.1"),
 }
 FORBIDDEN = (
     "video-analysis-ffmpeg",

@@ -3,7 +3,7 @@
 ## DEP-001 — Keep publication out of ordinary development
 
 - Develop cross-repository changes against source revisions rather than publishing packages to unblock feature work.
-- Prefer the repository's declared source-development mechanism and pin exact revisions.
+- Prefer the repository's declared source-development mechanism. Use a specific revision only when coordinating an unpublished change or reproducing a failure.
 - Do not start a crates.io, npm, or other registry release train unless the task is explicitly a release task.
 
 ## DEP-002 — Version bumps belong to release work
@@ -12,12 +12,13 @@
 - Put version bumps, changelogs, tags, registry publication, and registry-only consumer updates in a dedicated release change.
 - Do not treat a missing published version as a feature blocker when an exact source dependency can prove the change.
 
-## DEP-003 — Bound cross-repository task expansion
+## DEP-003 — Bound cross-repository task expansion by ownership
 
-- A normal implementation task may modify the target repository and at most two upstream repositories unless broader migration scope is explicitly authorized.
-- Treat this as an execution-scope budget, not as a limit on how many independently versioned capabilities an application may consume.
-- If implementation requires changing a wider source graph, stop recursively expanding the task and treat the boundary as explicit architecture or migration work.
-- Do not recursively repair or release unrelated transitive packages merely because they appear in the dependency graph.
+- A normal implementation task may cross repository boundaries when each changed repository owns a necessary part of the same capability or contract.
+- Keep the changed source graph as small as the architecture permits and make each repository's responsibility independently explainable and verifiable.
+- If implementation starts recursively pulling in unrelated transitive repositories, release work, or opportunistic cleanup, stop the expansion and treat the newly discovered boundary as separate architecture, migration, or follow-up work.
+- Do not impose an arbitrary repository-count limit when a coherent change genuinely spans more owners, and do not use a broad task as permission to repair unrelated dependencies.
+- When a defect or missing capability belongs to a dependency the workspace owns, fix it in the owning repository and advance the consumer's pin in the same task instead of working around it locally.
 
 ## DEP-004 — Require a reason for a new independently versioned package
 
@@ -71,15 +72,15 @@
 - Do not use source patches to normalize permanent sideways dependencies, duplicate ownership, or consumer knowledge of implementation internals.
 - Repeated feature work that requires coordinated source heads across several sibling repositories is an architecture signal: introduce or improve a contract, capability surface, adapter, or ownership boundary before expanding the patch graph further.
 
-## DEP-012 — Declare dependency versions according to the consumer contract
+## DEP-012 — Let maintained dependencies advance
 
-- Applications, internal tooling, and other leaf deliverables prefer exact dependency versions for predictable resolution.
+- Applications, internal tooling, and other leaf deliverables may follow current compatible releases without exact version pins. Do not add a fleet-wide exact-version requirement.
 - Published libraries declare the narrowest semver-compatible range that truthfully describes the versions consumers may use.
-- Lockfiles remain the reproducible resolution record; do not use `latest`, wildcard ranges, or similarly floating declarations for leaf repositories.
+- Repositories may retain lockfiles for repeatable builds, but should update dependencies through their ordinary maintenance path. A lockfile is not a reason to add repeated runner, revision, or dependency-identity verification to every check.
 
 ## DEP-013 — Make dependency changes explicit transactions
 
-- Ordinary install and verification commands use the committed lockfile without modifying it.
+- Install and verification commands follow the repository's declared dependency strategy. When it uses a committed lockfile, ordinary checks should not silently rewrite it.
 - A dependency-manifest change includes the corresponding lockfile change; unexplained lockfile-only changes are not normal feature-work noise.
 - Dependency updates use an explicit update command or workflow. Do not run a generic update merely to make dependency resolution or a build start passing.
 - Verification should use the ecosystem's frozen/locked mode where available.
@@ -95,7 +96,7 @@
 - Use Renovate as the canonical routine dependency-update engine for repositories adopting these conventions.
 - Keep the shared Renovate policy in this repository's `default.json`; consumer repositories should normally contain only a small `renovate.json` extending `github>moritzbrantner/coding-agent-conventions` plus narrow repository-specific exceptions when genuinely required.
 - Keep dependency-update policy in conventions and installation/scaffolding behavior in coding tooling; do not duplicate the policy across repository templates or consumers.
-- Ordinary dependency updates run on the shared cadence and limits. Major updates require explicit Dependency Dashboard approval, and broad automerge stays disabled until a repository has a trustworthy deterministic gate.
+- Ordinary dependency updates run on the shared cadence and limits and automerge only after Renovate sees successful repository checks. Repositories without successful checks remain unmerged, and major updates still require explicit Dependency Dashboard approval.
 - Keep GitHub dependency/vulnerability detection available, but do not run overlapping Dependabot version-update PRs after a repository has migrated to Renovate. Existing Dependabot updater configuration must be migrated explicitly rather than deleted implicitly by tooling.
 
 ## DEP-016 — Choose distribution by source ownership

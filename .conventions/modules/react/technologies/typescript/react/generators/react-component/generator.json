@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "react-component",
   "description": "Create a colocated React component scaffold with an explicit local entry point.",
-  "rules": ["REACT-001", "REACT-006"],
+  "rules": ["REACT-001"],
   "technologies": ["typescript", "react"],
   "inputs": {
     "name": {
